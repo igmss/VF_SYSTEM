@@ -1,0 +1,21 @@
+{
+    "users": {
+        "vtkmmVM0oHWeg7K3dH3DHXh3wxl2": {
+            "uid": "vtkmmVM0oHWeg7K3dH3DHXh3wxl2",
+            "name": "Admin",
+            "email": "ibrahem.gmss@gmail.com",
+            "role": "ADMIN",
+            "isActive": true,
+            "createdAt": "2026-03-11T02:09:00.000"
+        }
+    },
+    "bank_accounts": {},
+    "retailers": {},
+    "collectors": {},
+    "financial_ledger": {},
+    "mobile_numbers": {},
+    "transactions": {},
+    "sync_data": {
+        "lastSync": 0
+    }
+}

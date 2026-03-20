@@ -1,0 +1,50 @@
+name: vodafone_cash_tracker
+description: Track Vodafone Cash transfers with Bybit P2P integration
+publish_to: 'none'
+
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  firebase_core: ^4.5.0
+  firebase_database: ^12.1.4
+  firebase_auth: ^6.2.0
+  http: ^1.1.0
+  crypto: ^3.0.3          # Required for HMAC-SHA256 Bybit request signing
+  intl: ^0.19.0
+  provider: ^6.0.0
+  shared_preferences: ^2.2.0
+  uuid: ^4.0.0
+  easy_localization: ^3.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^3.0.0   # Fixed: was 'flutter_linter' (does not exist)
+  flutter_native_splash: ^2.4.4
+  flutter_launcher_icons: ^0.13.1
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/
+    - assets/translations/
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/logo.png"
+  min_sdk_android: 21
+  adaptive_icon_background: "#0F0F1A"
+  adaptive_icon_foreground: "assets/logo.png"
+
+flutter_native_splash:
+  color: "#0F0F1A"
+  image: assets/logo.png
+  android_12:
+    color: "#0F0F1A"
+    image: assets/logo.png

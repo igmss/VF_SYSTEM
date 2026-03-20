@@ -1,0 +1,81 @@
+{
+    "rules": {
+        "users": {
+            ".read": "auth != null",
+            "$uid": {
+                ".read": "auth != null && (auth.uid == $uid || root.child('users').child(auth.uid).child('role').val() == 'ADMIN')",
+                ".write": "auth != null && (auth.uid == $uid || root.child('users').child(auth.uid).child('role').val() == 'ADMIN')"
+            }
+        },
+        "bank_accounts": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')",
+            "$bankId": {
+                ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+                "balance": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')"
+                },
+                "lastUpdatedAt": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')"
+                }
+            }
+        },
+        "retailers": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')",
+            "$retailerId": {
+                ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+                "totalCollected": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || (root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR' && root.child('retailers').child($retailerId).child('assignedCollectorId').val() == auth.uid))"
+                },
+                "lastUpdatedAt": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || (root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR' && root.child('retailers').child($retailerId).child('assignedCollectorId').val() == auth.uid))"
+                }
+            }
+        },
+        "collectors": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')",
+            "$collectorId": {
+                ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+                "cashOnHand": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('collectors').child($collectorId).child('uid').val() == auth.uid)"
+                },
+                "totalCollected": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('collectors').child($collectorId).child('uid').val() == auth.uid)"
+                },
+                "totalDeposited": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('collectors').child($collectorId).child('uid').val() == auth.uid)"
+                },
+                "lastUpdatedAt": {
+                    ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('collectors').child($collectorId).child('uid').val() == auth.uid)"
+                }
+            }
+        },
+        "financial_ledger": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')",
+            ".indexOn": [
+                "timestamp",
+                "bybitOrderId"
+            ]
+        },
+        "usd_exchange": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
+        },
+        "mobile_numbers": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
+        },
+        "transactions": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".indexOn": [
+                "phoneNumber",
+                "bybitOrderId"
+            ]
+        },
+        "sync_data": {
+            ".read": "auth != null",
+            ".write": "auth != null"
+        }
+    }
+}

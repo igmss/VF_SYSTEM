@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "663873174672",
+    "project_id": "vodatracking",
+    "storage_bucket": "vodatracking.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:663873174672:android:b6557823d5118590dd2c15",
+        "android_client_info": {
+          "package_name": "com.vodafone.vodafone_cash_tracker"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAPMRsFJUje1kSfOEj-MW-OnrOB1BLv1qU"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

@@ -26,6 +26,7 @@ class AdminDashboard extends StatefulWidget {
 
 class _AdminDashboardState extends State<AdminDashboard> {
   int _idx = 0;
+  int? _moreIdx; // Index for sub-tabs within the "More" menu
 
   static const _darkBg = Color(0xFF0F0F1A);
   static const _accent = Color(0xFFE63946);
@@ -145,20 +146,78 @@ class _AdminDashboardState extends State<AdminDashboard> {
       );
     }
 
+    final bool useMore = availableTabs.length > 4;
+
+    Widget body;
+    if (useMore && _idx == 3) {
+      if (_moreIdx == null) {
+        body = _MoreMenu(
+          tabs: availableTabs.sublist(3),
+          onSelect: (subIdx) => setState(() => _moreIdx = subIdx),
+        );
+      } else {
+        final actualIdx = 3 + _moreIdx!;
+        body = Column(
+          children: [
+            _buildMoreHeader(availableTabs[actualIdx].label),
+            Expanded(child: availableTabs[actualIdx].widget),
+          ],
+        );
+      }
+    } else {
+      body = availableTabs[_idx].widget;
+    }
+
     return Scaffold(
       backgroundColor: _darkBg,
-      body: availableTabs[_idx].widget,
+      body: body,
       bottomNavigationBar: NavigationBar(
         backgroundColor: const Color(0xFF16162A),
         indicatorColor: _accent.withOpacity(0.2),
-        selectedIndex: _idx,
-        onDestinationSelected: (i) => setState(() => _idx = i),
+        selectedIndex: _idx >= 3 ? 3 : _idx,
+        onDestinationSelected: (i) {
+          setState(() {
+            _idx = i;
+            if (i != 3) _moreIdx = null;
+          });
+        },
         labelBehavior: NavigationDestinationLabelBehavior.onlyShowSelected,
-        destinations: availableTabs.map((t) => NavigationDestination(
-          icon: Icon(t.icon),
-          selectedIcon: Icon(t.selectedIcon, color: _accent),
-          label: t.label,
-        )).toList(),
+        destinations: [
+          ...availableTabs.take(useMore ? 3 : availableTabs.length).map((t) => NavigationDestination(
+                icon: Icon(t.icon),
+                selectedIcon: Icon(t.selectedIcon, color: _accent),
+                label: t.label,
+              )),
+          if (useMore)
+            const NavigationDestination(
+              icon: Icon(Icons.more_horiz_outlined),
+              selectedIcon: Icon(Icons.more_horiz, color: _accent),
+              label: 'More',
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildMoreHeader(String title) {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(8, 40, 16, 8),
+      color: const Color(0xFF16162A),
+      child: Row(
+        children: [
+          IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.white70),
+            onPressed: () => setState(() => _moreIdx = null),
+          ),
+          Text(
+            title,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -407,5 +466,64 @@ class _AssetCard extends StatelessWidget {
 
   String _f(double v) {
     return NumberFormat('#,##0.00', 'en_US').format(v);
+  }
+}
+
+class _MoreMenu extends StatelessWidget {
+  final List<_TabItem> tabs;
+  final Function(int) onSelect;
+
+  const _MoreMenu({required this.tabs, required this.onSelect});
+
+  @override
+  Widget build(BuildContext context) {
+    return SafeArea(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Padding(
+            padding: EdgeInsets.fromLTRB(24, 24, 24, 16),
+            child: Text(
+              'More Settings & Tools',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 24,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+          ),
+          Expanded(
+            child: ListView.builder(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: tabs.length,
+              itemBuilder: (context, i) {
+                final t = tabs[i];
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 12),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16162A),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.white.withOpacity(0.05)),
+                  ),
+                  child: ListTile(
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withOpacity(0.05),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Icon(t.icon, color: Colors.white70, size: 20),
+                    ),
+                    title: Text(t.label, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500)),
+                    trailing: const Icon(Icons.chevron_right, color: Colors.white24),
+                    onTap: () => onSelect(i),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }

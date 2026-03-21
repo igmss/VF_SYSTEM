@@ -567,11 +567,67 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         ),
         Switch(
           value: provider.isLiveSyncEnabled,
-          onChanged: (val) => provider.toggleLiveSync(val),
+          onChanged: (val) {
+            if (provider.syncPassword != null && provider.syncPassword!.isNotEmpty) {
+              _showPasswordDialog(context, provider, val);
+            } else {
+              provider.toggleLiveSync(val);
+            }
+          },
           activeColor: Colors.greenAccent,
           activeTrackColor: Colors.greenAccent.withOpacity(0.3),
         ),
       ],
+    );
+  }
+
+  void _showPasswordDialog(BuildContext context, AppProvider provider, bool newValue) {
+    final controller = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF16162A),
+        title: Text(newValue ? 'Enable Live Sync?' : 'Disable Live Sync?',
+            style: const TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text('Enter protection password to continue:',
+                style: TextStyle(color: Colors.white70, fontSize: 13)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: controller,
+              obscureText: true,
+              autofocus: true,
+              style: const TextStyle(color: Colors.white),
+              decoration: const InputDecoration(
+                labelText: 'Password',
+                border: OutlineInputBorder(),
+              ),
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel'),
+          ),
+          ElevatedButton(
+            onPressed: () {
+              if (controller.text == provider.syncPassword) {
+                Navigator.pop(ctx);
+                provider.toggleLiveSync(newValue);
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Incorrect password'), backgroundColor: Colors.red),
+                );
+              }
+            },
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE63946)),
+            child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
     );
   }
 

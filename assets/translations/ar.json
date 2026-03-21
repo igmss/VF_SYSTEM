@@ -205,5 +205,8 @@
     "add_retailer": "إضافة تاجر",
     "deposit_exceeds_cash": "لا يمكن إيداع أكثر من النقد الموجود ({} ج.م)",
     "insufficient_vf_balance": "الرصيد غير كافٍ في {} (المتاح: {} ج.م)",
-    "distribute_vfcash": "توزيع فودافون كاش"
+    "distribute_vfcash": "توزيع فودافون كاش",
+    "settings_locked": "الإعدادات مقفلة",
+    "enter_pass_to_access": "يرجى إدخال كلمة مرور حماية المزامنة للوصول إلى هذه الإعدادات.",
+    "unlock": "فتح القفل"
 }

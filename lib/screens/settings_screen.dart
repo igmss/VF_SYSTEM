@@ -16,16 +16,28 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _apiKeyCtrl = TextEditingController();
   final _apiSecretCtrl = TextEditingController();
+  final _syncPassCtrl = TextEditingController();
 
   bool _showSecret = false;
   bool _isSaving = false;
   bool _isSyncing = false;
+  bool _isSavingSyncPass = false;
   DateTime? _selectedDate;
+  bool _isUnlocked = false;
+  final _promptCtrl = TextEditingController();
+
+  @override
+  void initState() {
+    super.initState();
+    final provider = context.read<AppProvider>();
+    _syncPassCtrl.text = provider.syncPassword ?? '';
+  }
 
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
     _apiSecretCtrl.dispose();
+    _syncPassCtrl.dispose();
     super.dispose();
   }
 
@@ -108,6 +120,91 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final hasCredentials = provider.hasApiCredentials;
     final lastSync = provider.lastSyncTime;
     final syncStatus = provider.syncStatus;
+    final syncPass = provider.syncPassword;
+
+    // Check if locked
+    if (syncPass != null && syncPass.isNotEmpty && !_isUnlocked) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF0F0F1A),
+        appBar: AppBar(
+          title: Text('settings'.tr()),
+          backgroundColor: const Color(0xFF16162A),
+        ),
+        body: Center(
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(20),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16162A),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.lock_person_outlined, size: 48, color: Color(0xFFE63946)),
+                ),
+                const SizedBox(height: 24),
+                Text(
+                  'settings_locked'.tr(),
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'enter_pass_to_access'.tr(),
+                  style: const TextStyle(color: Colors.white54, fontSize: 14),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 32),
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 300),
+                  child: TextField(
+                    controller: _promptCtrl,
+                    obscureText: true,
+                    autofocus: true,
+                    style: const TextStyle(color: Colors.white),
+                    decoration: InputDecoration(
+                      hintText: 'Password',
+                      hintStyle: const TextStyle(color: Colors.white24),
+                      filled: true,
+                      fillColor: Colors.white.withOpacity(0.05),
+                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+                      prefixIcon: const Icon(Icons.password, color: Colors.white54),
+                    ),
+                    onSubmitted: (val) {
+                      if (val == syncPass) {
+                        setState(() => _isUnlocked = true);
+                      } else {
+                        _showSnack('Incorrect password');
+                        _promptCtrl.clear();
+                      }
+                    },
+                  ),
+                ),
+                const SizedBox(height: 24),
+                ElevatedButton(
+                  onPressed: () {
+                    if (_promptCtrl.text == syncPass) {
+                      setState(() => _isUnlocked = true);
+                    } else {
+                      _showSnack('Incorrect password');
+                      _promptCtrl.clear();
+                    }
+                  },
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFE63946),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  ),
+                  child: Text('unlock'.tr()),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
       backgroundColor: const Color(0xFF0F0F1A),
@@ -231,7 +328,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    // Server-Side Sync Toggle
                     SwitchListTile(
                       title: const Text('Server-Side Sync', style: TextStyle(color: Colors.white)),
                       subtitle: const Text('Sync orders automatically in the cloud', style: TextStyle(color: Colors.white54, fontSize: 12)),
@@ -239,6 +335,45 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       activeColor: const Color(0xFFE63946),
                       onChanged: (val) => provider.toggleServerSync(val),
                       contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 12),
+                    TextFormField(
+                      controller: _syncPassCtrl,
+                      obscureText: true,
+                      style: const TextStyle(color: Colors.white, fontSize: 14),
+                      decoration: InputDecoration(
+                        labelText: 'Sync Protection Password',
+                        labelStyle: const TextStyle(color: Colors.white54),
+                        hintText: 'Enter password to lock toggle',
+                        hintStyle: const TextStyle(color: Colors.white24),
+                        prefixIcon: const Icon(Icons.security, color: Colors.white54),
+                        border: const OutlineInputBorder(),
+                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _isSavingSyncPass ? null : () async {
+                          setState(() => _isSavingSyncPass = true);
+                          try {
+                            final pass = _syncPassCtrl.text.trim();
+                            await context.read<AppProvider>().setSyncPassword(pass.isEmpty ? null : pass);
+                            _showSnack('Sync password updated!', isError: false);
+                          } finally {
+                            if (mounted) setState(() => _isSavingSyncPass = false);
+                          }
+                        },
+                        icon: _isSavingSyncPass 
+                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                          : const Icon(Icons.lock_outline),
+                        label: const Text('Save Sync Password'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.blueGrey,
+                          foregroundColor: Colors.white,
+                        ),
+                      ),
                     ),
                     const Divider(height: 24),
 

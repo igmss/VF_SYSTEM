@@ -10,7 +10,7 @@ if (admin.apps.length === 0) {
 }
 
 const BYBIT_BASE_URL = 'https://api.bybit.com';
-const PAGE_SIZE = 50;
+const PAGE_SIZE = 30;
 const REGION = 'asia-east1';
 
 let timeOffsetMs = 0;
@@ -82,7 +82,7 @@ async function fetchAllOrdersSince(apiKey, apiSecret, beginTime) {
     const body = {
       page: page,
       size: PAGE_SIZE,
-      status: '50',
+      status: 50,
       beginTime: beginTime ? beginTime.toString() : undefined,
     };
 
@@ -106,7 +106,7 @@ async function fetchAllOrdersSince(apiKey, apiSecret, beginTime) {
     allOrders = allOrders.concat(items);
     if (items.length < PAGE_SIZE) break;
 
-    const lastItemTs = parseInt(items[items.length - 1].createTime || 0);
+    const lastItemTs = parseInt(items[items.length - 1].createDate || items[items.length - 1].createTime || 0);
     if (beginTime && lastItemTs < beginTime) break;
 
     page++;
@@ -114,10 +114,10 @@ async function fetchAllOrdersSince(apiKey, apiSecret, beginTime) {
   }
 
   const filtered = beginTime
-    ? allOrders.filter(o => parseInt(o.createTime || 0) >= beginTime)
+    ? allOrders.filter(o => parseInt(o.createDate || o.createTime || 0) > beginTime)
     : allOrders;
 
-  filtered.sort((a, b) => parseInt(a.createTime || 0) - parseInt(b.createTime || 0));
+  filtered.sort((a, b) => parseInt(a.createDate || a.createTime || 0) - parseInt(b.createDate || b.createTime || 0));
   return filtered;
 }
 
@@ -137,7 +137,7 @@ async function fetchOrderDetails(apiKey, apiSecret, orderId) {
 }
 
 async function fetchChatMessages(apiKey, apiSecret, orderId) {
-  const body = { orderId, currentPage: '1', size: '50' };
+  const body = { orderId, currentPage: '1', size: '30' };
   const jsonBody = JSON.stringify(body);
   const headers = getBybitHeaders(apiKey, apiSecret, jsonBody);
 
@@ -149,15 +149,47 @@ async function fetchChatMessages(apiKey, apiSecret, orderId) {
     const result = data.result;
     if (Array.isArray(result)) return result;
     if (result && Array.isArray(result.result)) return result.result;
+    if (result && Array.isArray(result.list)) return result.list;
+    if (result && Array.isArray(result.items)) return result.items;
     return [];
   } catch (e) {
     return [];
   }
 }
 
+function extractPaymentMethodName(json) {
+  let pmName = 'Unknown';
+  let acc = '';
+
+  if (json.confirmedPayTerm) {
+    if (json.confirmedPayTerm.paymentConfigVo && json.confirmedPayTerm.paymentConfigVo.paymentName) {
+      pmName = json.confirmedPayTerm.paymentConfigVo.paymentName;
+    }
+    acc = json.confirmedPayTerm.accountNo || json.confirmedPayTerm.mobile || '';
+    if (acc) pmName = `${pmName} (${acc})`;
+  }
+
+  if (pmName === 'Unknown' || pmName === 'Unknown ()') {
+    pmName = json.paymentName || json.paymentMethodName || json.paymentMethod || 'Unknown';
+    // Sometimes paymentMethod is an integer in simplifyList but a string in order/info, handle safely
+    if (typeof pmName === 'number') pmName = pmName.toString();
+  }
+
+  if ((pmName === 'Unknown' || pmName === 'Unknown ()') && Array.isArray(json.paymentTermList) && json.paymentTermList.length > 0) {
+    const first = json.paymentTermList[0];
+    if (first && first.paymentConfigVo && first.paymentConfigVo.paymentName) {
+      pmName = first.paymentConfigVo.paymentName;
+    }
+    acc = (first && (first.accountNo || first.mobile)) || '';
+    if (acc) pmName = `${pmName} (${acc})`;
+  }
+
+  return pmName === 'Unknown ()' ? 'Unknown' : pmName;
+}
+
 // ── Core Sync Logic ─────────────────────────────────────────────────────
 
-async function processSync(ignoreEnabledFlag = false) {
+async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) {
   console.log(`[Sync] Starting sync cycle (Manual: ${ignoreEnabledFlag})`);
   const db = admin.database();
 
@@ -192,7 +224,13 @@ async function processSync(ignoreEnabledFlag = false) {
   }
 
   const lastSyncedOrderTs = syncSnap.child('lastSyncedOrderTs').val() || 0;
-  const beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs + 1 : Date.now() - (24 * 60 * 60 * 1000);
+  let beginTime;
+  if (beginTimeOverride != null) {
+    beginTime = beginTimeOverride;
+    console.log(`[Sync] Using override beginTime: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
+  } else {
+    beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs + 1 : Date.now() - (24 * 60 * 60 * 1000);
+  }
 
   console.log(`[Sync] Fetching orders created after: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
 
@@ -215,7 +253,10 @@ async function processSync(ignoreEnabledFlag = false) {
       db.ref('financial_ledger').orderByChild('bybitOrderId').equalTo(orderId).once('value')
     ]);
 
-    if (txDup.exists() || ledgerDup.exists()) {
+    // financial_ledger is the source of truth for accounting.
+    // If a ledger entry exists → fully processed, skip.
+    // If only a transaction exists (e.g. from client-side sync) → still write ledger + balance updates.
+    if (ledgerDup.exists()) {
       skipped++;
       continue;
     }
@@ -224,17 +265,34 @@ async function processSync(ignoreEnabledFlag = false) {
     const chatMsgs = await fetchChatMessages(apiKey, apiSecret, orderId);
     const chatSummary = chatMsgs.map(m => `${m.nickName}: ${m.message || m.content}`).join('\n');
 
+    const paymentMethodString = extractPaymentMethodName(details);
+
     let matchedPhone = findMatchedPhone(chatSummary, knownNumbers);
     if (!matchedPhone) {
-      let pmName = '';
-      if (details.confirmedPayTerm && details.confirmedPayTerm.paymentConfigVo) {
-        pmName = details.confirmedPayTerm.paymentConfigVo.paymentName || '';
-        const acc = details.confirmedPayTerm.accountNo || details.confirmedPayTerm.mobile || '';
-        if (acc) pmName += ` (${acc})`;
-      }
-      matchedPhone = findMatchedPhone(pmName, knownNumbers);
+      matchedPhone = findMatchedPhone(paymentMethodString, knownNumbers);
     }
-    const matchedPhoneId = matchedPhone ? phoneToId[matchedPhone] : null;
+    
+    // Fallback: If still not matched, maybe it's in the initial order object
+    if (!matchedPhone) {
+      const orderPmString = extractPaymentMethodName(order);
+      matchedPhone = findMatchedPhone(orderPmString, knownNumbers);
+    }
+
+    let matchedPhoneId = matchedPhone ? phoneToId[matchedPhone] : null;
+
+    // Additional Fallback for SELL orders:
+    // If we're selling, Bybit doesn't always show the VF number in the seller's payment method string 
+    // depending on the endpoint. If we STILL can't match it, let's assume the default VF number.
+    if (!matchedPhoneId && parseInt(details.side) === 1) {
+      if (numbersSnap.exists()) {
+        const numbers = Object.entries(numbersSnap.val());
+        const defaultNum = numbers.find(([id, n]) => n.isDefault);
+        if (defaultNum) {
+          matchedPhoneId = defaultNum[0];
+          matchedPhone = defaultNum[1].phoneNumber;
+        }
+      }
+    }
 
     const side = parseInt(details.side);
     const amount = parseFloat(details.amount);
@@ -247,22 +305,42 @@ async function processSync(ignoreEnabledFlag = false) {
     const txId = uuidv4();
     const ledgerId = uuidv4();
 
-    updates[`transactions/${txId}`] = {
-      id: txId,
-      phoneNumber: matchedPhone || null,
-      amount, currency, timestamp,
-      bybitOrderId: orderId,
-      status: 'completed',
-      paymentMethod: details.paymentMethodName || details.paymentMethod || 'Bybit P2P',
-      side, chatHistory: chatSummary,
-      price, quantity, token: details.tokenId || 'USDT'
-    };
+    // Pre-compute bank info for BUY orders so we can embed it in the ledger object
+    // (Firebase multi-path update forbids setting both a path and its children separately)
+    let fromId = null;
+    let fromLabel = side === 0 ? 'Bank' : 'USD Exchange';
+    if (side === 0) {
+      const banks = banksSnap.val();
+      if (banks) {
+        const defaultBank = Object.values(banks).find(b => b.isDefaultForBuy);
+        if (defaultBank) {
+          fromId = defaultBank.id;
+          fromLabel = defaultBank.bankName;
+          updates[`bank_accounts/${defaultBank.id}/balance`] = admin.database.ServerValue.increment(-amount);
+        }
+      }
+    }
+
+    // Only write the transaction if it doesn't already exist (client-side sync may have written it)
+    if (!txDup.exists()) {
+      updates[`transactions/${txId}`] = {
+        id: txId,
+        phoneNumber: matchedPhone || null,
+        amount, currency, timestamp,
+        bybitOrderId: orderId,
+        status: 'completed',
+        paymentMethod: paymentMethodString === 'Unknown' ? 'Bybit P2P' : paymentMethodString,
+        side, chatHistory: chatSummary,
+        price, quantity, token: details.tokenId || 'USDT'
+      };
+    }
 
     updates[`financial_ledger/${ledgerId}`] = {
       id: ledgerId,
       type: side === 0 ? 'BUY_USDT' : 'SELL_USDT',
       amount, usdtPrice: price, usdtQuantity: quantity,
-      fromLabel: side === 0 ? 'Bank' : 'USD Exchange',
+      fromId: fromId,
+      fromLabel: fromLabel,
       toLabel: side === 0 ? 'USD Exchange' : (matchedPhone || 'Vodafone Cash'),
       toId: side === 1 ? matchedPhoneId : null,
       bybitOrderId: orderId,
@@ -271,18 +349,24 @@ async function processSync(ignoreEnabledFlag = false) {
     };
 
     if (side === 0) {
-      const banks = banksSnap.val();
-      if (banks) {
-        const defaultBank = Object.values(banks).find(b => b.isDefaultForBuy);
-        if (defaultBank) {
-          updates[`bank_accounts/${defaultBank.id}/balance`] = admin.database.ServerValue.increment(-amount);
-          updates[`financial_ledger/${ledgerId}/fromId`] = defaultBank.id;
-          updates[`financial_ledger/${ledgerId}/fromLabel`] = defaultBank.bankName;
-        }
-      }
       updates['usd_exchange/usdtBalance'] = admin.database.ServerValue.increment(quantity);
     } else {
       updates['usd_exchange/usdtBalance'] = admin.database.ServerValue.increment(-quantity);
+      // SELL: We received EGP into the matched VF number — increment its usage/balance
+      if (matchedPhoneId) {
+        const now = Date.now();
+        const d = new Date(now);
+        const todayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+        const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+        updates[`mobile_numbers/${matchedPhoneId}/inTotalUsed`] = admin.database.ServerValue.increment(amount);
+        if (orderTs >= todayStart) {
+          updates[`mobile_numbers/${matchedPhoneId}/inDailyUsed`] = admin.database.ServerValue.increment(amount);
+        }
+        if (orderTs >= monthStart) {
+          updates[`mobile_numbers/${matchedPhoneId}/inMonthlyUsed`] = admin.database.ServerValue.increment(amount);
+        }
+        updates[`mobile_numbers/${matchedPhoneId}/lastUpdatedAt`] = new Date().toISOString();
+      }
     }
     updates['usd_exchange/lastPrice'] = price;
     updates['usd_exchange/lastUpdatedAt'] = new Date().toISOString();
@@ -292,13 +376,18 @@ async function processSync(ignoreEnabledFlag = false) {
     added++;
   }
 
+  const safeNewMarker = Math.max(newLastSyncedTs, beginTime);
+  if (safeNewMarker < lastSyncedOrderTs) {
+    console.error(`[Sync] CRITICAL: Marker would move backward! Safe: ${safeNewMarker}, Old: ${lastSyncedOrderTs}. Keeping old.`);
+  }
+
   await db.ref('sync_data').update({
-    lastSyncedOrderTs: newLastSyncedTs,
+    lastSyncedOrderTs: Math.max(safeNewMarker, lastSyncedOrderTs),
     lastSyncTime: Date.now(),
     lastServerSyncStatus: `Success: Added ${added}, Skipped ${skipped} at ${new Date().toISOString()}`
   });
 
-  console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${newLastSyncedTs}`);
+  console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${Math.max(safeNewMarker, lastSyncedOrderTs)}`);
 
   for (const phone of numbersToRecalculate) {
     try {
@@ -324,7 +413,7 @@ async function recalculateUsage(phoneNumber) {
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const monthStart = new Date(now.getFullYear(), now.month(), 1).getTime();
+    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
     let inDailyUsed = 0, outDailyUsed = 0;
     let inMonthlyUsed = 0, outMonthlyUsed = 0;
@@ -333,8 +422,6 @@ async function recalculateUsage(phoneNumber) {
     if (txSnap.exists()) {
         Object.values(txSnap.val()).forEach(tx => {
             if (tx.status !== 'completed') return;
-            const pm = (tx.paymentMethod || '').toLowerCase();
-            if (!pm.includes('voda') && !pm.includes('vf')) return;
 
             const txTs = new Date(tx.timestamp).getTime();
             const amount = parseFloat(tx.amount);
@@ -358,6 +445,7 @@ async function recalculateUsage(phoneNumber) {
     });
 }
 
+
 // ── Cloud Functions ─────────────────────────────────────────────────────
 
 exports.resetDailyLimits = onSchedule({
@@ -377,10 +465,13 @@ exports.resetDailyLimits = onSchedule({
 });
 
 exports.syncBybitOrders = onSchedule({
-  schedule: '*/2 * * * *',
+  schedule: 'every 1 minutes',
   region: REGION,
   timeoutSeconds: 300,
 }, async (event) => {
+  await processSync(false);
+  // achievng 30s frequency
+  await new Promise(resolve => setTimeout(resolve, 30000));
   await processSync(false);
 });
 
@@ -392,5 +483,6 @@ exports.manualSyncBybit = onCall({ region: REGION }, async (request) => {
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FINANCE')) {
       throw new HttpsError('permission-denied', 'Unauthorized');
   }
-  return await processSync(true);
+  const beginTimeOverride = request.data?.beginTime ? parseInt(request.data.beginTime) : null;
+  return await processSync(true, beginTimeOverride);
 });

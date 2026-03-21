@@ -48,11 +48,18 @@ class AppProvider extends ChangeNotifier {
   Timer? _liveSyncTimer;
 
   bool _useServerSync = true; // Default to server sync now
+  String? _syncPassword; // Password to protect the live sync toggle
 
   // ── Getters ───────────────────────────────────────────────────────────────
+  // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
+  StreamSubscription<List<MobileNumber>>? _numbersSub;
+  StreamSubscription<List<CashTransaction>>? _transactionsSub;
+  StreamSubscription<DatabaseEvent>? _syncDataSub;
+
   List<MobileNumber> get mobileNumbers => _mobileNumbers;
   List<CashTransaction> get transactions => _transactions;
   MobileNumber? get defaultNumber => _defaultNumber;
+  String? get syncPassword => _syncPassword;
   bool get isLoading => _isLoading;
   String? get error => _error;
   bool get hasApiCredentials => _apiKey.isNotEmpty && _apiSecret.isNotEmpty;
@@ -115,10 +122,7 @@ class AppProvider extends ChangeNotifier {
   Future<void> _initialize() async {
     try {
       await _loadApiCredentials();
-      await loadMobileNumbers();
-      await loadAllTransactions();
-      _lastSyncedOrderTs = await _dbService.getLastSyncedOrderTimestamp();
-      _lastSyncTime = await _dbService.getLastSyncTime();
+      _initializeListeners();
       await _loadLiveSyncState();
     } catch (e) {
       print('Initialization error (non-fatal): $e');
@@ -126,6 +130,56 @@ class AppProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  void _initializeListeners() {
+    _numbersSub?.cancel();
+    _numbersSub = _dbService.streamMobileNumbers().listen((numbers) {
+      _mobileNumbers = numbers;
+      _mobileNumbers.sort((a, b) {
+        if (a.isDefault == b.isDefault) {
+          return a.phoneNumber.compareTo(b.phoneNumber);
+        }
+        return a.isDefault ? -1 : 1;
+      });
+      _defaultNumber = _mobileNumbers.isEmpty
+          ? null
+          : _mobileNumbers.firstWhere((n) => n.isDefault,
+              orElse: () => _mobileNumbers.first);
+      notifyListeners();
+    });
+
+    _transactionsSub?.cancel();
+    _transactionsSub = _dbService.streamAllTransactions().listen((txs) {
+      _transactions = txs;
+      notifyListeners();
+    });
+
+    _syncDataSub?.cancel();
+    _syncDataSub = FirebaseDatabase.instance.ref('sync_data').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (snap.exists && snap.value != null && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _lastSyncedOrderTs = data['lastSyncedOrderTs'] as int? ?? 0;
+        final ms = data['lastSyncTime'] as int?;
+        _lastSyncTime = ms != null ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
+      } else {
+        _lastSyncedOrderTs = 0;
+        _lastSyncTime = null;
+      }
+      notifyListeners();
+    });
+  }
+
+  @override
+  void dispose() {
+    _liveSyncTimer?.cancel();
+    _numbersSub?.cancel();
+    _transactionsSub?.cancel();
+    _syncDataSub?.cancel();
+    _syncConfigSub?.cancel();
+    super.dispose();
+  }
+
 
   // ── API Credentials ───────────────────────────────────────────────────────
 
@@ -179,7 +233,7 @@ class AppProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<SyncResult> _syncOrdersServer({bool isSilent = false}) async {
+  Future<SyncResult> _syncOrdersServer({DateTime? fromDate, bool isSilent = false}) async {
     if (_isSyncing) return const SyncResult(error: 'Sync in progress');
     _isSyncing = true;
     if (!isSilent) {
@@ -190,7 +244,17 @@ class AppProvider extends ChangeNotifier {
 
     try {
       final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
-      final result = await functions.httpsCallable('manualSyncBybit').call();
+
+      // Build payload — include beginTime only if a custom fromDate was chosen
+      Map<String, dynamic>? payload;
+      if (fromDate != null) {
+        final utcDate = DateTime.utc(fromDate.year, fromDate.month, fromDate.day);
+        payload = {'beginTime': utcDate.millisecondsSinceEpoch.toString()};
+        _syncStatus = 'Syncing from ${fromDate.day}/${fromDate.month}/${fromDate.year}...';
+        if (!isSilent) notifyListeners();
+      }
+
+      final result = await functions.httpsCallable('manualSyncBybit').call(payload);
 
       final Map<String, dynamic> data = Map<String, dynamic>.from(result.data as Map);
       final added = data['added'] as int? ?? 0;
@@ -223,9 +287,16 @@ class AppProvider extends ChangeNotifier {
 
     // Listen to Firebase for the central sync switch
     _syncConfigSub?.cancel();
-    _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config/enabled').onValue.listen((event) {
-      final val = event.snapshot.value;
-      _isLiveSyncEnabled = val == true;
+    _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (snap.exists && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _isLiveSyncEnabled = data['enabled'] == true;
+        _syncPassword = data['password']?.toString();
+      } else {
+        _isLiveSyncEnabled = false;
+        _syncPassword = null;
+      }
 
       if (_isLiveSyncEnabled && !_useServerSync) {
         _startLiveSyncTimer();
@@ -234,6 +305,12 @@ class AppProvider extends ChangeNotifier {
       }
       notifyListeners();
     });
+  }
+
+  Future<void> setSyncPassword(String? password) async {
+    await FirebaseDatabase.instance.ref('system/sync_config/password').set(password);
+    _syncPassword = password;
+    notifyListeners();
   }
 
   Future<void> toggleServerSync(bool enabled) async {
@@ -276,33 +353,12 @@ class AppProvider extends ChangeNotifier {
     // _isLiveSyncEnabled will be updated by the listener in _loadLiveSyncState
   }
 
-  @override
-  void dispose() {
-    _liveSyncTimer?.cancel();
-    _syncConfigSub?.cancel();
-    super.dispose();
-  }
+  //  dispose method moved to top
 
   // ── Mobile Numbers ────────────────────────────────────────────────────────
 
   Future<void> loadMobileNumbers() async {
-    try {
-      _mobileNumbers = await _dbService.getMobileNumbers();
-      _mobileNumbers.sort((a, b) {
-        if (a.isDefault == b.isDefault) {
-          return a.phoneNumber.compareTo(b.phoneNumber);
-        }
-        return a.isDefault ? -1 : 1;
-      });
-      _defaultNumber = _mobileNumbers.isEmpty
-          ? null
-          : _mobileNumbers.firstWhere((n) => n.isDefault,
-              orElse: () => _mobileNumbers.first);
-      notifyListeners();
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-    }
+    // Deprecated: Now handled automatically via real-time stream `_initializeListeners`
   }
 
   Future<void> addMobileNumber({
@@ -379,13 +435,7 @@ class AppProvider extends ChangeNotifier {
   // ── Transactions ──────────────────────────────────────────────────────────
 
   Future<void> loadAllTransactions() async {
-    try {
-      _transactions = await _dbService.getAllTransactions();
-      notifyListeners();
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-    }
+    // Deprecated: Now handled automatically via real-time stream `_initializeListeners`
   }
 
   Future<List<CashTransaction>> getTransactionsForNumber(
@@ -436,7 +486,7 @@ class AppProvider extends ChangeNotifier {
   /// Orders are always deduplicated by `bybitOrderId` before saving.
   Future<SyncResult> syncOrders({DateTime? fromDate, bool isSilent = false}) async {
     if (_useServerSync) {
-      return _syncOrdersServer(isSilent: isSilent);
+      return _syncOrdersServer(fromDate: fromDate, isSilent: isSilent);
     }
 
     if (_bybitService == null) {

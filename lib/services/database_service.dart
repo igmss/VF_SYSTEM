@@ -32,6 +32,24 @@ class DatabaseService {
     }
   }
 
+  /// Stream all mobile numbers
+  Stream<List<MobileNumber>> streamMobileNumbers() {
+    return _database.ref(_numbersPath).onValue.map((event) {
+      final snapshot = event.snapshot;
+      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
+        final data = snapshot.value as Map;
+        final List<MobileNumber> numbers = [];
+        data.forEach((key, value) {
+          if (value is Map) {
+            numbers.add(MobileNumber.fromMap(Map<String, dynamic>.from(value)));
+          }
+        });
+        return numbers;
+      }
+      return [];
+    });
+  }
+
   /// Get all mobile numbers
   Future<List<MobileNumber>> getMobileNumbers() async {
     try {
@@ -155,6 +173,29 @@ class DatabaseService {
     }
   }
 
+  /// Stream all transactions for a number
+  Stream<List<CashTransaction>> streamTransactionsForNumber(String phoneNumber) {
+    return _database
+        .ref(_transactionsPath)
+        .orderByChild('phoneNumber')
+        .equalTo(phoneNumber)
+        .onValue
+        .map((event) {
+      final snapshot = event.snapshot;
+      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
+        final data = snapshot.value as Map;
+        final List<CashTransaction> results = [];
+        data.forEach((key, value) {
+          if (value is Map) {
+            results.add(CashTransaction.fromMap(Map<String, dynamic>.from(value)));
+          }
+        });
+        return results..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      }
+      return [];
+    });
+  }
+
   /// Get all transactions for a number
   Future<List<CashTransaction>> getTransactionsForNumber(
       String phoneNumber) async {
@@ -181,6 +222,24 @@ class DatabaseService {
     } catch (e) {
       throw Exception('Error fetching transactions: $e');
     }
+  }
+
+  /// Stream all transactions
+  Stream<List<CashTransaction>> streamAllTransactions() {
+    return _database.ref(_transactionsPath).onValue.map((event) {
+      final snapshot = event.snapshot;
+      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
+        final data = snapshot.value as Map;
+        final List<CashTransaction> results = [];
+        data.forEach((key, value) {
+          if (value is Map) {
+            results.add(CashTransaction.fromMap(Map<String, dynamic>.from(value)));
+          }
+        });
+        return results..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      }
+      return [];
+    });
   }
 
   /// Get all transactions

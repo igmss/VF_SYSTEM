@@ -205,5 +205,8 @@
     "add_retailer": "Add Retailer",
     "deposit_exceeds_cash": "Cannot deposit more than your cash on hand ({} EGP)",
     "insufficient_vf_balance": "Not enough balance on {} (available: {} EGP)",
-    "distribute_vfcash": "Distribute VF Cash"
+    "distribute_vfcash": "Distribute VF Cash",
+    "settings_locked": "Settings Locked",
+    "enter_pass_to_access": "Please enter your sync protection password to access these settings.",
+    "unlock": "Unlock"
 }

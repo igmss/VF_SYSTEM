@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:uuid/uuid.dart';
@@ -19,7 +20,15 @@ class DistributionProvider extends ChangeNotifier {
 
   bool _isLoading = false;
   bool _isProcessingAction = false;
+  bool _isListenersInitialized = false;
+  bool _syncCompleted = false; 
   String? _error;
+
+  StreamSubscription<DatabaseEvent>? _usdExchangeSub;
+  StreamSubscription<DatabaseEvent>? _banksSub;
+  StreamSubscription<DatabaseEvent>? _retailersSub;
+  StreamSubscription<DatabaseEvent>? _collectorsSub;
+  StreamSubscription<DatabaseEvent>? _ledgerSub;
 
   List<BankAccount> get bankAccounts => _bankAccounts;
   List<Retailer> get retailers => _retailers;
@@ -60,41 +69,130 @@ class DistributionProvider extends ChangeNotifier {
   double get totalTransferFees =>
       _ledger.where((tx) => tx.type == FlowType.EXPENSE_VFCASH_FEE).fold(0.0, (sum, tx) => sum + tx.amount);
 
-  // ─── Load all data ─────────────────────────────────────────────────────────
+  // ─── Real-Time Data Listeners ──────────────────────────────────────────────
 
   Future<void> loadAll() async {
     _isLoading = true;
     _error = null;
+    // Notify once before we start listening so the UI can show a spinner if needed
     notifyListeners();
+
     try {
-      await Future.wait([
-        _loadBankAccounts(),
-        _loadRetailers(),
-        _loadCollectors(),
-        _loadLedger(),
-        _loadUsdExchangeBalance(),
-      ]);
-      // Auto-create collector records for any COLLECTOR-role user that
-      // was created via User Management but has no collectors/ record yet.
-      await _syncCollectorsFromUsers();
+      _initializeListeners();
+      if (!_syncCompleted) {
+        await _syncCollectorsFromUsers();
+        _syncCompleted = true;
+      }
     } catch (e) {
       _error = e.toString();
     }
+
     _isLoading = false;
     notifyListeners();
   }
 
-  Future<void> _loadUsdExchangeBalance() async {
-    final snap = await _db.ref('usd_exchange').get();
-    if (snap.exists && snap.value != null && snap.value is Map) {
-      final data = Map<String, dynamic>.from(snap.value as Map);
-      _usdtBalance = _asDouble(data['usdtBalance']);
-      _usdtLastPrice = _asDouble(data['lastPrice']);
-    } else {
-      _usdtBalance = 0.0;
-      _usdtLastPrice = 0.0;
-    }
+  void _initializeListeners() {
+    if (_isListenersInitialized) return;
+    _isListenersInitialized = true;
+
+    _usdExchangeSub?.cancel();
+    _usdExchangeSub = _db.ref('usd_exchange').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (snap.exists && snap.value != null && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _usdtBalance = _asDouble(data['usdtBalance']);
+        _usdtLastPrice = _asDouble(data['lastPrice']);
+      } else {
+        _usdtBalance = 0.0;
+        _usdtLastPrice = 0.0;
+      }
+      notifyListeners();
+    });
+
+    _banksSub?.cancel();
+    _banksSub = _db.ref('bank_accounts').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _bankAccounts = [];
+      } else {
+        final map = snap.value as Map;
+        _bankAccounts = map.values.where((v) => v is Map).map((v) {
+          return BankAccount.fromMap(Map<String, dynamic>.from(v as Map));
+        }).toList();
+        _bankAccounts.sort((a, b) {
+          if (a.isDefaultForBuy == b.isDefaultForBuy) {
+            return a.bankName.compareTo(b.bankName);
+          }
+          return a.isDefaultForBuy ? -1 : 1;
+        });
+      }
+      notifyListeners();
+    });
+
+    _retailersSub?.cancel();
+    _retailersSub = _db.ref('retailers').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _retailers = [];
+      } else {
+        final map = snap.value as Map;
+        _retailers = map.values
+            .where((v) => v is Map)
+            .map((v) => Retailer.fromMap(Map<String, dynamic>.from(v as Map)))
+            .where((r) => r.isActive)
+            .toList();
+        _retailers.sort((a, b) => a.name.compareTo(b.name));
+      }
+      notifyListeners();
+    });
+
+    _collectorsSub?.cancel();
+    _collectorsSub = _db.ref('collectors').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _collectors = [];
+      } else {
+        final map = snap.value as Map;
+        _collectors = map.values
+            .where((v) => v is Map)
+            .map((v) => Collector.fromMap(Map<String, dynamic>.from(v as Map)))
+            .where((c) => c.isActive)
+            .toList();
+        _collectors.sort((a, b) => a.name.compareTo(b.name));
+      }
+      notifyListeners();
+    });
+
+    _ledgerSub?.cancel();
+    _ledgerSub = _db.ref('financial_ledger').orderByChild('timestamp').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _ledger = [];
+      } else {
+        final map = snap.value as Map;
+        _ledger = map.values
+            .where((v) => v is Map)
+            .map((v) => FinancialTransaction.fromMap(Map<String, dynamic>.from(v as Map)))
+            .toList();
+        _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp)); // newest first
+      }
+      notifyListeners();
+    });
   }
+
+  @override
+  void dispose() {
+    _usdExchangeSub?.cancel();
+    _banksSub?.cancel();
+    _retailersSub?.cancel();
+    _collectorsSub?.cancel();
+    _ledgerSub?.cancel();
+    super.dispose();
+  }
+
+  // We keep `loadAll()` calling `_syncCollectorsFromUsers()` to ensure sync on startup,
+  // but we replaced the body of `_loadBankAccounts`, `_loadRetailers`, etc. 
+  // since they are now handled entirely by the robust `.onValue` listeners defined above!
 
   double _asDouble(dynamic v) {
     if (v == null) return 0.0;
@@ -132,53 +230,12 @@ class DistributionProvider extends ChangeNotifier {
     });
   }
 
-  Future<void> _loadBankAccounts() async {
-    final snap = await _db.ref('bank_accounts').get();
-    if (!snap.exists || snap.value == null || snap.value is! Map) {
-      _bankAccounts = [];
-      return;
-    }
-    final map = snap.value as Map;
-    _bankAccounts = map.values.where((v) => v is Map).map((v) {
-      return BankAccount.fromMap(Map<String, dynamic>.from(v as Map));
-    }).toList();
-    _bankAccounts.sort((a, b) {
-      if (a.isDefaultForBuy == b.isDefaultForBuy) {
-        return a.bankName.compareTo(b.bankName);
-      }
-      return a.isDefaultForBuy ? -1 : 1;
-    });
-  }
+  Future<void> _loadBankAccounts() async {}
+  Future<void> _loadRetailers() async {}
+  Future<void> _loadCollectors() async {}
+  Future<void> _loadLedger() async {}
+  Future<void> _loadUsdExchangeBalance() async {}
 
-  Future<void> _loadRetailers() async {
-    final snap = await _db.ref('retailers').get();
-    if (!snap.exists || snap.value == null || snap.value is! Map) {
-      _retailers = [];
-      return;
-    }
-    final map = snap.value as Map;
-    _retailers = map.values
-        .where((v) => v is Map)
-        .map((v) => Retailer.fromMap(Map<String, dynamic>.from(v as Map)))
-        .where((r) => r.isActive)
-        .toList();
-    _retailers.sort((a, b) => a.name.compareTo(b.name));
-  }
-
-  Future<void> _loadCollectors() async {
-    final snap = await _db.ref('collectors').get();
-    if (!snap.exists || snap.value == null || snap.value is! Map) {
-      _collectors = [];
-      return;
-    }
-    final map = snap.value as Map;
-    _collectors = map.values
-        .where((v) => v is Map)
-        .map((v) => Collector.fromMap(Map<String, dynamic>.from(v as Map)))
-        .where((c) => c.isActive)
-        .toList();
-    _collectors.sort((a, b) => a.name.compareTo(b.name));
-  }
 
   /// Reads all users with role == 'COLLECTOR' from the users node.
   /// For each one that has no matching collectors/ record (by uid),
@@ -187,6 +244,12 @@ class DistributionProvider extends ChangeNotifier {
     try {
       final snap = await _db.ref('users').get();
       if (!snap.exists || snap.value == null || snap.value is! Map) return;
+
+      final collectorsSnap = await _db.ref('collectors').get();
+      final existingCollectorUids = <String>{};
+      if (collectorsSnap.exists && collectorsSnap.value is Map) {
+        existingCollectorUids.addAll((collectorsSnap.value as Map).keys.cast<String>());
+      }
 
       final usersMap = snap.value as Map;
       bool added = false;
@@ -198,9 +261,8 @@ class DistributionProvider extends ChangeNotifier {
         final data = Map<String, dynamic>.from(val);
         if (data['role'] != 'COLLECTOR') continue;
 
-        // Check if a collector record with this uid already exists in memory
-        final alreadyExists = _collectors.any((c) => c.uid == uid);
-        if (!alreadyExists) {
+        // Check if a collector record with this uid actually exists in Firebase
+        if (!existingCollectorUids.contains(uid)) {
           // Create the missing collector record in the database
           debugPrint('Auto-creating collector record for user $uid (${data['name']})');
           final collectorData = {
@@ -231,22 +293,7 @@ class DistributionProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> _loadLedger() async {
-    final snap =
-        await _db.ref('financial_ledger').orderByChild('timestamp').get();
-    if (!snap.exists || snap.value == null || snap.value is! Map) {
-      _ledger = [];
-      return;
-    }
-    final map = snap.value as Map;
-    _ledger = map.values
-        .where((v) => v is Map)
-        .map((v) =>
-            FinancialTransaction.fromMap(Map<String, dynamic>.from(v as Map)))
-        .toList();
-    _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp)); // newest first
-  }
-
+  // Ledger data stream previously here is now in `_initializeListeners()`
   // ─── Collector-role helpers ─────────────────────────────────────────────────
 
   /// Returns retailers assigned to this collector's UID (for COLLECTOR role).
@@ -460,7 +507,6 @@ class DistributionProvider extends ChangeNotifier {
       );
       await _db.ref('financial_ledger/${tx.id}').set(tx.toMap());
 
-      await loadAll(); // Reload everything to update balances and ledger lists
       return true;
     } catch (e) {
       debugPrint('Process Buy Order error: $e');
@@ -570,7 +616,6 @@ class DistributionProvider extends ChangeNotifier {
       fixed++;
     }
 
-    await loadAll();
     return {'fixed': fixed, 'message': 'Fixed $fixed wrong BALANCE_CORRECTION entries.'};
   }
 
@@ -693,7 +738,6 @@ class DistributionProvider extends ChangeNotifier {
           .set(DateTime.now().toIso8601String()),
     ];
     await Future.wait(futures);
-    await loadAll();
     } finally {
       _isProcessingAction = false;
     }
@@ -755,7 +799,6 @@ class DistributionProvider extends ChangeNotifier {
       _db.ref('collectors/$collectorId/lastUpdatedAt')
           .set(DateTime.now().toIso8601String()),
     ]);
-    await loadAll();
     } finally {
       _isProcessingAction = false;
     }
@@ -797,7 +840,6 @@ class DistributionProvider extends ChangeNotifier {
       _db.ref('bank_accounts/$bankAccountId/lastUpdatedAt')
           .set(DateTime.now().toIso8601String()),
     ]);
-    await loadAll();
     } finally {
       _isProcessingAction = false;
     }
@@ -900,7 +942,7 @@ class DistributionProvider extends ChangeNotifier {
       }
 
       await Future.wait(futures);
-      await loadAll();
+    } catch (e) {
     } catch (e) {
       debugPrint('Correction error: $e');
       rethrow;
@@ -975,8 +1017,6 @@ class DistributionProvider extends ChangeNotifier {
         'timestamp': DateTime.now().millisecondsSinceEpoch,
       });
     }
-
-    await loadAll();
   }
 
   /// ONE-TIME: Manually correct a bank account balance by writing a correction
@@ -1003,7 +1043,6 @@ class DistributionProvider extends ChangeNotifier {
     );
     await _db.ref('bank_accounts/$bankAccountId/balance').set(newBalance);
     await _db.ref('financial_ledger/${correctionTx.id}').set(correctionTx.toMap());
-    await loadAll();
   }
 
   /// Record a Bybit Sell USDT order (synced from Bybit).
@@ -1065,10 +1104,6 @@ class DistributionProvider extends ChangeNotifier {
           'timestamp': DateTime.now().millisecondsSinceEpoch,
         });
       }
-
-      await _loadLedger();
-      await _loadUsdExchangeBalance();
-      notifyListeners();
     } catch (e) {
       debugPrint('Process Sell Order error: $e');
     }
@@ -1145,7 +1180,6 @@ class DistributionProvider extends ChangeNotifier {
       ];
       
       await Future.wait(futures);
-      await loadAll();
     } catch (e) {
       debugPrint('Credit Return error: $e');
       rethrow;
@@ -1257,7 +1291,6 @@ class DistributionProvider extends ChangeNotifier {
       futures.add(_db.ref('financial_ledger/${tx.id}').remove());
 
       await Future.wait(futures);
-      await loadAll();
     } catch (e) {
       debugPrint('Delete transaction error: $e');
       rethrow;

@@ -7,6 +7,7 @@ import '../../models/retailer.dart';
 import '../../models/collector.dart';
 import '../../models/bank_account.dart';
 import '../../models/financial_transaction.dart';
+import '../admin/retailer_details_screen.dart';
 
 class CollectorDashboard extends StatefulWidget {
   const CollectorDashboard({Key? key}) : super(key: key);
@@ -288,13 +289,21 @@ class _RetailerCard extends StatelessWidget {
     final debt = retailer.pendingDebt;
     final debtColor = debt > 0 ? const Color(0xFFFBBF24) : const Color(0xFF4ADE80);
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      decoration: BoxDecoration(
-        color: const Color(0xFF16162A),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: debtColor.withOpacity(0.2)),
+    return InkWell(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => RetailerDetailsScreen(retailer: retailer),
+        ),
       ),
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF16162A),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: debtColor.withOpacity(0.2)),
+        ),
       child: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
@@ -380,7 +389,7 @@ class _RetailerCard extends StatelessWidget {
           ],
         ),
       ),
-    );
+    ),);
   }
 
   Widget _buildStatColumn(String label, double amount, Color color) {

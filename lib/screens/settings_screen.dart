@@ -231,6 +231,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
+                    // Server-Side Sync Toggle
+                    SwitchListTile(
+                      title: const Text('Server-Side Sync', style: TextStyle(color: Colors.white)),
+                      subtitle: const Text('Sync orders automatically in the cloud', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                      value: provider.useServerSync,
+                      activeColor: const Color(0xFFE63946),
+                      onChanged: (val) => provider.toggleServerSync(val),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                    const Divider(height: 24),
+
                     // Last sync info
                     if (lastSync != null) ...[
                       Row(

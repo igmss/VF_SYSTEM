@@ -142,8 +142,12 @@ async function processSync() {
 
   const { apiKey, apiSecret } = credsSnap.val();
   const knownNumbers = [];
+  const phoneToId = {};
   if (numbersSnap.exists()) {
-    Object.values(numbersSnap.val()).forEach(n => knownNumbers.push(n.phoneNumber));
+    Object.entries(numbersSnap.val()).forEach(([id, n]) => {
+      knownNumbers.push(n.phoneNumber);
+      phoneToId[n.phoneNumber] = id;
+    });
   }
 
   const lastSyncedOrderTs = syncSnap.child('lastSyncedOrderTs').val() || 0;
@@ -163,8 +167,12 @@ async function processSync() {
 
     if (orderTs > newLastSyncedTs) newLastSyncedTs = orderTs;
 
-    const dupSnap = await db.ref('transactions').orderByChild('bybitOrderId').equalTo(orderId).once('value');
-    if (dupSnap.exists()) {
+    const [txDup, ledgerDup] = await Promise.all([
+      db.ref('transactions').orderByChild('bybitOrderId').equalTo(orderId).once('value'),
+      db.ref('financial_ledger').orderByChild('bybitOrderId').equalTo(orderId).once('value')
+    ]);
+
+    if (txDup.exists() || ledgerDup.exists()) {
       skipped++;
       continue;
     }
@@ -183,6 +191,7 @@ async function processSync() {
       }
       matchedPhone = findMatchedPhone(pmName, knownNumbers);
     }
+    const matchedPhoneId = matchedPhone ? phoneToId[matchedPhone] : null;
 
     const side = parseInt(details.side);
     const amount = parseFloat(details.amount);
@@ -212,6 +221,7 @@ async function processSync() {
       amount, usdtPrice: price, usdtQuantity: quantity,
       fromLabel: side === 0 ? 'Bank' : 'USD Exchange',
       toLabel: side === 0 ? 'USD Exchange' : (matchedPhone || 'Vodafone Cash'),
+      toId: side === 1 ? matchedPhoneId : null,
       bybitOrderId: orderId,
       createdByUid: 'server_sync',
       timestamp: orderTs

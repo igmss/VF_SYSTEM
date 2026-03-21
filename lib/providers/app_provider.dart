@@ -215,19 +215,33 @@ class AppProvider extends ChangeNotifier {
 
   // ── Live Sync Monitoring ────────────────────────────────────────────────
   
+  StreamSubscription? _syncConfigSub;
+
   Future<void> _loadLiveSyncState() async {
     final prefs = await SharedPreferences.getInstance();
-    _isLiveSyncEnabled = prefs.getBool('live_sync_enabled') ?? false;
     _useServerSync = prefs.getBool('use_server_sync') ?? true;
-    if (_isLiveSyncEnabled && !_useServerSync) {
-      _startLiveSyncTimer();
-    }
+
+    // Listen to Firebase for the central sync switch
+    _syncConfigSub?.cancel();
+    _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config/enabled').onValue.listen((event) {
+      final val = event.snapshot.value;
+      _isLiveSyncEnabled = val == true;
+
+      if (_isLiveSyncEnabled && !_useServerSync) {
+        _startLiveSyncTimer();
+      } else {
+        _stopLiveSyncTimer();
+      }
+      notifyListeners();
+    });
   }
 
   Future<void> toggleServerSync(bool enabled) async {
     _useServerSync = enabled;
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('use_server_sync', enabled);
+
+    // If we switch to server sync, stop local timer
     if (enabled) {
       _stopLiveSyncTimer();
     } else if (_isLiveSyncEnabled) {
@@ -251,25 +265,21 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> toggleLiveSync(bool enabled) async {
-    _isLiveSyncEnabled = enabled;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('live_sync_enabled', enabled);
+    // This now updates Firebase centrally so the Cloud Function also knows
+    await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(enabled);
     
-    if (enabled) {
-      // User requested: When activating live sync, only fetch orders from THIS MOMENT onwards.
+    if (enabled && !_useServerSync) {
+      // For local sync only: Reset marker to now to avoid syncing old history
       _lastSyncedOrderTs = DateTime.now().millisecondsSinceEpoch;
       await _dbService.saveLastSyncedOrderTimestamp(_lastSyncedOrderTs);
-      
-      _startLiveSyncTimer();
-    } else {
-      _stopLiveSyncTimer();
     }
-    notifyListeners();
+    // _isLiveSyncEnabled will be updated by the listener in _loadLiveSyncState
   }
 
   @override
   void dispose() {
     _liveSyncTimer?.cancel();
+    _syncConfigSub?.cancel();
     super.dispose();
   }
 

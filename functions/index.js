@@ -128,22 +128,33 @@ async function fetchChatMessages(apiKey, apiSecret, orderId) {
 
 // ── Core Sync Logic ─────────────────────────────────────────────────────
 
-async function processSync() {
+async function processSync(ignoreEnabledFlag = false) {
   const db = admin.database();
 
-  const [credsSnap, numbersSnap, syncSnap, banksSnap] = await Promise.all([
+  const [credsSnap, numbersSnap, syncSnap, banksSnap, configSnap] = await Promise.all([
     db.ref('system/api_credentials/bybit').once('value'),
     db.ref('mobile_numbers').once('value'),
     db.ref('sync_data').once('value'),
     db.ref('bank_accounts').once('value'),
+    db.ref('system/sync_config/enabled').once('value'),
   ]);
+
+  // Check if sync is globally enabled (unless it's a manual override)
+  if (!ignoreEnabledFlag && configSnap.val() !== true) {
+    console.log('Sync is globally disabled in system/sync_config/enabled. Skipping.');
+    return { skippedByConfig: true };
+  }
 
   if (!credsSnap.exists()) return { error: 'Missing credentials' };
 
   const { apiKey, apiSecret } = credsSnap.val();
   const knownNumbers = [];
+  const phoneToId = {};
   if (numbersSnap.exists()) {
-    Object.values(numbersSnap.val()).forEach(n => knownNumbers.push(n.phoneNumber));
+    Object.entries(numbersSnap.val()).forEach(([id, n]) => {
+      knownNumbers.push(n.phoneNumber);
+      phoneToId[n.phoneNumber] = id;
+    });
   }
 
   const lastSyncedOrderTs = syncSnap.child('lastSyncedOrderTs').val() || 0;
@@ -163,8 +174,12 @@ async function processSync() {
 
     if (orderTs > newLastSyncedTs) newLastSyncedTs = orderTs;
 
-    const dupSnap = await db.ref('transactions').orderByChild('bybitOrderId').equalTo(orderId).once('value');
-    if (dupSnap.exists()) {
+    const [txDup, ledgerDup] = await Promise.all([
+      db.ref('transactions').orderByChild('bybitOrderId').equalTo(orderId).once('value'),
+      db.ref('financial_ledger').orderByChild('bybitOrderId').equalTo(orderId).once('value')
+    ]);
+
+    if (txDup.exists() || ledgerDup.exists()) {
       skipped++;
       continue;
     }
@@ -183,6 +198,7 @@ async function processSync() {
       }
       matchedPhone = findMatchedPhone(pmName, knownNumbers);
     }
+    const matchedPhoneId = matchedPhone ? phoneToId[matchedPhone] : null;
 
     const side = parseInt(details.side);
     const amount = parseFloat(details.amount);
@@ -212,6 +228,7 @@ async function processSync() {
       amount, usdtPrice: price, usdtQuantity: quantity,
       fromLabel: side === 0 ? 'Bank' : 'USD Exchange',
       toLabel: side === 0 ? 'USD Exchange' : (matchedPhone || 'Vodafone Cash'),
+      toId: side === 1 ? matchedPhoneId : null,
       bybitOrderId: orderId,
       createdByUid: 'server_sync',
       timestamp: orderTs
@@ -335,7 +352,8 @@ exports.syncBybitOrders = onSchedule({
   region: REGION,
   timeoutSeconds: 300,
 }, async (event) => {
-  await processSync();
+  // Pass false to respect the enabled flag
+  await processSync(false);
 });
 
 exports.manualSyncBybit = onCall({ region: REGION }, async (request) => {
@@ -346,5 +364,6 @@ exports.manualSyncBybit = onCall({ region: REGION }, async (request) => {
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FINANCE')) {
       throw new HttpsError('permission-denied', 'Unauthorized');
   }
-  return await processSync();
+  // Pass true to ignore the enabled flag (manual override)
+  return await processSync(true);
 });

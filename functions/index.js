@@ -129,6 +129,7 @@ async function fetchChatMessages(apiKey, apiSecret, orderId) {
 // ── Core Sync Logic ─────────────────────────────────────────────────────
 
 async function processSync(ignoreEnabledFlag = false) {
+  console.log(`[Sync] Starting sync cycle (Manual: ${ignoreEnabledFlag})`);
   const db = admin.database();
 
   const [credsSnap, numbersSnap, syncSnap, banksSnap, configSnap] = await Promise.all([
@@ -141,11 +142,14 @@ async function processSync(ignoreEnabledFlag = false) {
 
   // Check if sync is globally enabled (unless it's a manual override)
   if (!ignoreEnabledFlag && configSnap.val() !== true) {
-    console.log('Sync is globally disabled in system/sync_config/enabled. Skipping.');
+    console.log('[Sync] Skipped: Globally disabled in system/sync_config/enabled.');
     return { skippedByConfig: true };
   }
 
-  if (!credsSnap.exists()) return { error: 'Missing credentials' };
+  if (!credsSnap.exists()) {
+    console.error('[Sync] Error: Missing Bybit API credentials in database.');
+    return { error: 'Missing credentials' };
+  }
 
   const { apiKey, apiSecret } = credsSnap.val();
   const knownNumbers = [];
@@ -160,8 +164,10 @@ async function processSync(ignoreEnabledFlag = false) {
   const lastSyncedOrderTs = syncSnap.child('lastSyncedOrderTs').val() || 0;
   const beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs + 1 : Date.now() - (24 * 60 * 60 * 1000);
 
+  console.log(`[Sync] Fetching orders created after: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
+
   const orders = await fetchAllOrdersSince(apiKey, apiSecret, beginTime);
-  console.log(`Processing ${orders.length} new orders.`);
+  console.log(`[Sync] Bybit returned ${orders.length} potential new orders.`);
 
   let added = 0;
   let skipped = 0;
@@ -260,8 +266,10 @@ async function processSync(ignoreEnabledFlag = false) {
   await db.ref('sync_data').update({
     lastSyncedOrderTs: newLastSyncedTs,
     lastSyncTime: Date.now(),
-    lastServerSyncStatus: `Success: Added ${added}, Skipped ${skipped}`
+    lastServerSyncStatus: `Success: Added ${added}, Skipped ${skipped} at ${new Date().toISOString()}`
   });
+
+  console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${newLastSyncedTs}`);
 
   // Batch recalculation of usage AFTER the loop to avoid redundant O(N) scans
   for (const phone of numbersToRecalculate) {

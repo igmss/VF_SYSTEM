@@ -10,17 +10,32 @@ if (admin.apps.length === 0) {
 }
 
 const BYBIT_BASE_URL = 'https://api.bybit.com';
-const PAGE_SIZE = 50; // Increased page size
+const PAGE_SIZE = 50;
 const REGION = 'asia-east1';
 
+let timeOffsetMs = 0;
+
 // ── Helpers ─────────────────────────────────────────────────────────────
+
+async function syncServerTime() {
+    try {
+        const res = await axios.get(`${BYBIT_BASE_URL}/v5/market/time`);
+        if (res.data && res.data.result && res.data.result.timeNano) {
+            const serverMs = Math.floor(parseInt(res.data.result.timeNano) / 1000000);
+            timeOffsetMs = serverMs - Date.now();
+            console.log(`[Sync] Synced server time. Offset: ${timeOffsetMs}ms`);
+        }
+    } catch (e) {
+        console.error(`[Sync] Failed to sync server time: ${e.message}`);
+    }
+}
 
 function generateSignature(secret, payload) {
   return crypto.createHmac('sha256', secret).update(payload).digest('hex');
 }
 
 function getBybitHeaders(apiKey, apiSecret, jsonBody) {
-  const ts = Date.now().toString();
+  const ts = (Date.now() + timeOffsetMs).toString();
   const recvWindow = '30000';
   const payload = ts + apiKey + recvWindow + jsonBody;
   const sig = generateSignature(apiSecret, payload);
@@ -67,33 +82,37 @@ async function fetchAllOrdersSince(apiKey, apiSecret, beginTime) {
     const body = {
       page: page,
       size: PAGE_SIZE,
-      status: '50', // Completed
+      status: '50',
       beginTime: beginTime ? beginTime.toString() : undefined,
     };
 
     const jsonBody = JSON.stringify(body);
     const headers = getBybitHeaders(apiKey, apiSecret, jsonBody);
 
-    const res = await axios.post(`${BYBIT_BASE_URL}/v5/p2p/order/simplifyList`, body, { headers });
-    if (res.data.retCode !== 0) {
-      throw new Error(`Bybit API Error (simplifyList): ${res.data.retMsg}`);
+    const res = await axios.post(`${BYBIT_BASE_URL}/v5/p2p/order/simplifyList`, jsonBody, { headers });
+
+    const data = res.data;
+    const retCode = data.retCode ?? data.ret_code ?? -1;
+    const retMsg = data.retMsg ?? data.ret_msg ?? 'Unknown error';
+
+    if (retCode !== 0) {
+      console.error(`[Sync] Bybit API Error: ${retMsg}`, data);
+      throw new Error(`Bybit API Error (simplifyList): ${retMsg}`);
     }
 
-    const items = res.data.result.items || res.data.result.list || [];
+    const items = data.result.items || data.result.list || [];
     if (items.length === 0) break;
 
     allOrders = allOrders.concat(items);
-    if (items.length < PAGE_SIZE) break; // Last page
+    if (items.length < PAGE_SIZE) break;
 
-    // Check if the last item is already older than beginTime to avoid infinite loops
     const lastItemTs = parseInt(items[items.length - 1].createTime || 0);
     if (beginTime && lastItemTs < beginTime) break;
 
     page++;
-    if (page > 20) break; // Safety cap (1000 orders)
+    if (page > 20) break;
   }
 
-  // Filter and sort client-side for absolute accuracy
   const filtered = beginTime
     ? allOrders.filter(o => parseInt(o.createTime || 0) >= beginTime)
     : allOrders;
@@ -107,9 +126,14 @@ async function fetchOrderDetails(apiKey, apiSecret, orderId) {
   const jsonBody = JSON.stringify(body);
   const headers = getBybitHeaders(apiKey, apiSecret, jsonBody);
 
-  const res = await axios.post(`${BYBIT_BASE_URL}/v5/p2p/order/info`, body, { headers });
-  if (res.data.retCode !== 0) return null;
-  return res.data.result;
+  try {
+    const res = await axios.post(`${BYBIT_BASE_URL}/v5/p2p/order/info`, jsonBody, { headers });
+    const data = res.data;
+    if ((data.retCode ?? data.ret_code) !== 0) return null;
+    return data.result;
+  } catch (e) {
+    return null;
+  }
 }
 
 async function fetchChatMessages(apiKey, apiSecret, orderId) {
@@ -117,13 +141,18 @@ async function fetchChatMessages(apiKey, apiSecret, orderId) {
   const jsonBody = JSON.stringify(body);
   const headers = getBybitHeaders(apiKey, apiSecret, jsonBody);
 
-  const res = await axios.post(`${BYBIT_BASE_URL}/v5/p2p/order/message/listpage`, body, { headers });
-  if (res.data.retCode !== 0) return [];
+  try {
+    const res = await axios.post(`${BYBIT_BASE_URL}/v5/p2p/order/message/listpage`, jsonBody, { headers });
+    const data = res.data;
+    if ((data.retCode ?? data.ret_code) !== 0) return [];
 
-  const result = res.data.result;
-  if (Array.isArray(result)) return result;
-  if (result && Array.isArray(result.result)) return result.result;
-  return [];
+    const result = data.result;
+    if (Array.isArray(result)) return result;
+    if (result && Array.isArray(result.result)) return result.result;
+    return [];
+  } catch (e) {
+    return [];
+  }
 }
 
 // ── Core Sync Logic ─────────────────────────────────────────────────────
@@ -140,7 +169,6 @@ async function processSync(ignoreEnabledFlag = false) {
     db.ref('system/sync_config/enabled').once('value'),
   ]);
 
-  // Check if sync is globally enabled (unless it's a manual override)
   if (!ignoreEnabledFlag && configSnap.val() !== true) {
     console.log('[Sync] Skipped: Globally disabled in system/sync_config/enabled.');
     return { skippedByConfig: true };
@@ -150,6 +178,8 @@ async function processSync(ignoreEnabledFlag = false) {
     console.error('[Sync] Error: Missing Bybit API credentials in database.');
     return { error: 'Missing credentials' };
   }
+
+  await syncServerTime();
 
   const { apiKey, apiSecret } = credsSnap.val();
   const knownNumbers = [];
@@ -262,7 +292,6 @@ async function processSync(ignoreEnabledFlag = false) {
     added++;
   }
 
-  // Final metadata update
   await db.ref('sync_data').update({
     lastSyncedOrderTs: newLastSyncedTs,
     lastSyncTime: Date.now(),
@@ -271,7 +300,6 @@ async function processSync(ignoreEnabledFlag = false) {
 
   console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${newLastSyncedTs}`);
 
-  // Batch recalculation of usage AFTER the loop to avoid redundant O(N) scans
   for (const phone of numbersToRecalculate) {
     try {
         await recalculateUsage(phone);
@@ -296,30 +324,23 @@ async function recalculateUsage(phoneNumber) {
 
     const now = new Date();
     const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+    const monthStart = new Date(now.getFullYear(), now.month(), 1).getTime();
 
     let inDailyUsed = 0, outDailyUsed = 0;
     let inMonthlyUsed = 0, outMonthlyUsed = 0;
     let inTotalUsed = 0, outTotalUsed = 0;
 
     if (txSnap.exists()) {
-        const thirtyDaysAgo = Date.now() - (31 * 24 * 60 * 60 * 1000);
         Object.values(txSnap.val()).forEach(tx => {
             if (tx.status !== 'completed') return;
-            const txTs = new Date(tx.timestamp).getTime();
-
-            // Only iterate through recent-ish transactions for daily/monthly to save CPU
-            // though we still need all for inTotalUsed/outTotalUsed.
-            // In a real high-scale system, we should use incremental counters instead of O(N).
-
             const pm = (tx.paymentMethod || '').toLowerCase();
             if (!pm.includes('voda') && !pm.includes('vf')) return;
 
+            const txTs = new Date(tx.timestamp).getTime();
             const amount = parseFloat(tx.amount);
             const isIncoming = tx.side === 1;
 
             if (isIncoming) inTotalUsed += amount; else outTotalUsed += amount;
-
             if (txTs >= todayStart) {
                 if (isIncoming) inDailyUsed += amount; else outDailyUsed += amount;
             }
@@ -360,7 +381,6 @@ exports.syncBybitOrders = onSchedule({
   region: REGION,
   timeoutSeconds: 300,
 }, async (event) => {
-  // Pass false to respect the enabled flag
   await processSync(false);
 });
 
@@ -372,6 +392,5 @@ exports.manualSyncBybit = onCall({ region: REGION }, async (request) => {
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FINANCE')) {
       throw new HttpsError('permission-denied', 'Unauthorized');
   }
-  // Pass true to ignore the enabled flag (manual override)
   return await processSync(true);
 });

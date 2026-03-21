@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../models/models.dart';
 import '../services/database_service.dart';
 import '../services/bybit_service.dart';
@@ -45,6 +47,8 @@ class AppProvider extends ChangeNotifier {
   bool _isLiveSyncEnabled = false;
   Timer? _liveSyncTimer;
 
+  bool _useServerSync = true; // Default to server sync now
+
   // ── Getters ───────────────────────────────────────────────────────────────
   List<MobileNumber> get mobileNumbers => _mobileNumbers;
   List<CashTransaction> get transactions => _transactions;
@@ -55,6 +59,7 @@ class AppProvider extends ChangeNotifier {
   DateTime? get lastSyncTime => _lastSyncTime;
   String get syncStatus => _syncStatus;
   bool get isLiveSyncEnabled => _isLiveSyncEnabled;
+  bool get useServerSync => _useServerSync;
 
   // Callback to trigger Bank logic in DistributionProvider
   Future<void> Function({
@@ -147,6 +152,14 @@ class AppProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString('bybit_api_key', apiKey);
     await prefs.setString('bybit_api_secret', apiSecret);
+
+    // Also save to Firebase for server-side sync
+    await FirebaseDatabase.instance.ref('system/api_credentials/bybit').set({
+      'apiKey': apiKey,
+      'apiSecret': apiSecret,
+      'updatedAt': DateTime.now().toIso8601String(),
+    });
+
     _apiKey = apiKey;
     _apiSecret = apiSecret;
     _initBybitService();
@@ -157,20 +170,84 @@ class AppProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove('bybit_api_key');
     await prefs.remove('bybit_api_secret');
+
+    await FirebaseDatabase.instance.ref('system/api_credentials/bybit').remove();
+
     _apiKey = '';
     _apiSecret = '';
     _bybitService = null;
     notifyListeners();
   }
 
+  Future<SyncResult> _syncOrdersServer({bool isSilent = false}) async {
+    if (_isSyncing) return const SyncResult(error: 'Sync in progress');
+    _isSyncing = true;
+    if (!isSilent) {
+      _isLoading = true;
+      _syncStatus = 'Requesting server sync...';
+      notifyListeners();
+    }
+
+    try {
+      final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
+      final result = await functions.httpsCallable('manualSyncBybit').call();
+
+      final Map<String, dynamic> data = Map<String, dynamic>.from(result.data as Map);
+      final added = data['added'] as int? ?? 0;
+      final skipped = data['skipped'] as int? ?? 0;
+
+      // Data updates are real-time via Firebase, but we reload to be sure
+      await loadAllTransactions();
+      await loadMobileNumbers();
+
+      _lastSyncTime = DateTime.now();
+      _syncStatus = '';
+      return SyncResult(added: added, skipped: skipped);
+    } catch (e) {
+      _syncStatus = '';
+      return SyncResult(error: e.toString());
+    } finally {
+      _isSyncing = false;
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
   // ── Live Sync Monitoring ────────────────────────────────────────────────
   
+  StreamSubscription? _syncConfigSub;
+
   Future<void> _loadLiveSyncState() async {
     final prefs = await SharedPreferences.getInstance();
-    _isLiveSyncEnabled = prefs.getBool('live_sync_enabled') ?? false;
-    if (_isLiveSyncEnabled) {
+    _useServerSync = prefs.getBool('use_server_sync') ?? true;
+
+    // Listen to Firebase for the central sync switch
+    _syncConfigSub?.cancel();
+    _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config/enabled').onValue.listen((event) {
+      final val = event.snapshot.value;
+      _isLiveSyncEnabled = val == true;
+
+      if (_isLiveSyncEnabled && !_useServerSync) {
+        _startLiveSyncTimer();
+      } else {
+        _stopLiveSyncTimer();
+      }
+      notifyListeners();
+    });
+  }
+
+  Future<void> toggleServerSync(bool enabled) async {
+    _useServerSync = enabled;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('use_server_sync', enabled);
+
+    // If we switch to server sync, stop local timer
+    if (enabled) {
+      _stopLiveSyncTimer();
+    } else if (_isLiveSyncEnabled) {
       _startLiveSyncTimer();
     }
+    notifyListeners();
   }
 
   void _startLiveSyncTimer() {
@@ -188,25 +265,21 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> toggleLiveSync(bool enabled) async {
-    _isLiveSyncEnabled = enabled;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('live_sync_enabled', enabled);
+    // This now updates Firebase centrally so the Cloud Function also knows
+    await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(enabled);
     
-    if (enabled) {
-      // User requested: When activating live sync, only fetch orders from THIS MOMENT onwards.
+    if (enabled && !_useServerSync) {
+      // For local sync only: Reset marker to now to avoid syncing old history
       _lastSyncedOrderTs = DateTime.now().millisecondsSinceEpoch;
       await _dbService.saveLastSyncedOrderTimestamp(_lastSyncedOrderTs);
-      
-      _startLiveSyncTimer();
-    } else {
-      _stopLiveSyncTimer();
     }
-    notifyListeners();
+    // _isLiveSyncEnabled will be updated by the listener in _loadLiveSyncState
   }
 
   @override
   void dispose() {
     _liveSyncTimer?.cancel();
+    _syncConfigSub?.cancel();
     super.dispose();
   }
 
@@ -362,6 +435,10 @@ class AppProvider extends ChangeNotifier {
   ///
   /// Orders are always deduplicated by `bybitOrderId` before saving.
   Future<SyncResult> syncOrders({DateTime? fromDate, bool isSilent = false}) async {
+    if (_useServerSync) {
+      return _syncOrdersServer(isSilent: isSilent);
+    }
+
     if (_bybitService == null) {
       return const SyncResult(error: 'No API credentials. Set them in Settings.');
     }

@@ -85,6 +85,10 @@
             "lastDailyReset": {
                 ".read": "auth != null",
                 ".write": "false"
+            },
+            "sync_config": {
+                ".read": "auth != null",
+                ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
             }
         }
     }

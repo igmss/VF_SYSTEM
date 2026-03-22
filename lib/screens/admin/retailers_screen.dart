@@ -190,6 +190,7 @@ class RetailersScreen extends StatelessWidget {
     final amtCtrl = TextEditingController();
     final feesCtrl = TextEditingController();
     bool isExternalWallet = false;
+    bool applyCredit = false;
     final appProvider = context.read<AppProvider>();
     // Only show numbers that have a positive balance
     final numbers = appProvider.mobileNumbers;
@@ -298,6 +299,20 @@ class RetailersScreen extends StatelessWidget {
               ),
               _tf(feesCtrl, 'Vodafone Fees (Optional)'.tr(), Icons.money_off,
                   keyboard: TextInputType.number),
+              if (retailer.credit > 0)
+                CheckboxListTile(
+                  title: Text('Use Retailer Credit (${retailer.credit} EGP)', style: const TextStyle(color: Colors.greenAccent, fontSize: 13)),
+                  value: applyCredit,
+                  activeColor: Colors.greenAccent,
+                  checkColor: const Color(0xFF16162A),
+                  contentPadding: EdgeInsets.zero,
+                  controlAffinity: ListTileControlAffinity.leading,
+                  onChanged: (val) {
+                    setSt(() {
+                      applyCredit = val ?? false;
+                    });
+                  },
+                ),
             ],
             onConfirm: () {
               final num = numbers.firstWhere((n) => n.id == selectedId);
@@ -334,6 +349,7 @@ class RetailersScreen extends StatelessWidget {
                 amount: amount,
                 fees: fees,
                 chargeFeesToRetailer: isExternalWallet,
+                applyCredit: applyCredit,
                 createdByUid: auth.currentUser?.uid ?? 'system',
               );
             },
@@ -532,6 +548,34 @@ class _RetailerCard extends StatelessWidget {
             ),
           ],
         ),
+        if (retailer.credit > 0) ...[
+          const SizedBox(height: 8),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: Colors.greenAccent.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: Colors.greenAccent.withOpacity(0.35)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.account_balance_wallet, color: Colors.greenAccent, size: 12),
+                    const SizedBox(width: 4),
+                    Text('Credit: ${_f(retailer.credit)} EGP',
+                        style: const TextStyle(
+                            color: Colors.greenAccent,
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 10),
         LinearProgressIndicator(
           value: pct,

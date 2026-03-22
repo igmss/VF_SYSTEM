@@ -663,6 +663,7 @@ class DistributionProvider extends ChangeNotifier {
     required double amount,
     double fees = 0.0,
     bool chargeFeesToRetailer = false,
+    bool applyCredit = false,
     required String createdByUid,
     String? notes,
   }) async {
@@ -678,12 +679,19 @@ class DistributionProvider extends ChangeNotifier {
     final double feeToCharge = chargeFeesToRetailer ? fees : 0.0;
 
     // Round UP to nearest integer so collectors always deal with whole amounts
-    final double actualDebtIncrease = (amount + discountAmount + feeToCharge).ceilToDouble();
+    double actualDebtIncrease = (amount + discountAmount + feeToCharge).ceilToDouble();
     
+    double creditUsed = 0.0;
+    if (applyCredit && retailer.credit > 0) {
+      creditUsed = retailer.credit > actualDebtIncrease ? actualDebtIncrease : retailer.credit;
+      actualDebtIncrease -= creditUsed;
+    }
+
     String feeNotes = chargeFeesToRetailer && fees > 0 ? ', +$fees Fee' : '';
+    String creditNotes = creditUsed > 0 ? ', -$creditUsed Credit Used' : '';
     final String appliedNotes = notes != null && notes.isNotEmpty
-        ? '$notes (Rate: ${retailer.discountPer1000}/1K$feeNotes, Debt +$actualDebtIncrease EGP)'
-        : 'Rate: ${retailer.discountPer1000}/1K$feeNotes, Debt +$actualDebtIncrease EGP';
+        ? '$notes (Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP)'
+        : 'Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP';
 
     final tx = FinancialTransaction(
       type: FlowType.DISTRIBUTE_VFCASH,
@@ -734,6 +742,8 @@ class DistributionProvider extends ChangeNotifier {
       if (feeTx != null) _db.ref('financial_ledger/${feeTx.id}').set(feeTx.toMap()),
       _db.ref('transactions/$cashTxId').set(cashTxMap),
       _db.ref('retailers/$retailerId/totalAssigned').set(newAssigned),
+      if (creditUsed > 0)
+        _db.ref('retailers/$retailerId/credit').set(retailer.credit - creditUsed),
       _db.ref('retailers/$retailerId/lastUpdatedAt')
           .set(DateTime.now().toIso8601String()),
     ];
@@ -776,29 +786,47 @@ class DistributionProvider extends ChangeNotifier {
     try {
       final collector = _collectors.firstWhere((c) => c.id == collectorId);
       final retailer = _retailers.firstWhere((r) => r.id == retailerId);
-    final tx = FinancialTransaction(
-      type: FlowType.COLLECT_CASH,
-      amount: amount,
-      fromId: retailerId,
-      fromLabel: retailer.name,
-      toId: collectorId,
-      toLabel: collector.name,
-      createdByUid: createdByUid,
-      notes: notes,
-    );
-    await Future.wait([
-      _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-      _db.ref('retailers/$retailerId/totalCollected')
-          .set(retailer.totalCollected + amount),
-      _db.ref('retailers/$retailerId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-      _db.ref('collectors/$collectorId/cashOnHand')
-          .set(collector.cashOnHand + amount),
-      _db.ref('collectors/$collectorId/totalCollected')
-          .set(collector.totalCollected + amount),
-      _db.ref('collectors/$collectorId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-    ]);
+
+      // Handle excess credit
+      double addedToCollected = amount;
+      double addedToCredit = 0.0;
+
+      if (amount > retailer.pendingDebt) {
+        // Retailer pays more than what they owe
+        addedToCollected = retailer.pendingDebt > 0 ? retailer.pendingDebt : 0.0;
+        addedToCredit = amount - addedToCollected;
+      }
+
+      String? appliedNotes = notes;
+      if (addedToCredit > 0) {
+        final creditNote = '(+${addedToCredit.toStringAsFixed(0)} EGP added to Credit)';
+        appliedNotes = notes != null && notes.isNotEmpty ? '$notes $creditNote' : creditNote;
+      }
+
+      final tx = FinancialTransaction(
+        type: FlowType.COLLECT_CASH,
+        amount: amount,
+        fromId: retailerId,
+        fromLabel: retailer.name,
+        toId: collectorId,
+        toLabel: collector.name,
+        createdByUid: createdByUid,
+        notes: appliedNotes,
+      );
+
+      final futures = <Future<void>>[
+        _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
+        if (addedToCollected > 0)
+          _db.ref('retailers/$retailerId/totalCollected').set(retailer.totalCollected + addedToCollected),
+        if (addedToCredit > 0)
+          _db.ref('retailers/$retailerId/credit').set(retailer.credit + addedToCredit),
+        _db.ref('retailers/$retailerId/lastUpdatedAt').set(DateTime.now().toIso8601String()),
+        _db.ref('collectors/$collectorId/cashOnHand').set(collector.cashOnHand + amount),
+        _db.ref('collectors/$collectorId/totalCollected').set(collector.totalCollected + amount),
+        _db.ref('collectors/$collectorId/lastUpdatedAt').set(DateTime.now().toIso8601String()),
+      ];
+
+      await Future.wait(futures);
     } finally {
       _isProcessingAction = false;
     }

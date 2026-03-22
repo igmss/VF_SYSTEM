@@ -14,6 +14,9 @@ class Retailer {
   /// Cash already collected from this retailer (EGP)
   final double totalCollected;
 
+  /// Extra credit paid by the retailer (EGP)
+  final double credit;
+
   /// Pending debt = totalAssigned - totalCollected
   double get pendingDebt => totalAssigned - totalCollected;
 
@@ -36,6 +39,7 @@ class Retailer {
     this.area = '',
     this.totalAssigned = 0.0,
     this.totalCollected = 0.0,
+    this.credit = 0.0,
     this.isActive = true,
     DateTime? createdAt,
     DateTime? lastUpdatedAt,
@@ -52,6 +56,7 @@ class Retailer {
         'area': area,
         'totalAssigned': totalAssigned,
         'totalCollected': totalCollected,
+        'credit': credit,
         'isActive': isActive,
         'createdAt': createdAt.toIso8601String(),
         'lastUpdatedAt': lastUpdatedAt.toIso8601String(),
@@ -73,6 +78,7 @@ class Retailer {
       area: map['area']?.toString() ?? '',
       totalAssigned: asDouble(map['totalAssigned']),
       totalCollected: asDouble(map['totalCollected']),
+      credit: asDouble(map['credit']),
       isActive: (map['isActive'] is bool) ? map['isActive'] : true,
       createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
       lastUpdatedAt: DateTime.tryParse(map['lastUpdatedAt']?.toString() ?? '') ?? DateTime.now(),
@@ -87,6 +93,7 @@ class Retailer {
     String? area,
     double? totalAssigned,
     double? totalCollected,
+    double? credit,
     bool? isActive,
     DateTime? lastUpdatedAt,
     double? discountPer1000,
@@ -99,6 +106,7 @@ class Retailer {
         area: area ?? this.area,
         totalAssigned: totalAssigned ?? this.totalAssigned,
         totalCollected: totalCollected ?? this.totalCollected,
+        credit: credit ?? this.credit,
         isActive: isActive ?? this.isActive,
         createdAt: createdAt,
         lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,

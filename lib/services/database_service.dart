@@ -118,36 +118,102 @@ class DatabaseService {
     }
   }
 
-  /// Add transaction (with duplicate prevention)
-  Future<bool> addTransaction(CashTransaction transaction) async {
-    try {
-      // Check if transaction already exists (by bybitOrderId)
-      final existingTx =
-          await _getTransactionByBybitOrderId(transaction.bybitOrderId);
+  // ── Retry helper ─────────────────────────────────────────────────────────
 
-      if (existingTx != null) {
-        print('Transaction already exists: ${transaction.bybitOrderId}');
-        return false; // Duplicate prevented
+  /// Retry a Firebase write up to [maxAttempts] times on timeout/error.
+  Future<void> _retryWrite(Future<void> Function() fn, {int maxAttempts = 3}) async {
+    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+      try {
+        await fn();
+        return;
+      } catch (e) {
+        if (attempt == maxAttempts) rethrow;
+        print('Firebase write failed (attempt $attempt/$maxAttempts): $e — retrying in 2s...');
+        await Future.delayed(const Duration(seconds: 2));
+      }
+    }
+  }
+
+  // ── Bulk order-ID pre-loader ──────────────────────────────────────────────
+
+  /// Fetches all stored [bybitOrderId] values in a **single** Firebase read.
+  /// Use this at the start of a sync batch to build an in-memory Set for
+  /// O(1) duplicate checks, avoiding per-order round-trips.
+  Future<Set<String>> getExistingBybitOrderIds() async {
+    try {
+      final snapshot = await _database
+          .ref(_transactionsPath)
+          .get()
+          .timeout(_timeout);
+
+      final ids = <String>{};
+      if (snapshot.exists && snapshot.value is Map) {
+        final data = snapshot.value as Map;
+        data.forEach((_, value) {
+          if (value is Map) {
+            final id = value['bybitOrderId'];
+            if (id != null && id is String && id.isNotEmpty) ids.add(id);
+          }
+        });
+      }
+      print('Sync: Pre-loaded ${ids.length} existing bybitOrderIds for dedup.');
+      return ids;
+    } catch (e) {
+      print('Warning: could not pre-load order IDs, falling back to per-order checks: $e');
+      return {}; // safe fallback — per-order check used instead
+    }
+  }
+
+  // ── Transactions ─────────────────────────────────────────────────────────
+
+  /// Add transaction with duplicate prevention.
+  ///
+  /// Pass [knownIds] (from [getExistingBybitOrderIds]) for fast O(1) dedup.
+  /// If omitted, falls back to a per-order Firebase query (backward-compatible).
+  Future<bool> addTransaction(CashTransaction transaction,
+      {Set<String>? knownIds}) async {
+    try {
+      // ── Duplicate check ──────────────────────────────────────────────────
+      final orderId = transaction.bybitOrderId;
+      if (orderId != null && orderId.isNotEmpty) {
+        if (knownIds != null) {
+          // Fast path: O(1) Set lookup
+          if (knownIds.contains(orderId)) {
+            print('Sync: Duplicate (Set check) — skipping $orderId');
+            return false;
+          }
+        } else {
+          // Slow path: per-order DB query (backward-compatible)
+          final existingTx = await _getTransactionByBybitOrderId(orderId);
+          if (existingTx != null) {
+            print('Sync: Duplicate (DB query) — skipping $orderId');
+            return false;
+          }
+        }
       }
 
-      // Add new transaction
-      await _database
+      // ── Write with retry ─────────────────────────────────────────────────
+      await _retryWrite(() => _database
           .ref('$_transactionsPath/${transaction.id}')
           .set(transaction.toMap())
-          .timeout(_timeout);
+          .timeout(_timeout));
+
+      // Update the in-memory Set so subsequent orders in the same batch
+      // don't try to insert this one again.
+      if (orderId != null && orderId.isNotEmpty) knownIds?.add(orderId);
 
       // Update mobile number usage if assigned
       if (transaction.phoneNumber != null) {
         await _updateNumberUsage(transaction.phoneNumber!);
       }
 
-      return true; // New transaction added
+      return true;
     } catch (e) {
       throw Exception('Error adding transaction: $e');
     }
   }
 
-  /// Get transaction by Bybit Order ID
+  /// Get transaction by Bybit Order ID (used by legacy / backward-compat path)
   Future<CashTransaction?> _getTransactionByBybitOrderId(
       String bybitOrderId) async {
     try {

@@ -19,9 +19,22 @@ class DistributionProvider extends ChangeNotifier {
   double _usdtLastPrice = 0.0;  // Last known EGP/USDT price (for EGP equivalent)
 
   bool _isLoading = false;
-  bool _isProcessingAction = false;
   bool _isListenersInitialized = false;
-  bool _syncCompleted = false; 
+  bool _syncCompleted = false;
+
+  // Per-action in-flight flags (replaces the single shared _isProcessingAction
+  // that was silently dropping concurrent calls).
+  bool _isDistributing = false;
+  bool _isCollecting = false;
+  bool _isDepositing = false;
+  bool _isCorrecting = false;
+  bool _isCreditReturning = false;
+  bool _isDeleting = false;
+
+  bool get isDistributing    => _isDistributing;
+  bool get isCollecting      => _isCollecting;
+  bool get isDepositing      => _isDepositing;
+  bool get isCreditReturning => _isCreditReturning;
   String? _error;
 
   StreamSubscription<DatabaseEvent>? _usdExchangeSub;
@@ -667,89 +680,93 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    if (_isProcessingAction) return;
-    _isProcessingAction = true;
+    if (_isDistributing) return;
+    _isDistributing = true;
+    notifyListeners();
     try {
       final retailer = _retailers.firstWhere((r) => r.id == retailerId);
-    
-    // Calculate the actual debt increase based on the discount rate per 1000 EGP
-    final double discountAmount = (amount / 1000.0) * retailer.discountPer1000;
-    
-    // If external wallet, the retailer pays the transfer fees
-    final double feeToCharge = chargeFeesToRetailer ? fees : 0.0;
 
-    // Round UP to nearest integer so collectors always deal with whole amounts
-    double actualDebtIncrease = (amount + discountAmount + feeToCharge).ceilToDouble();
-    
-    double creditUsed = 0.0;
-    if (applyCredit && retailer.credit > 0) {
-      creditUsed = retailer.credit > actualDebtIncrease ? actualDebtIncrease : retailer.credit;
-      actualDebtIncrease -= creditUsed;
-    }
+      // Calculate the actual debt increase based on the discount rate per 1000 EGP
+      final double discountAmount = (amount / 1000.0) * retailer.discountPer1000;
 
-    String feeNotes = chargeFeesToRetailer && fees > 0 ? ', +$fees Fee' : '';
-    String creditNotes = creditUsed > 0 ? ', -$creditUsed Credit Used' : '';
-    final String appliedNotes = notes != null && notes.isNotEmpty
-        ? '$notes (Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP)'
-        : 'Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP';
+      // If external wallet, the retailer pays the transfer fees
+      final double feeToCharge = chargeFeesToRetailer ? fees : 0.0;
 
-    final tx = FinancialTransaction(
-      type: FlowType.DISTRIBUTE_VFCASH,
-      amount: amount,
-      fromId: fromVfNumberId,
-      fromLabel: fromVfPhone,
-      toId: retailerId,
-      toLabel: retailer.name,
-      createdByUid: createdByUid,
-      notes: appliedNotes,
-    );
+      // Round UP to nearest integer so collectors always deal with whole amounts
+      double actualDebtIncrease = (amount + discountAmount + feeToCharge).ceilToDouble();
 
-    // Also record as a CashTransaction for the Mobile Number balance tracking
-    final cashTxId = const Uuid().v4();
-    final double vfFeeToSystem = chargeFeesToRetailer ? 0.0 : fees;
-    final double totalDeduction = amount + vfFeeToSystem;
-    final cashTxMap = {
-      'id': cashTxId,
-      'phoneNumber': fromVfPhone,
-      'amount': totalDeduction,
-      'currency': 'EGP',
-      'timestamp': DateTime.now().toIso8601String(),
-      'bybitOrderId': 'DIST-${tx.id.substring(0, 8)}',
-      'status': 'completed',
-      'paymentMethod': 'Vodafone Distribution', // Must contain 'Vodafone' to be counted in balance recalc
-      'side': 0, // Outgoing
-      'chatHistory': vfFeeToSystem > 0 
-          ? 'Automated Distribution to ${retailer.name} (Includes $vfFeeToSystem EGP transfer fees)'
-          : 'Automated Distribution to ${retailer.name}',
-    };
+      double creditUsed = 0.0;
+      if (applyCredit && retailer.credit > 0) {
+        creditUsed = retailer.credit > actualDebtIncrease ? actualDebtIncrease : retailer.credit;
+        actualDebtIncrease -= creditUsed;
+      }
 
-    FinancialTransaction? feeTx;
-    if (vfFeeToSystem > 0) {
-      feeTx = FinancialTransaction(
-        type: FlowType.EXPENSE_VFCASH_FEE,
-        amount: vfFeeToSystem,
+      String feeNotes = chargeFeesToRetailer && fees > 0 ? ', +$fees Fee' : '';
+      String creditNotes = creditUsed > 0 ? ', -$creditUsed Credit Used' : '';
+      final String appliedNotes = notes != null && notes.isNotEmpty
+          ? '$notes (Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP)'
+          : 'Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP';
+
+      final tx = FinancialTransaction(
+        type: FlowType.DISTRIBUTE_VFCASH,
+        amount: amount,
         fromId: fromVfNumberId,
         fromLabel: fromVfPhone,
+        toId: retailerId,
+        toLabel: retailer.name,
         createdByUid: createdByUid,
-        notes: 'Vodafone Transfer Fee for assigning $amount EGP to ${retailer.name}',
+        notes: appliedNotes,
       );
-    }
 
-    final newAssigned = retailer.totalAssigned + actualDebtIncrease;
-    
-    final futures = <Future<void>>[
-      _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-      if (feeTx != null) _db.ref('financial_ledger/${feeTx.id}').set(feeTx.toMap()),
-      _db.ref('transactions/$cashTxId').set(cashTxMap),
-      _db.ref('retailers/$retailerId/totalAssigned').set(newAssigned),
-      if (creditUsed > 0)
-        _db.ref('retailers/$retailerId/credit').set(retailer.credit - creditUsed),
-      _db.ref('retailers/$retailerId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-    ];
-    await Future.wait(futures);
+      // The VF number ALWAYS loses (amount + fees) — that is the physical transfer cost.
+      final cashTxId = const Uuid().v4();
+      final double totalDeduction = amount + fees;
+      final cashTxMap = {
+        'id': cashTxId,
+        'phoneNumber': fromVfPhone,
+        'amount': totalDeduction,
+        'currency': 'EGP',
+        'timestamp': DateTime.now().toIso8601String(),
+        'bybitOrderId': 'DIST-${tx.id.substring(0, 8)}',
+        'status': 'completed',
+        'paymentMethod': 'Vodafone Distribution',
+        'side': 0, // Outgoing
+        'chatHistory': fees > 0
+            ? 'Automated Distribution to ${retailer.name} (Includes $fees EGP transfer fees${chargeFeesToRetailer ? " – charged to retailer" : ""})'
+            : 'Automated Distribution to ${retailer.name}',
+      };
+
+      // Build atomic multi-path update
+      final now = DateTime.now().toIso8601String();
+      final updates = <String, dynamic>{
+        'financial_ledger/${tx.id}': tx.toMap(),
+        'transactions/$cashTxId': cashTxMap,
+        'retailers/$retailerId/totalAssigned': retailer.totalAssigned + actualDebtIncrease,
+        'retailers/$retailerId/lastUpdatedAt': now,
+      };
+
+      if (creditUsed > 0) {
+        updates['retailers/$retailerId/credit'] = retailer.credit - creditUsed;
+      }
+
+      if (fees > 0) {
+        final feeTx = FinancialTransaction(
+          type: FlowType.EXPENSE_VFCASH_FEE,
+          amount: fees,
+          fromId: fromVfNumberId,
+          fromLabel: fromVfPhone,
+          createdByUid: createdByUid,
+          notes: chargeFeesToRetailer
+              ? 'Vodafone Transfer Fee for assigning $amount EGP to ${retailer.name} (charged to retailer debt)'
+              : 'Vodafone Transfer Fee for assigning $amount EGP to ${retailer.name}',
+        );
+        updates['financial_ledger/${feeTx.id}'] = feeTx.toMap();
+      }
+
+      await _db.ref().update(updates);
     } finally {
-      _isProcessingAction = false;
+      _isDistributing = false;
+      notifyListeners();
     }
   }
 
@@ -781,8 +798,9 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    if (_isProcessingAction) return;
-    _isProcessingAction = true;
+    if (_isCollecting) return;
+    _isCollecting = true;
+    notifyListeners();
     try {
       final collector = _collectors.firstWhere((c) => c.id == collectorId);
       final retailer = _retailers.firstWhere((r) => r.id == retailerId);
@@ -814,21 +832,30 @@ class DistributionProvider extends ChangeNotifier {
         notes: appliedNotes,
       );
 
-      final futures = <Future<void>>[
-        _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-        if (addedToCollected > 0)
-          _db.ref('retailers/$retailerId/totalCollected').set(retailer.totalCollected + addedToCollected),
-        if (addedToCredit > 0)
-          _db.ref('retailers/$retailerId/credit').set(retailer.credit + addedToCredit),
-        _db.ref('retailers/$retailerId/lastUpdatedAt').set(DateTime.now().toIso8601String()),
-        _db.ref('collectors/$collectorId/cashOnHand').set(collector.cashOnHand + amount),
-        _db.ref('collectors/$collectorId/totalCollected').set(collector.totalCollected + amount),
-        _db.ref('collectors/$collectorId/lastUpdatedAt').set(DateTime.now().toIso8601String()),
-      ];
+      final now = DateTime.now().toIso8601String();
+      final updates = <String, dynamic>{
+        'financial_ledger/${tx.id}': tx.toMap(),
+        'retailers/$retailerId/lastUpdatedAt': now,
+        'collectors/$collectorId/cashOnHand': collector.cashOnHand + amount,
+        'collectors/$collectorId/totalCollected': collector.totalCollected + amount,
+        'collectors/$collectorId/lastUpdatedAt': now,
+      };
 
-      await Future.wait(futures);
+      if (addedToCollected > 0) {
+        updates['retailers/$retailerId/totalCollected'] =
+            retailer.totalCollected + addedToCollected;
+      }
+      if (addedToCredit > 0) {
+        updates['retailers/$retailerId/credit'] =
+            retailer.credit + addedToCredit;
+      }
+
+      // Single atomic multi-path update — Firebase applies all fields at once,
+      // triggers each .onValue listener once with the final state.
+      await _db.ref().update(updates);
     } finally {
-      _isProcessingAction = false;
+      _isCollecting = false;
+      notifyListeners();
     }
   }
 
@@ -840,8 +867,9 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    if (_isProcessingAction) return;
-    _isProcessingAction = true;
+    if (_isDepositing) return;
+    _isDepositing = true;
+    notifyListeners();
     try {
       final collector = _collectors.firstWhere((c) => c.id == collectorId);
       final bank = _bankAccounts.firstWhere((b) => b.id == bankAccountId);
@@ -855,21 +883,18 @@ class DistributionProvider extends ChangeNotifier {
       createdByUid: createdByUid,
       notes: notes,
     );
-    await Future.wait([
-      _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-      _db.ref('collectors/$collectorId/cashOnHand')
-          .set(collector.cashOnHand - amount),
-      _db.ref('collectors/$collectorId/totalDeposited')
-          .set(collector.totalDeposited + amount),
-      _db.ref('collectors/$collectorId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-      _db.ref('bank_accounts/$bankAccountId/balance')
-          .set(bank.balance + amount),
-      _db.ref('bank_accounts/$bankAccountId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-    ]);
+    final now = DateTime.now().toIso8601String();
+    await _db.ref().update({
+      'financial_ledger/${tx.id}': tx.toMap(),
+      'collectors/$collectorId/cashOnHand': collector.cashOnHand - amount,
+      'collectors/$collectorId/totalDeposited': collector.totalDeposited + amount,
+      'collectors/$collectorId/lastUpdatedAt': now,
+      'bank_accounts/$bankAccountId/balance': bank.balance + amount,
+      'bank_accounts/$bankAccountId/lastUpdatedAt': now,
+    });
     } finally {
-      _isProcessingAction = false;
+      _isDepositing = false;
+      notifyListeners();
     }
   }
 
@@ -881,8 +906,8 @@ class DistributionProvider extends ChangeNotifier {
     required String adminUid,
     String? reason,
   }) async {
-    if (_isProcessingAction) return;
-    _isProcessingAction = true;
+    if (_isCorrecting) return;
+    _isCorrecting = true;
     try {
       final double diff = correctAmount - originalTx.amount;
       if (diff == 0) return;
@@ -971,11 +996,10 @@ class DistributionProvider extends ChangeNotifier {
 
       await Future.wait(futures);
     } catch (e) {
-    } catch (e) {
       debugPrint('Correction error: $e');
       rethrow;
     } finally {
-      _isProcessingAction = false;
+      _isCorrecting = false;
     }
   }
 
@@ -1148,14 +1172,15 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    if (_isProcessingAction) return;
-    _isProcessingAction = true;
+    if (_isCreditReturning) return;
+    _isCreditReturning = true;
+    notifyListeners();
     try {
       final retailer = _retailers.firstWhere((r) => r.id == retailerId);
       final totalReceived = amount + fees;
 
       final now = DateTime.now();
-      
+
       // 1. Transaction for the base amount (Debt Settlement)
       final tx = FinancialTransaction(
         type: FlowType.CREDIT_RETURN,
@@ -1192,34 +1217,35 @@ class DistributionProvider extends ChangeNotifier {
         'timestamp': now.toIso8601String(),
         'bybitOrderId': 'CRTN-${tx.id.substring(0, 8)}',
         'status': 'completed',
-        'paymentMethod': 'VF Credit Return', // Must contain 'VF' or 'Voda' to be counted
+        'paymentMethod': 'VF Credit Return',
         'side': 1, // Incoming
         'chatHistory': 'Credit Return from ${retailer.name} (Amount: $amount, Fee: $fees)',
       };
-      
-      final futures = <Future<void>>[
-        _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-        if (fees > 0) _db.ref('financial_ledger/${feeTx.id}').set(feeTx.toMap()),
-        _db.ref('transactions/$cashTxId').set(cashTxMap),
-        _db.ref('retailers/$retailerId/totalCollected')
-            .set(retailer.totalCollected + amount),
-        _db.ref('retailers/$retailerId/lastUpdatedAt')
-            .set(now.toIso8601String()),
-      ];
-      
-      await Future.wait(futures);
+
+      final updates = <String, dynamic>{
+        'financial_ledger/${tx.id}': tx.toMap(),
+        'transactions/$cashTxId': cashTxMap,
+        'retailers/$retailerId/totalCollected': retailer.totalCollected + amount,
+        'retailers/$retailerId/lastUpdatedAt': now.toIso8601String(),
+      };
+      if (fees > 0) {
+        updates['financial_ledger/${feeTx.id}'] = feeTx.toMap();
+      }
+
+      await _db.ref().update(updates);
     } catch (e) {
       debugPrint('Credit Return error: $e');
       rethrow;
     } finally {
-      _isProcessingAction = false;
+      _isCreditReturning = false;
+      notifyListeners();
     }
   }
 
   /// Admin: Delete a transaction and reverse its financial impact.
   Future<void> deleteTransaction(FinancialTransaction tx) async {
-    if (_isProcessingAction) return;
-    _isProcessingAction = true;
+    if (_isDeleting) return;
+    _isDeleting = true;
     try {
       final futures = <Future<void>>[];
 
@@ -1323,7 +1349,7 @@ class DistributionProvider extends ChangeNotifier {
       debugPrint('Delete transaction error: $e');
       rethrow;
     } finally {
-      _isProcessingAction = false;
+      _isDeleting = false;
     }
   }
 }

@@ -427,112 +427,183 @@ class _RetailerCard extends StatelessWidget {
     }
     final ctrl = TextEditingController(
         text: retailer.pendingDebt.toStringAsFixed(0));
+
     showDialog(
       context: context,
-      builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16162A),
-        title: Text(
-          '${'collect_from'.tr()} ${retailer.name}',
-          style: const TextStyle(color: Colors.white),
-        ),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              '${'pending_debt'.tr()}: ${retailer.pendingDebt.toStringAsFixed(0)} EGP',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 14),
-            TextField(
-              controller: ctrl,
-              keyboardType: TextInputType.number,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setSt) {
+          final entered  = double.tryParse(ctrl.text) ?? 0.0;
+          final debt     = retailer.pendingDebt;
+          final debtPaid = entered > debt ? debt : entered;
+          final credit   = entered > debt ? entered - debt : 0.0;
+
+          return AlertDialog(
+            backgroundColor: const Color(0xFF16162A),
+            title: Text(
+              '${'collect_from'.tr()} ${retailer.name}',
               style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'amount'.tr(),
-                labelStyle: const TextStyle(color: Colors.white54),
-                suffixText: 'EGP',
-                suffixStyle: const TextStyle(color: Colors.white38),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.06),
-                border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
             ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: Text('cancel'.tr(),
-                style: const TextStyle(color: Colors.white38)),
-          ),
-          ElevatedButton(
-            onPressed: () async {
-              final amount = double.tryParse(ctrl.text) ?? 0;
-              if (amount <= 0 || amount > (retailer.pendingDebt + 0.5).ceilToDouble()) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text('invalid_amount'.tr()),
-                      backgroundColor: Colors.red),
-                );
-                return;
-              }
-              // Confirmation Dialog
-              final confirm = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  backgroundColor: const Color(0xFF16162A),
-                  title: const Text('Confirm Action', style: TextStyle(color: Colors.white)),
-                  content: Text(
-                    'Are you sure you collected ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?',
-                    style: const TextStyle(color: Colors.white70),
-                  ),
-                  actions: [
-                    TextButton(
-                      onPressed: () => Navigator.pop(ctx, false),
-                      child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
-                    ),
-                    ElevatedButton(
-                      onPressed: () => Navigator.pop(ctx, true),
-                      style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFA78BFA)),
-                      child: const Text('Confirm', style: TextStyle(color: Colors.white)),
-                    ),
-                  ],
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Pending debt label
+                Text(
+                  '${'pending_debt'.tr()}: ${debt.toStringAsFixed(0)} EGP',
+                  style: const TextStyle(color: Colors.white70),
                 ),
-              );
+                const SizedBox(height: 14),
+                TextField(
+                  controller: ctrl,
+                  keyboardType: TextInputType.number,
+                  style: const TextStyle(color: Colors.white),
+                  onChanged: (_) => setSt(() {}),
+                  decoration: InputDecoration(
+                    labelText: 'amount'.tr(),
+                    labelStyle: const TextStyle(color: Colors.white54),
+                    suffixText: 'EGP',
+                    suffixStyle: const TextStyle(color: Colors.white38),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.06),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
 
-              if (confirm != true) return;
-
-              final auth = context.read<AuthProvider>();
-              try {
-                await context.read<DistributionProvider>().collectFromRetailer(
-                      collectorId: collector.id,
-                      retailerId: retailer.id,
-                      amount: amount,
-                      createdByUid: auth.currentUser?.uid ?? '',
+                // Live breakdown — only shown when amount is valid
+                if (entered > 0) ...[
+                  const SizedBox(height: 12),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.04),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: credit > 0
+                            ? const Color(0xFF4ADE80).withOpacity(0.4)
+                            : Colors.white12,
+                      ),
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _breakdownRow(
+                          '↓ Debt Reduced',
+                          '${debtPaid.toStringAsFixed(0)} EGP',
+                          const Color(0xFFFBBF24),
+                        ),
+                        if (credit > 0) ...[
+                          const SizedBox(height: 4),
+                          _breakdownRow(
+                            '⊕ Credit Added',
+                            '+${credit.toStringAsFixed(0)} EGP',
+                            const Color(0xFF4ADE80),
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ],
+              ],
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(ctx),
+                child: Text('cancel'.tr(),
+                    style: const TextStyle(color: Colors.white38)),
+              ),
+              ElevatedButton(
+                onPressed: () async {
+                  final amount = double.tryParse(ctrl.text) ?? 0;
+                  if (amount <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('invalid_amount'.tr()),
+                          backgroundColor: Colors.red),
                     );
-                Navigator.pop(ctx);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('collect_success'.tr())),
-                );
-              } catch (e) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                      content: Text('Error: $e'),
-                      backgroundColor: Colors.red),
-                );
-              }
-            },
-            style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFFA78BFA)),
-            child: Text('collect'.tr(),
-                style: const TextStyle(color: Colors.white)),
-          ),
-        ],
+                    return;
+                  }
+                  // Confirmation dialog — mention credit if applicable
+                  final creditAmt = amount > debt ? amount - debt : 0.0;
+                  final confirmMsg = creditAmt > 0
+                      ? 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?\n\n'
+                        '• Debt reduced by ${debt.toStringAsFixed(0)} EGP\n'
+                        '• ${creditAmt.toStringAsFixed(0)} EGP stored as credit'
+                      : 'Are you sure you collected ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?';
+
+                  final confirm = await showDialog<bool>(
+                    context: context,
+                    builder: (ctx) => AlertDialog(
+                      backgroundColor: const Color(0xFF16162A),
+                      title: const Text('Confirm Action',
+                          style: TextStyle(color: Colors.white)),
+                      content: Text(confirmMsg,
+                          style: const TextStyle(color: Colors.white70)),
+                      actions: [
+                        TextButton(
+                          onPressed: () => Navigator.pop(ctx, false),
+                          child: const Text('Cancel',
+                              style: TextStyle(color: Colors.white38)),
+                        ),
+                        ElevatedButton(
+                          onPressed: () => Navigator.pop(ctx, true),
+                          style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFA78BFA)),
+                          child: const Text('Confirm',
+                              style: TextStyle(color: Colors.white)),
+                        ),
+                      ],
+                    ),
+                  );
+
+                  if (confirm != true) return;
+
+                  final auth = context.read<AuthProvider>();
+                  try {
+                    await context
+                        .read<DistributionProvider>()
+                        .collectFromRetailer(
+                          collectorId: collector.id,
+                          retailerId: retailer.id,
+                          amount: amount,
+                          createdByUid: auth.currentUser?.uid ?? '',
+                        );
+                    Navigator.pop(ctx);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(content: Text('collect_success'.tr())),
+                    );
+                  } catch (e) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                          content: Text('Error: $e'),
+                          backgroundColor: Colors.red),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFFA78BFA)),
+                child: Text('collect'.tr(),
+                    style: const TextStyle(color: Colors.white)),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
+
+  Widget _breakdownRow(String label, String value, Color color) => Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(label,
+              style: const TextStyle(color: Colors.white54, fontSize: 12)),
+          Text(value,
+              style: TextStyle(
+                  color: color,
+                  fontSize: 12,
+                  fontWeight: FontWeight.bold)),
+        ],
+      );
 }
 
 // ─── Deposit Tab ──────────────────────────────────────────────────────────────

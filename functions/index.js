@@ -113,8 +113,10 @@ async function fetchAllOrdersSince(apiKey, apiSecret, beginTime) {
     if (page > 20) break;
   }
 
+  // Client-side date filter — reliable regardless of Bybit sort order.
+  // Use >= so orders created exactly at beginTime are NOT dropped.
   const filtered = beginTime
-    ? allOrders.filter(o => parseInt(o.createDate || o.createTime || 0) > beginTime)
+    ? allOrders.filter(o => parseInt(o.createDate || o.createTime || 0) >= beginTime)
     : allOrders;
 
   filtered.sort((a, b) => parseInt(a.createDate || a.createTime || 0) - parseInt(b.createDate || b.createTime || 0));
@@ -229,7 +231,9 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
     beginTime = beginTimeOverride;
     console.log(`[Sync] Using override beginTime: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
   } else {
-    beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs + 1 : Date.now() - (24 * 60 * 60 * 1000);
+    // Overlap by 5 s so orders sharing the last timestamp are never skipped.
+    // The pre-loaded ID Sets below prevent inserting actual duplicates.
+    beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs - 5000 : Date.now() - (24 * 60 * 60 * 1000);
   }
 
   console.log(`[Sync] Fetching orders created after: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
@@ -237,8 +241,33 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
   const orders = await fetchAllOrdersSince(apiKey, apiSecret, beginTime);
   console.log(`[Sync] Bybit returned ${orders.length} potential new orders.`);
 
+  // Pre-load ALL existing bybitOrderIds in ONE read each to avoid N×2 per-order queries.
+  // Falls back gracefully: if the read fails, the Set is empty and per-order checks will still work.
+  const [existingTxSnap, existingLedgerSnap] = await Promise.all([
+    db.ref('transactions').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
+    db.ref('financial_ledger').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
+  ]);
+
+  const existingTxIds = new Set();
+  if (existingTxSnap && existingTxSnap.exists()) {
+    existingTxSnap.forEach(child => {
+      const id = child.val().bybitOrderId;
+      if (id) existingTxIds.add(id);
+    });
+  }
+
+  const existingLedgerIds = new Set();
+  if (existingLedgerSnap && existingLedgerSnap.exists()) {
+    existingLedgerSnap.forEach(child => {
+      const id = child.val().bybitOrderId;
+      if (id) existingLedgerIds.add(id);
+    });
+  }
+  console.log(`[Sync] Pre-loaded ${existingTxIds.size} tx IDs and ${existingLedgerIds.size} ledger IDs for dedup.`);
+
   let added = 0;
   let skipped = 0;
+  // Accumulate the new high-water mark locally; commit ONLY after all writes succeed.
   let newLastSyncedTs = lastSyncedOrderTs;
   const numbersToRecalculate = new Set();
 
@@ -246,17 +275,9 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
     const orderTs = parseInt(order.createTime || order.createDate || 0);
     const orderId = order.id || order.orderId;
 
-    if (orderTs > newLastSyncedTs) newLastSyncedTs = orderTs;
-
-    const [txDup, ledgerDup] = await Promise.all([
-      db.ref('transactions').orderByChild('bybitOrderId').equalTo(orderId).once('value'),
-      db.ref('financial_ledger').orderByChild('bybitOrderId').equalTo(orderId).once('value')
-    ]);
-
-    // financial_ledger is the source of truth for accounting.
-    // If a ledger entry exists → fully processed, skip.
-    // If only a transaction exists (e.g. from client-side sync) → still write ledger + balance updates.
-    if (ledgerDup.exists()) {
+    // Check ledger first (source of truth) using O(1) Set lookup.
+    // If ledger entry exists → fully processed, skip entirely.
+    if (existingLedgerIds.has(orderId)) {
       skipped++;
       continue;
     }
@@ -321,8 +342,8 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
       }
     }
 
-    // Only write the transaction if it doesn't already exist (client-side sync may have written it)
-    if (!txDup.exists()) {
+    // Only write the transaction if not already present in either source.
+    if (!existingTxIds.has(orderId)) {
       updates[`transactions/${txId}`] = {
         id: txId,
         phoneNumber: matchedPhone || null,
@@ -372,6 +393,14 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
     updates['usd_exchange/lastUpdatedAt'] = new Date().toISOString();
 
     await db.ref().update(updates);
+
+    // Mark these IDs as known so later orders in the same batch don't try to re-insert them.
+    existingLedgerIds.add(orderId);
+    existingTxIds.add(orderId);
+
+    // Advance the local high-water mark AFTER the write succeeds.
+    if (orderTs > newLastSyncedTs) newLastSyncedTs = orderTs;
+
     if (matchedPhone) numbersToRecalculate.add(matchedPhone);
     added++;
   }

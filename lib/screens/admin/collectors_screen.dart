@@ -212,7 +212,8 @@ class CollectorsScreen extends StatelessWidget {
   void _showCollectDialog(BuildContext ctx, Collector collector,
       DistributionProvider dist, AuthProvider auth) {
     final amtCtrl = TextEditingController();
-    final retailers = dist.retailers.where((r) => r.pendingDebt > 0).toList();
+    // Show ALL active retailers — admin may collect more than the debt (credit)
+    final retailers = dist.retailers;
     if (retailers.isEmpty) {
       ScaffoldMessenger.of(ctx)
           .showSnackBar(SnackBar(content: Text('no_data'.tr())));
@@ -222,40 +223,103 @@ class CollectorsScreen extends StatelessWidget {
     showDialog(
       context: ctx,
       builder: (ctx2) => StatefulBuilder(
-        builder: (ctx2, setSt) => _Dialog(
-          title: 'collect_from_retailer'.tr(args: [collector.name]),
-          fields: [
-            DropdownButtonFormField<String>(
-              value: selectedRetailerId,
-              dropdownColor: const Color(0xFF1E1E3A),
-              style: const TextStyle(color: Colors.white),
-              decoration: InputDecoration(
-                labelText: 'retailers'.tr(),
-                labelStyle: const TextStyle(color: Colors.white54),
-                filled: true,
-                fillColor: Colors.white.withOpacity(0.06),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+        builder: (ctx2, setSt) {
+          final selectedRetailer =
+              retailers.firstWhere((r) => r.id == selectedRetailerId);
+          final entered   = double.tryParse(amtCtrl.text) ?? 0.0;
+          final debt      = selectedRetailer.pendingDebt;
+          final debtPaid  = entered > debt ? debt : entered;
+          final credit    = entered > debt ? entered - debt : 0.0;
+
+          return _Dialog(
+            title: 'collect_from_retailer'.tr(args: [collector.name]),
+            fields: [
+              DropdownButtonFormField<String>(
+                value: selectedRetailerId,
+                dropdownColor: const Color(0xFF1E1E3A),
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'retailers'.tr(),
+                  labelStyle: const TextStyle(color: Colors.white54),
+                  filled: true,
+                  fillColor: Colors.white.withOpacity(0.06),
+                  border:
+                      OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                items: retailers
+                    .map((r) => DropdownMenuItem(
+                        value: r.id,
+                        child: Text('${r.name} (${_fmt(r.pendingDebt)} EGP)')))
+                    .toList(),
+                onChanged: (v) =>
+                    setSt(() => selectedRetailerId = v ?? selectedRetailerId),
               ),
-              items: retailers
-                  .map((r) => DropdownMenuItem(
-                      value: r.id,
-                      child: Text('${r.name} (${_fmt(r.pendingDebt)} EGP)')))
-                  .toList(),
-              onChanged: (v) => setSt(() => selectedRetailerId = v ?? selectedRetailerId),
-            ),
-            const SizedBox(height: 12),
-            _tf(amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
-                keyboard: TextInputType.number),
-          ],
-          onConfirm: () {
-            dist.collectFromRetailer(
-              collectorId: collector.id,
-              retailerId: selectedRetailerId,
-              amount: double.tryParse(amtCtrl.text) ?? 0,
-              createdByUid: auth.currentUser?.uid ?? 'system',
-            );
-          },
-        ),
+              const SizedBox(height: 12),
+              _tf(amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
+                  keyboard: TextInputType.number,
+                  onChanged: (_) => setSt(() {})),
+              // Live breakdown
+              if (entered > 0) ...[
+                const SizedBox(height: 8),
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.04),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(
+                      color: credit > 0
+                          ? const Color(0xFF4ADE80).withOpacity(0.4)
+                          : Colors.white12,
+                    ),
+                  ),
+                  child: Column(
+                    children: [
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text('↓ Debt Reduced',
+                              style: TextStyle(
+                                  color: Colors.white54, fontSize: 12)),
+                          Text('${debtPaid.toStringAsFixed(0)} EGP',
+                              style: const TextStyle(
+                                  color: Color(0xFFFBBF24),
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold)),
+                        ],
+                      ),
+                      if (credit > 0) ...[
+                        const SizedBox(height: 4),
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            const Text('⊕ Credit Added',
+                                style: TextStyle(
+                                    color: Colors.white54, fontSize: 12)),
+                            Text('+${credit.toStringAsFixed(0)} EGP',
+                                style: const TextStyle(
+                                    color: Color(0xFF4ADE80),
+                                    fontSize: 12,
+                                    fontWeight: FontWeight.bold)),
+                          ],
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ],
+            onConfirm: () {
+              final amount = double.tryParse(amtCtrl.text) ?? 0;
+              if (amount <= 0) return;
+              dist.collectFromRetailer(
+                collectorId: collector.id,
+                retailerId: selectedRetailerId,
+                amount: amount,
+                createdByUid: auth.currentUser?.uid ?? 'system',
+              );
+            },
+          );
+        },
       ),
     );
   }
@@ -413,13 +477,15 @@ class CollectorsScreen extends StatelessWidget {
   }
 
   static Widget _tf(TextEditingController c, String label, IconData icon,
-      {TextInputType keyboard = TextInputType.text}) =>
+      {TextInputType keyboard = TextInputType.text,
+      void Function(String)? onChanged}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: TextField(
           controller: c,
           keyboardType: keyboard,
           style: const TextStyle(color: Colors.white),
+          onChanged: onChanged,
           decoration: InputDecoration(
             labelText: label,
             labelStyle: const TextStyle(color: Colors.white54),

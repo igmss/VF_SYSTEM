@@ -285,6 +285,16 @@ class AppProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _useServerSync = prefs.getBool('use_server_sync') ?? true;
 
+    // Enforce recommended setup: if server sync is the chosen mode,
+    // always ensure the Firebase scheduler flag is ON so the Cloud
+    // Function runs automatically. This is a no-op if already true.
+    if (_useServerSync) {
+      FirebaseDatabase.instance
+          .ref('system/sync_config/enabled')
+          .set(true)
+          .catchError((e) => print('Sync: Could not enforce enabled flag: $e'));
+    }
+
     // Listen to Firebase for the central sync switch
     _syncConfigSub?.cancel();
     _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config').onValue.listen((event) {
@@ -318,8 +328,10 @@ class AppProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('use_server_sync', enabled);
 
-    // If we switch to server sync, stop local timer
     if (enabled) {
+      // Switching TO server sync: ensure the Firebase scheduler flag is ON
+      // so the Cloud Function picks up orders automatically.
+      await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(true);
       _stopLiveSyncTimer();
     } else if (_isLiveSyncEnabled) {
       _startLiveSyncTimer();
@@ -526,9 +538,10 @@ class AppProvider extends ChangeNotifier {
         // IMPORTANT: For a full sync, we should ignore the local markers
         // to ensure we don't accidentally skip anything if markers were ahead.
       } else if (_lastSyncedOrderTs > 0) {
-        // Incremental — start from 1ms after the last order we saved
-        beginTime = _lastSyncedOrderTs + 1;
-        print('Sync: Starting INCREMENTAL sync from TS $beginTime');
+        // Incremental — overlap by 5 s so orders sharing the last timestamp
+        // are never skipped. The DB dedup (bybitOrderId Set) prevents doubles.
+        beginTime = _lastSyncedOrderTs - 5000;
+        print('Sync: Starting INCREMENTAL sync from TS $beginTime (5 s overlap from $_lastSyncedOrderTs)');
         _syncStatus = 'Checking for new orders…';
       } else {
         // No history — fetch last 30 days by default
@@ -584,6 +597,14 @@ class AppProvider extends ChangeNotifier {
       final knownNumbers = _mobileNumbers.map((n) => n.phoneNumber).toList();
       print('Sync: Starting assignment loop. Known numbers in app: $knownNumbers');
 
+      // Pre-load all existing bybit order IDs in ONE read for O(1) dedup.
+      // Falls back to empty Set (triggering per-order DB checks) on error.
+      final knownIds = await _dbService.getExistingBybitOrderIds();
+
+      // Track the new high-water mark locally; only commit it after the
+      // entire batch succeeds so a mid-batch crash doesn't advance the cursor.
+      int newMaxTs = _lastSyncedOrderTs;
+
       for (int i = 0; i < detailedOrders.length; i++) {
         final order = detailedOrders[i];
         
@@ -591,7 +612,11 @@ class AppProvider extends ChangeNotifier {
         // We must check if the order is genuinely older than the requested beginTime,
         // but we allow equal timestamps because an order might have been created EXACTLY
         // on the millisecond of beginTime.
-        if (beginTime != null && order.createTime.millisecondsSinceEpoch < beginTime - 1000) {
+        // The overlap window means we may receive orders that were already saved.
+        // The Set-based dedup inside addTransaction will handle those cheaply.
+        // We keep a 6-second guard (1 s buffer over the 5-second overlap) to
+        // skip orders that are clearly too old even with overlap.
+        if (beginTime != null && order.createTime.millisecondsSinceEpoch < beginTime - 6000) {
            print('Sync: Skipping order ${order.orderId} - Outside date window (${order.createTime.millisecondsSinceEpoch} < $beginTime).');
            continue;
         }
@@ -613,10 +638,11 @@ class AppProvider extends ChangeNotifier {
           notifyListeners();
         }
 
-        // Always update the newest timestamp seen
-        if (order.createTime.millisecondsSinceEpoch > _lastSyncedOrderTs) {
-          _lastSyncedOrderTs = order.createTime.millisecondsSinceEpoch;
-        }
+        // Track the newest timestamp seen — commit to _lastSyncedOrderTs only
+        // AFTER the full batch completes so a mid-batch error doesn't advance
+        // the cursor past unsaved orders.
+        final orderTs = order.createTime.millisecondsSinceEpoch;
+        if (orderTs > newMaxTs) newMaxTs = orderTs;
 
         // 2. Scan chat/terms for assignment
         String? matchedNumber;
@@ -667,7 +693,7 @@ class AppProvider extends ChangeNotifier {
             token: order.token,
           );
 
-          final wasAdded = await _dbService.addTransaction(tx);
+          final wasAdded = await _dbService.addTransaction(tx, knownIds: knownIds);
           if (wasAdded) {
              added++;
           } else {
@@ -712,7 +738,7 @@ class AppProvider extends ChangeNotifier {
           token: order.token,
         );
 
-        final wasAdded = await _dbService.addTransaction(tx);
+        final wasAdded = await _dbService.addTransaction(tx, knownIds: knownIds);
         if (wasAdded) {
           added++;
         } else {
@@ -741,6 +767,10 @@ class AppProvider extends ChangeNotifier {
       }
 
       print('Sync Result: $added total records, $skipped duplicates. (Vodafone: ${added - notVodaMethod}, Other: $notVodaMethod, Unassigned: $notVodaChat)');
+
+      // Commit the high-water mark only now that every order in this batch
+      // has been successfully written to Firebase.
+      _lastSyncedOrderTs = newMaxTs;
 
       // Persist sync metadata
       _lastSyncTime = DateTime.now();

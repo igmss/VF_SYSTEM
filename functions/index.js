@@ -334,14 +334,24 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
       const isVodafoneCash = paymentMethodString.toLowerCase().includes('vodafone');
 
       if (isVodafoneCash) {
-        if (numbersSnap.exists()) {
-          const numbers = Object.entries(numbersSnap.val());
-          const defaultNum = numbers.find(([id, n]) => n.isDefault);
-          if (defaultNum) {
-            fromId = defaultNum[0];
-            fromLabel = defaultNum[1].phoneNumber;
-            matchedPhoneId = defaultNum[0];
-            matchedPhone = defaultNum[1].phoneNumber;
+            let targetId = matchedPhoneId;
+            let targetPhone = matchedPhone;
+
+            // Fallback to default number ONLY if we couldn't match from chat
+            if (!targetId && numbersSnap.exists()) {
+              const numbers = Object.entries(numbersSnap.val());
+              const defaultNum = numbers.find(([id, n]) => n.isDefault);
+              if (defaultNum) {
+                targetId = defaultNum[0];
+                targetPhone = defaultNum[1].phoneNumber;
+              }
+            }
+
+            if (targetId && targetPhone) {
+              fromId = targetId;
+              fromLabel = targetPhone;
+              matchedPhoneId = targetId;
+              matchedPhone = targetPhone;
 
             const now = Date.now();
             const d = new Date(now);
@@ -356,8 +366,10 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
               updates[`mobile_numbers/${matchedPhoneId}/outMonthlyUsed`] = admin.database.ServerValue.increment(amount);
             }
             updates[`mobile_numbers/${matchedPhoneId}/lastUpdatedAt`] = new Date().toISOString();
-          }
-        }
+            } else {
+              fromId = null;
+              fromLabel = 'Vodafone Cash (Unassigned)';
+            }
       } else {
         const banks = banksSnap.val();
         if (banks) {

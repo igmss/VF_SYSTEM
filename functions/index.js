@@ -331,13 +331,42 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
     let fromId = null;
     let fromLabel = side === 0 ? 'Bank' : 'USD Exchange';
     if (side === 0) {
-      const banks = banksSnap.val();
-      if (banks) {
-        const defaultBank = Object.values(banks).find(b => b.isDefaultForBuy);
-        if (defaultBank) {
-          fromId = defaultBank.id;
-          fromLabel = defaultBank.bankName;
-          updates[`bank_accounts/${defaultBank.id}/balance`] = admin.database.ServerValue.increment(-amount);
+      const isVodafoneCash = paymentMethodString.toLowerCase().includes('vodafone');
+
+      if (isVodafoneCash) {
+        if (numbersSnap.exists()) {
+          const numbers = Object.entries(numbersSnap.val());
+          const defaultNum = numbers.find(([id, n]) => n.isDefault);
+          if (defaultNum) {
+            fromId = defaultNum[0];
+            fromLabel = defaultNum[1].phoneNumber;
+            matchedPhoneId = defaultNum[0];
+            matchedPhone = defaultNum[1].phoneNumber;
+
+            const now = Date.now();
+            const d = new Date(now);
+            const todayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+            const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+
+            updates[`mobile_numbers/${matchedPhoneId}/outTotalUsed`] = admin.database.ServerValue.increment(amount);
+            if (orderTs >= todayStart) {
+              updates[`mobile_numbers/${matchedPhoneId}/outDailyUsed`] = admin.database.ServerValue.increment(amount);
+            }
+            if (orderTs >= monthStart) {
+              updates[`mobile_numbers/${matchedPhoneId}/outMonthlyUsed`] = admin.database.ServerValue.increment(amount);
+            }
+            updates[`mobile_numbers/${matchedPhoneId}/lastUpdatedAt`] = new Date().toISOString();
+          }
+        }
+      } else {
+        const banks = banksSnap.val();
+        if (banks) {
+          const defaultBank = Object.values(banks).find(b => b.isDefaultForBuy);
+          if (defaultBank) {
+            fromId = defaultBank.id;
+            fromLabel = defaultBank.bankName;
+            updates[`bank_accounts/${defaultBank.id}/balance`] = admin.database.ServerValue.increment(-amount);
+          }
         }
       }
     }

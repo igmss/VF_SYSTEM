@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../theme/app_theme.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({Key? key}) : super(key: key);
@@ -39,7 +40,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       body: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
@@ -69,18 +70,18 @@ class _SplashScreenState extends State<SplashScreen>
               width: 200,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(10),
-                child: const LinearProgressIndicator(
-                  color: Color(0xFFE63946),
-                  backgroundColor: Color(0xFF16162A),
+                child: LinearProgressIndicator(
+                  color: const Color(0xFFE63946),
+                  backgroundColor: AppTheme.lineColor(context),
                   minHeight: 4,
                 ),
               ),
             ),
             const SizedBox(height: 16),
-            const Text(
+              Text(
               'SECURING LEDGER...',
               style: TextStyle(
-                color: Colors.white38,
+                color: AppTheme.textMutedColor(context).withValues(alpha: 0.5),
                 fontSize: 12,
                 letterSpacing: 2.0,
                 fontWeight: FontWeight.bold,

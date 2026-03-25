@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -13,9 +14,9 @@ class RetailerDetailsScreen extends StatefulWidget {
   final Retailer retailer;
 
   const RetailerDetailsScreen({
-    Key? key,
+    super.key,
     required this.retailer,
-  }) : super(key: key);
+  });
 
   @override
   State<RetailerDetailsScreen> createState() => _RetailerDetailsScreenState();
@@ -56,7 +57,11 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
           tx.type == FlowType.DISTRIBUTE_VFCASH && tx.toId == retailer.id;
       final isCollected =
           tx.type == FlowType.COLLECT_CASH && tx.fromId == retailer.id;
-      return isAssigned || isCollected;
+      final isCreditReturn =
+          tx.type == FlowType.CREDIT_RETURN && tx.fromId == retailer.id;
+      final isCreditReturnFee =
+          tx.type == FlowType.CREDIT_RETURN_FEE && tx.fromId == retailer.id;
+      return isAssigned || isCollected || isCreditReturn || isCreditReturnFee;
     }).toList();
 
     final List<FinancialTransaction> assignedTxs = allTxs
@@ -64,20 +69,26 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
         .toList();
 
     final List<FinancialTransaction> collectedTxs = allTxs
-        .where((tx) => tx.type == FlowType.COLLECT_CASH)
+        .where((tx) =>
+            tx.type == FlowType.COLLECT_CASH ||
+            tx.type == FlowType.CREDIT_RETURN ||
+            tx.type == FlowType.CREDIT_RETURN_FEE)
         .toList();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF16162A),
-        title: Text(retailer.name, style: const TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        backgroundColor: AppTheme.surfaceColor(context),
+        elevation: 0,
+        title: Text(retailer.name, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
+        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
         bottom: TabBar(
           controller: _tabController,
-          indicatorColor: const Color(0xFFE63946),
-          labelColor: Colors.white,
-          unselectedLabelColor: Colors.white54,
+          indicatorColor: AppTheme.accent,
+          indicatorWeight: 3,
+          labelColor: AppTheme.textPrimaryColor(context),
+          labelStyle: const TextStyle(fontWeight: FontWeight.bold),
+          unselectedLabelColor: AppTheme.textMutedColor(context),
           tabs: [
             Tab(text: 'All (${allTxs.length})'),
             Tab(text: 'Assigned (${assignedTxs.length})'),
@@ -89,34 +100,40 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
         children: [
           // Summary Header
           Container(
-            padding: const EdgeInsets.all(16),
-            color: const Color(0xFF16162A),
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: AppTheme.panelGradient(context),
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+              border: Border(bottom: BorderSide(color: AppTheme.lineColor(context))),
+              boxShadow: AppTheme.softShadow(context),
+            ),
             child: Column(
               children: [
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
-                    Expanded(child: _buildSummaryStat('assigned'.tr(), retailer.totalAssigned, const Color(0xFF4CC9F0))),
-                    Expanded(child: _buildSummaryStat('collected'.tr(), retailer.totalCollected, const Color(0xFF4ADE80))),
-                    Expanded(child: _buildSummaryStat('debt'.tr(), retailer.pendingDebt, const Color(0xFFFF6B6B))),
+                    Expanded(child: _buildSummaryStat(context, 'assigned'.tr(), retailer.totalAssigned, AppTheme.infoColor(context))),
+                    Expanded(child: _buildSummaryStat(context, 'collected'.tr(), retailer.totalCollected, AppTheme.positiveColor(context))),
+                    Expanded(child: _buildSummaryStat(context, 'debt'.tr(), retailer.pendingDebt, AppTheme.warningColor(context))),
                   ],
                 ),
-                Builder(builder: (ctx) {
-                  debugPrint('Retailer: ${retailer.name}, isAdmin: ${auth.currentUser?.isAdmin}, Debt: ${retailer.pendingDebt}');
-                  return const SizedBox.shrink();
-                }),
                 if ((auth.currentUser?.isAdmin ?? false) && retailer.pendingDebt > 0) ...[
-                  const SizedBox(height: 16),
+                  const SizedBox(height: 20),
                   SizedBox(
                     width: double.infinity,
-                    child: OutlinedButton.icon(
-                      icon: const Icon(Icons.keyboard_return, size: 16),
+                    child: ElevatedButton.icon(
+                      icon: const Icon(Icons.keyboard_return, size: 18),
                       label: Text('Credit Return (VF Cash)'.tr()),
-                      style: OutlinedButton.styleFrom(
-                        foregroundColor: const Color(0xFF4ADE80),
-                        side: const BorderSide(color: Color(0xFF4ADE80)),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        padding: const EdgeInsets.symmetric(vertical: 10),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.positiveColor(context),
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        elevation: 0,
                       ),
                       onPressed: () => _showCreditReturnDialog(context, retailer, dist),
                     ),
@@ -143,14 +160,14 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
     );
   }
 
-  Widget _buildSummaryStat(String label, double val, Color color) {
+  Widget _buildSummaryStat(BuildContext context, String label, double val, Color color) {
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4.0),
       child: Column(
         children: [
           Text(
             label,
-            style: const TextStyle(color: Colors.white54, fontSize: 9),
+            style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10, fontWeight: FontWeight.w600),
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
             maxLines: 1,
@@ -160,7 +177,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
             fit: BoxFit.scaleDown,
             child: Text('${_fmt(val)} EGP',
                 style: TextStyle(
-                    color: color, fontWeight: FontWeight.bold, fontSize: 12)),
+                    color: color, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: -0.5)),
           ),
         ],
       ),
@@ -170,28 +187,43 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
   Widget _buildTransactionList(List<FinancialTransaction> txs) {
     if (txs.isEmpty) {
       return Center(
-        child: Text('no_data'.tr(), style: const TextStyle(color: Colors.white38)),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.history_outlined, color: AppTheme.textMutedColor(context).withValues(alpha: 0.1), size: 64),
+            const SizedBox(height: 14),
+            Text('no_data'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.5), fontSize: 16, fontWeight: FontWeight.bold)),
+          ],
+        ),
       );
     }
 
     return ListView.builder(
-      padding: const EdgeInsets.all(12),
+      padding: const EdgeInsets.all(16),
       itemCount: txs.length,
       itemBuilder: (context, index) {
         final tx = txs[index];
         final isAssigned = tx.type == FlowType.DISTRIBUTE_VFCASH;
+        final isCreditReturn = tx.type == FlowType.CREDIT_RETURN;
+        final isCreditReturnFee = tx.type == FlowType.CREDIT_RETURN_FEE;
+        final txColor = isAssigned
+            ? AppTheme.infoColor(context)
+            : isCreditReturnFee
+                ? AppTheme.warningColor(context)
+                : AppTheme.positiveColor(context);
 
         return Container(
-          margin: const EdgeInsets.only(bottom: 12),
-          padding: const EdgeInsets.all(16),
+          margin: const EdgeInsets.only(bottom: 16),
+          padding: const EdgeInsets.all(18),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E1E3A),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(
-              color: isAssigned
-                  ? const Color(0xFF4CC9F0).withOpacity(0.3)
-                  : const Color(0xFF4ADE80).withOpacity(0.3),
+            gradient: LinearGradient(
+              colors: AppTheme.panelGradient(context),
+              begin: Alignment.topLeft,
+              end: Alignment.bottomRight,
             ),
+            borderRadius: BorderRadius.circular(22),
+            border: Border.all(color: txColor.withValues(alpha: 0.2)),
+            boxShadow: AppTheme.softShadow(context),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -201,23 +233,34 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                 children: [
                   Row(
                     children: [
-                      Icon(
-                        isAssigned
-                            ? Icons.arrow_downward
-                            : Icons.check_circle_outline,
-                        color: isAssigned
-                            ? const Color(0xFF4CC9F0)
-                            : const Color(0xFF4ADE80),
-                        size: 18,
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: txColor.withValues(alpha: 0.1),
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        child: Icon(
+                          isAssigned
+                              ? Icons.arrow_downward
+                              : isCreditReturnFee
+                                  ? Icons.receipt_long_outlined
+                                  : Icons.check_circle_outline,
+                          color: txColor,
+                          size: 18,
+                        ),
                       ),
-                      const SizedBox(width: 8),
-                      Text(
-                        isAssigned ? 'Assigned' : 'Collected',
-                        style: TextStyle(
-                          color: isAssigned
-                              ? const Color(0xFF4CC9F0)
-                              : const Color(0xFF4ADE80),
-                          fontWeight: FontWeight.bold,
+                      const SizedBox(width: 12),
+                        Text(
+                          isAssigned
+                              ? 'Assigned'
+                              : isCreditReturn
+                                  ? 'Credit Return'
+                                  : isCreditReturnFee
+                                      ? 'Return Fee'
+                                      : 'Collected',
+                          style: TextStyle(
+                            color: txColor,
+                            fontWeight: FontWeight.bold,
                           fontSize: 14,
                         ),
                       ),
@@ -225,11 +268,11 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                   ),
                   Text(
                     DateFormat('MMM d, yyyy • HH:mm').format(tx.timestamp),
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                   ),
                 ],
               ),
-              const SizedBox(height: 12),
+              const SizedBox(height: 16),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -237,21 +280,23 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          isAssigned
-                              ? 'From: ${tx.fromLabel ?? 'Unknown Number'}'
-                              : 'By: ${tx.toLabel ?? 'Unknown Collector'}',
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 11,
-                              fontWeight: FontWeight.w500),
+                          Text(
+                            isAssigned
+                                ? '${'from'.tr()}: ${tx.fromLabel ?? 'Unknown Number'}'
+                                : isCreditReturn || isCreditReturnFee
+                                    ? 'To VF Number: ${tx.toLabel ?? 'Unknown Number'}'
+                                    : '${'by'.tr()}: ${tx.toLabel ?? 'Unknown Collector'}',
+                          style: TextStyle(
+                              color: AppTheme.textPrimaryColor(context),
+                              fontSize: 12,
+                              fontWeight: FontWeight.w600),
                         ),
                         if (tx.notes != null && tx.notes!.isNotEmpty) ...[
-                          const SizedBox(height: 4),
+                          const SizedBox(height: 6),
                           Text(
                             tx.notes!,
-                            style: const TextStyle(
-                                color: Colors.white38, fontSize: 12),
+                            style: TextStyle(
+                                color: AppTheme.textMutedColor(context), fontSize: 12),
                           ),
                         ]
                       ],
@@ -259,10 +304,10 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                   ),
                   Text(
                     '${_fmt(tx.amount)} EGP',
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.bold,
+                    style: TextStyle(
+                      color: AppTheme.textPrimaryColor(context),
+                      fontSize: 15,
+                      fontWeight: FontWeight.w900,
                     ),
                   ),
                 ],
@@ -291,33 +336,33 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: const Color(0xFF16162A),
-          title: Text('Credit Return (VF Cash)', style: const TextStyle(color: Colors.white)),
+          backgroundColor: AppTheme.surfaceColor(context),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+          title: Text('Credit Return (VF Cash)', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text('Retailer: ${retailer.name}', style: const TextStyle(color: Colors.white70, fontSize: 13)),
-                Text('Debt: ${_fmt(retailer.pendingDebt)} EGP', style: const TextStyle(color: Colors.white54, fontSize: 12)),
-                const SizedBox(height: 16),
+                Text('Retailer: ${retailer.name}', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14, fontWeight: FontWeight.bold)),
+                Text('Debt: ${_fmt(retailer.pendingDebt)} EGP', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 20),
                 
-                // Select VF Number
-                const Text('Select VF Number Receiving Cash', style: TextStyle(color: Colors.white70, fontSize: 12)),
-                const SizedBox(height: 8),
+                Text('Select Receiving Number', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 12, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 10),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 14),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.06),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white10),
+                    color: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.lineColor(context)),
                   ),
                   child: DropdownButtonHideUnderline(
                     child: DropdownButton<MobileNumber>(
                       value: selectedNumber,
-                      dropdownColor: const Color(0xFF16162A),
+                      dropdownColor: AppTheme.surfaceColor(context),
                       isExpanded: true,
-                      style: const TextStyle(color: Colors.white),
+                      style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
                       items: appProvider.mobileNumbers.map((n) {
                         return DropdownMenuItem(
                           value: n,
@@ -331,38 +376,34 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                   ),
                 ),
 
-                const SizedBox(height: 16),
+                const SizedBox(height: 20),
                 TextField(
                   controller: amountCtrl,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
                   decoration: InputDecoration(
-                    labelText: 'Settlement Amount (Debt Reduction)',
-                    labelStyle: const TextStyle(color: Colors.white54),
+                    labelText: 'Settlement Amount',
                     suffixText: 'EGP',
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.06),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
                   ),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 14),
                 TextField(
                   controller: feesCtrl,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
                   decoration: InputDecoration(
-                    labelText: 'Additional Fees (Keep separated)',
-                    labelStyle: const TextStyle(color: Colors.white54),
+                    labelText: 'Additional Fees',
                     suffixText: 'EGP',
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.06),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
                   ),
                 ),
-                const SizedBox(height: 10),
+                const SizedBox(height: 14),
                 Text(
-                  'Note: The retailer debt will decrease by the "Settlement Amount". The VF number balance will increase by both (Amount + Fees).',
-                  style: TextStyle(color: Colors.white38, fontSize: 10, fontStyle: FontStyle.italic),
+                  'Note: Debt decreases by "Settlement Amount". VF balance increases by (Amount + Fees).',
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, fontStyle: FontStyle.italic),
                 ),
               ],
             ),
@@ -370,7 +411,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(ctx),
-              child: Text('cancel'.tr(), style: const TextStyle(color: Colors.white38)),
+              child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
             ),
             ElevatedButton(
               onPressed: () async {
@@ -398,8 +439,13 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                   );
                 }
               },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4ADE80)),
-              child: const Text('Confirm Return', style: TextStyle(color: Colors.white)),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.positiveColor(context),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+              ),
+              child: Text('confirm'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
             ),
           ],
         ),

@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/app_user.dart';
 
 class UserManagementScreen extends StatefulWidget {
-  const UserManagementScreen({Key? key}) : super(key: key);
+  const UserManagementScreen({super.key});
 
   @override
   State<UserManagementScreen> createState() => _UserManagementScreenState();
@@ -24,6 +25,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   Future<void> _loadUsers() async {
     setState(() => _loading = true);
     final users = await context.read<AuthProvider>().getAllUsers();
+    if (!mounted) return;
     setState(() {
       _users = users;
       _loading = false;
@@ -33,20 +35,27 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF16162A),
-        title: Text('manage_users'.tr(), style: const TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        backgroundColor: AppTheme.surfaceColor(context),
+        elevation: 0,
+        title: Text(
+          'manage_users'.tr(),
+          style: TextStyle(
+            color: AppTheme.textPrimaryColor(context),
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
         actions: [
           IconButton(
             tooltip: 'repair_account'.tr(),
-            icon: const Icon(Icons.build_outlined, color: Colors.blueAccent),
+            icon: Icon(Icons.build_outlined, color: AppTheme.infoColor(context)),
             onPressed: () => _showSyncDialog(context),
           ),
           IconButton(
             tooltip: 'create_new_user'.tr(),
-            icon: const Icon(Icons.add, color: Color(0xFFE63946)),
+            icon: Icon(Icons.add, color: AppTheme.accent),
             onPressed: () => _showCreateUserDialog(context),
           ),
         ],
@@ -54,14 +63,54 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
       body: _loading
           ? const Center(child: CircularProgressIndicator())
           : _users.isEmpty
-              ? Center(child: Text('no_users'.tr(), style: const TextStyle(color: Colors.white38)))
-              : ListView.builder(
-                  padding: const EdgeInsets.all(16),
-                  itemCount: _users.length,
-                  itemBuilder: (context, index) {
-                    final user = _users[index];
-                    return _UserCard(user: user);
-                  },
+              ? Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.people_outline, size: 64, color: AppTheme.textMutedColor(context).withValues(alpha: 0.18)),
+                      const SizedBox(height: 16),
+                      Text(
+                        'no_users'.tr(),
+                        style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 16, fontWeight: FontWeight.w700),
+                      ),
+                    ],
+                  ),
+                )
+              : Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                      child: Container(
+                        width: double.infinity,
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: AppTheme.isDark(context)
+                                ? AppTheme.panelGradient(context)
+                                : const [Color(0xFFFFFBF4), Color(0xFFF2E5D2)],
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                          ),
+                          borderRadius: BorderRadius.circular(24),
+                          border: Border.all(color: AppTheme.lineColor(context)),
+                          boxShadow: AppTheme.softShadow(context),
+                        ),
+                        child: Row(
+                          children: [
+                            Expanded(child: _UserSummary(label: 'Users', value: _users.length.toString())),
+                            Expanded(child: _UserSummary(label: 'Admins', value: _users.where((u) => u.role == UserRole.ADMIN).length.toString())),
+                          ],
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                        itemCount: _users.length,
+                        itemBuilder: (context, index) => _UserCard(user: _users[index]),
+                      ),
+                    ),
+                  ],
                 ),
     );
   }
@@ -75,69 +124,51 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          backgroundColor: const Color(0xFF16162A),
-          title: Text('create_new_user'.tr(), style: const TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _tf(nameCtrl, 'full_name'.tr(), Icons.person),
-                _tf(emailCtrl, 'email'.tr(), Icons.email, keyboard: TextInputType.emailAddress),
-                _tf(passCtrl, 'password'.tr(), Icons.lock, obscure: true),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<UserRole>(
-                  value: selectedRole,
-                  dropdownColor: const Color(0xFF1E1E3A),
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'role'.tr(),
-                    labelStyle: const TextStyle(color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.06),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  items: UserRole.values
-                      .map((r) => DropdownMenuItem(
-                            value: r,
-                            child: Text(r.name),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('cancel'.tr(), style: const TextStyle(color: Colors.white38)),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final auth = context.read<AuthProvider>();
-                try {
-                  await auth.createUser(
-                    email: emailCtrl.text.trim(),
-                    password: passCtrl.text.trim(),
-                    name: nameCtrl.text.trim(),
-                    role: selectedRole,
-                  );
-                  Navigator.pop(ctx);
-                  _loadUsers();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('user_created_success'.tr())),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: $e')),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE63946)),
-              child: Text('create'.tr(), style: const TextStyle(color: Colors.white)),
+        builder: (ctx, setSt) => _ManagementDialog(
+          title: 'create_new_user'.tr(),
+          fields: [
+            _tf(nameCtrl, 'full_name'.tr(), Icons.person),
+            _tf(emailCtrl, 'email'.tr(), Icons.email, keyboard: TextInputType.emailAddress),
+            _tf(passCtrl, 'password'.tr(), Icons.lock, obscure: true),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<UserRole>(
+              value: selectedRole,
+              dropdownColor: AppTheme.surfaceColor(context),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                labelText: 'role'.tr(),
+                filled: true,
+                fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+              ),
+              items: UserRole.values
+                  .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
+                  .toList(),
+              onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
             ),
           ],
+          onConfirm: () async {
+            final auth = context.read<AuthProvider>();
+            try {
+              await auth.createUser(
+                email: emailCtrl.text.trim(),
+                password: passCtrl.text.trim(),
+                name: nameCtrl.text.trim(),
+                role: selectedRole,
+              );
+              if (!ctx.mounted) return false;
+              Navigator.pop(ctx);
+              _loadUsers();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('user_created_success'.tr())),
+              );
+              return true;
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+              );
+              return false;
+            }
+          },
         ),
       ),
     );
@@ -152,90 +183,75 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setSt) => AlertDialog(
-          backgroundColor: const Color(0xFF16162A),
-          title: Text('repair_desynced_account'.tr(), style: const TextStyle(color: Colors.white)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                _tf(uidCtrl, 'Firebase UID', Icons.key),
-                _tf(nameCtrl, 'full_name'.tr(), Icons.person),
-                _tf(emailCtrl, 'email'.tr(), Icons.email),
-                const SizedBox(height: 12),
-                DropdownButtonFormField<UserRole>(
-                  value: selectedRole,
-                  dropdownColor: const Color(0xFF1E1E3A),
-                  style: const TextStyle(color: Colors.white),
-                  decoration: InputDecoration(
-                    labelText: 'role'.tr(),
-                    labelStyle: const TextStyle(color: Colors.white54),
-                    filled: true,
-                    fillColor: Colors.white.withOpacity(0.06),
-                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  items: UserRole.values
-                      .map((r) => DropdownMenuItem(
-                            value: r,
-                            child: Text(r.name),
-                          ))
-                      .toList(),
-                  onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('cancel'.tr(), style: const TextStyle(color: Colors.white38)),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final auth = context.read<AuthProvider>();
-                try {
-                  await auth.syncUserRecord(
-                    uid: uidCtrl.text.trim(),
-                    email: emailCtrl.text.trim(),
-                    name: nameCtrl.text.trim(),
-                    role: selectedRole,
-                  );
-                  Navigator.pop(ctx);
-                  _loadUsers();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('user_synced_success'.tr())),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: $e')),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(backgroundColor: Colors.blueAccent),
-              child: Text('sync'.tr(), style: const TextStyle(color: Colors.white)),
+        builder: (ctx, setSt) => _ManagementDialog(
+          title: 'repair_desynced_account'.tr(),
+          fields: [
+            _tf(uidCtrl, 'Firebase UID', Icons.key),
+            _tf(nameCtrl, 'full_name'.tr(), Icons.person),
+            _tf(emailCtrl, 'email'.tr(), Icons.email),
+            const SizedBox(height: 12),
+            DropdownButtonFormField<UserRole>(
+              value: selectedRole,
+              dropdownColor: AppTheme.surfaceColor(context),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
+              decoration: InputDecoration(
+                labelText: 'role'.tr(),
+                filled: true,
+                fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+              ),
+              items: UserRole.values
+                  .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
+                  .toList(),
+              onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
             ),
           ],
+          onConfirm: () async {
+            final auth = context.read<AuthProvider>();
+            try {
+              await auth.syncUserRecord(
+                uid: uidCtrl.text.trim(),
+                email: emailCtrl.text.trim(),
+                name: nameCtrl.text.trim(),
+                role: selectedRole,
+              );
+              if (!ctx.mounted) return false;
+              Navigator.pop(ctx);
+              _loadUsers();
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('user_synced_success'.tr())),
+              );
+              return true;
+            } catch (e) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+              );
+              return false;
+            }
+          },
         ),
       ),
     );
   }
 
-  Widget _tf(TextEditingController c, String label, IconData icon,
-          {TextInputType keyboard = TextInputType.text, bool obscure = false}) =>
+  Widget _tf(
+    TextEditingController c,
+    String label,
+    IconData icon, {
+    TextInputType keyboard = TextInputType.text,
+    bool obscure = false,
+  }) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: TextField(
           controller: c,
           keyboardType: keyboard,
           obscureText: obscure,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
           decoration: InputDecoration(
             labelText: label,
-            labelStyle: const TextStyle(color: Colors.white54),
-            prefixIcon: Icon(icon, color: Colors.white38, size: 20),
+            prefixIcon: Icon(icon, size: 20),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.06),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+            fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
           ),
         ),
       );
@@ -247,58 +263,133 @@ class _UserCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color = _getRoleColor(user.role);
+    final color = _getRoleColor(context, user.role);
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        color: const Color(0xFF16162A),
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: color.withOpacity(0.2)),
+        gradient: LinearGradient(
+          colors: AppTheme.isDark(context)
+              ? AppTheme.panelGradient(context)
+              : const [Color(0xFFFFFEFB), Color(0xFFF6EFE2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+        boxShadow: AppTheme.softShadow(context),
       ),
-      child: Row(
-        children: [
-          CircleAvatar(
-            backgroundColor: color.withOpacity(0.12),
-            child: Text(user.name.substring(0, 1).toUpperCase(),
-                style: TextStyle(color: color, fontWeight: FontWeight.bold)),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(user.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                Text(user.email, style: const TextStyle(color: Colors.white38, fontSize: 12)),
-              ],
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Row(
+          children: [
+            CircleAvatar(
+              radius: 24,
+              backgroundColor: color.withValues(alpha: 0.12),
+              child: Text(
+                user.name.substring(0, 1).toUpperCase(),
+                style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 18),
+              ),
             ),
-          ),
-          Container(
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            decoration: BoxDecoration(
-              color: color.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(6),
+            const SizedBox(width: 16),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(user.name, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 16)),
+                  const SizedBox(height: 2),
+                  Text(user.email, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
+                ],
+              ),
             ),
-            child: Text(
-              user.role.name.toUpperCase(),
-              style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.bold),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+              decoration: BoxDecoration(
+                color: color.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: color.withValues(alpha: 0.3)),
+              ),
+              child: Text(
+                user.role.name.toUpperCase(),
+                style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w900, letterSpacing: 0.5),
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
 
-  Color _getRoleColor(UserRole role) {
+  Color _getRoleColor(BuildContext context, UserRole role) {
     switch (role) {
       case UserRole.ADMIN:
-        return const Color(0xFFE63946);
+        return AppTheme.accent;
       case UserRole.FINANCE:
-        return const Color(0xFF4CC9F0);
+        return AppTheme.infoColor(context);
       case UserRole.COLLECTOR:
-        return const Color(0xFFA78BFA);
+        return const Color(0xFF8C6239);
       case UserRole.OPERATOR:
-        return const Color(0xFF4ADE80);
+        return AppTheme.positiveColor(context);
     }
+  }
+}
+
+class _UserSummary extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _UserSummary({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w800)),
+      ],
+    );
+  }
+}
+
+class _ManagementDialog extends StatelessWidget {
+  final String title;
+  final List<Widget> fields;
+  final Future<bool> Function() onConfirm;
+
+  const _ManagementDialog({required this.title, required this.fields, required this.onConfirm});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: AppTheme.surfaceColor(context),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+      title: Text(title, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 18)),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: fields,
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.pop(context),
+          child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.bold)),
+        ),
+        ElevatedButton(
+          onPressed: () async {
+            await onConfirm();
+          },
+          style: ElevatedButton.styleFrom(
+            backgroundColor: AppTheme.accent,
+            foregroundColor: Colors.white,
+            elevation: 0,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+          ),
+          child: Text('save'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
+        ),
+      ],
+    );
   }
 }

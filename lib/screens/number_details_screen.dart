@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
+import '../theme/app_theme.dart';
 
 class NumberDetailsScreen extends StatefulWidget {
   final MobileNumber number;
@@ -52,7 +53,7 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
     );
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
         title: Text(currentNum.phoneNumber),
         elevation: 0,
@@ -67,9 +68,9 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
                   );
                 }
               },
-              icon: const Icon(Icons.star_border, color: Colors.white),
+              icon: Icon(Icons.star_border, color: AppTheme.textPrimaryColor(context)),
               label: Text('set_default'.tr(),
-                  style: const TextStyle(color: Colors.white, fontSize: 12)),
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 12)),
             ),
           PopupMenuButton<String>(
             onSelected: (val) async {
@@ -210,7 +211,7 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
         padding: const EdgeInsets.only(top: 100),
         child: Center(
             child: Text('no_activity'.tr(),
-                style: const TextStyle(color: Colors.white38))),
+                style: TextStyle(color: AppTheme.textMutedColor(context)))),
       );
     }
 
@@ -232,7 +233,7 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
         children: [
           Text(
             'daily_activity_journal'.tr(),
-            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: AppTheme.textPrimaryColor(context)),
           ),
           const SizedBox(height: 16),
           ...sortedDates.map((dateStr) {
@@ -259,7 +260,7 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 24),
       decoration: BoxDecoration(
-        color: const Color(0xFF16162A),
+        color: AppTheme.surfaceColor(context),
         borderRadius: BorderRadius.circular(16),
         boxShadow: [
           BoxShadow(
@@ -273,9 +274,9 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
           // Day Summary Header
           Container(
             padding: const EdgeInsets.all(16),
-            decoration: const BoxDecoration(
-              color: Color(0xFF1E1E3A),
-              borderRadius: BorderRadius.only(
+            decoration: BoxDecoration(
+              color: AppTheme.surfaceRaisedColor(context),
+              borderRadius: const BorderRadius.only(
                 topLeft: Radius.circular(16),
                 topRight: Radius.circular(16),
               ),
@@ -284,7 +285,7 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text(date,
-                    style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.white)),
+                    style: TextStyle(fontWeight: FontWeight.bold, color: AppTheme.textPrimaryColor(context))),
                 Row(
                   children: [
                     _buildTinyTag('+$dailyIn', Colors.green),
@@ -328,15 +329,15 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
       ),
       title: Text(
         '${isIncoming ? "+" : "-"}${tx.amount.toStringAsFixed(2)} ${tx.currency}',
-        style: const TextStyle(fontWeight: FontWeight.w600, color: Colors.white),
+        style: TextStyle(fontWeight: FontWeight.w600, color: AppTheme.textPrimaryColor(context)),
       ),
       subtitle: Text(
         '${tx.paymentMethod} • ${DateFormat('HH:mm').format(tx.timestamp)}',
-        style: const TextStyle(fontSize: 11, color: Colors.white54),
+        style: TextStyle(fontSize: 11, color: AppTheme.textMutedColor(context)),
       ),
       trailing: Text(
         tx.bybitOrderId.substring(0, 6),
-        style: TextStyle(color: Colors.grey[400], fontSize: 10),
+        style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10),
       ),
     );
   }
@@ -355,9 +356,9 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF16162A),
+        color: AppTheme.surfaceColor(context),
         borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: Colors.white10),
+        border: Border.all(color: AppTheme.lineColor(context)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,0 +1,6 @@
+﻿  error - ledger_screen.dart:139:27 - The argument type 'String' can't be assigned to the parameter type 'BuildContext'.  - argument_type_not_assignable
+  error - ledger_screen.dart:140:27 - The argument type 'bool' can't be assigned to the parameter type 'String'.  - argument_type_not_assignable
+  error - ledger_screen.dart:140:38 - 3 positional arguments expected by '_labelChip', but 2 found. Try adding the missing arguments. - not_enough_positional_arguments
+  error - ledger_screen.dart:144:27 - The argument type 'String' can't be assigned to the parameter type 'BuildContext'.  - argument_type_not_assignable
+  error - ledger_screen.dart:145:27 - The argument type 'bool' can't be assigned to the parameter type 'String'.  - argument_type_not_assignable
+  error - ledger_screen.dart:145:36 - 3 positional arguments expected by '_labelChip', but 2 found. Try adding the missing arguments. - not_enough_positional_arguments

@@ -1,12 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:intl/intl.dart';
 import '../providers/app_provider.dart';
-
+import '../providers/theme_provider.dart';
+import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
-  const SettingsScreen({Key? key}) : super(key: key);
+  const SettingsScreen({super.key});
 
   @override
   State<SettingsScreen> createState() => _SettingsScreenState();
@@ -16,32 +17,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _apiKeyCtrl = TextEditingController();
   final _apiSecretCtrl = TextEditingController();
-  final _syncPassCtrl = TextEditingController();
 
   bool _showSecret = false;
   bool _isSaving = false;
   bool _isSyncing = false;
-  bool _isSavingSyncPass = false;
   DateTime? _selectedDate;
-  bool _isUnlocked = false;
-  final _promptCtrl = TextEditingController();
-
-  @override
-  void initState() {
-    super.initState();
-    final provider = context.read<AppProvider>();
-    _syncPassCtrl.text = provider.syncPassword ?? '';
-  }
 
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
     _apiSecretCtrl.dispose();
-    _syncPassCtrl.dispose();
     super.dispose();
   }
-
-  // ── Actions ───────────────────────────────────────────────────────────────
 
   Future<void> _saveCredentials() async {
     if (!_formKey.currentState!.validate()) return;
@@ -52,7 +39,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           .saveApiCredentials(_apiKeyCtrl.text.trim(), _apiSecretCtrl.text.trim());
       _showSnack('creds_saved'.tr(), isError: false);
     } catch (e) {
-      _showSnack('error'.tr() + ': $e');
+      _showSnack('${'error'.tr()}: $e');
     } finally {
       if (mounted) setState(() => _isSaving = false);
     }
@@ -68,7 +55,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _pickDate() async {
     final picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(), // Default to today to avoid wrong month confusion
+      initialDate: DateTime.now(),
       firstDate: DateTime(2020),
       lastDate: DateTime.now(),
       helpText: 'sync_orders'.tr(),
@@ -81,7 +68,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showSnack('pick_start_date'.tr());
       return;
     }
-    _showSnack('sync_started'.tr(args: [DateFormat('dd MMM yyyy').format(_selectedDate!)]), isError: false);
+    _showSnack(
+      'sync_started'.tr(args: [DateFormat('dd MMM yyyy').format(_selectedDate!)]),
+      isError: false,
+    );
     await _doSync(fromDate: _selectedDate);
   }
 
@@ -93,8 +83,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Future<void> _doSync({DateTime? fromDate}) async {
     setState(() => _isSyncing = true);
     try {
-      final result =
-          await context.read<AppProvider>().syncOrders(fromDate: fromDate);
+      final result = await context.read<AppProvider>().syncOrders(fromDate: fromDate);
       if (mounted) {
         _showSnack(result.toString(), isError: !result.isSuccess);
       }
@@ -105,130 +94,153 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showSnack(String msg, {bool isError = true}) {
     if (!mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-      content: Text(msg),
-      backgroundColor: isError ? Colors.red : Colors.green,
-      duration: const Duration(seconds: 4),
-    ));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(msg),
+        backgroundColor: isError ? Colors.red : Colors.green,
+        duration: const Duration(seconds: 4),
+      ),
+    );
   }
-
-  // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<AppProvider>();
+    final themeProvider = context.watch<ThemeProvider>();
     final hasCredentials = provider.hasApiCredentials;
     final lastSync = provider.lastSyncTime;
     final syncStatus = provider.syncStatus;
-    final syncPass = provider.syncPassword;
-
-    // Check if locked
-    if (syncPass != null && syncPass.isNotEmpty && !_isUnlocked) {
-      return Scaffold(
-        backgroundColor: const Color(0xFF0F0F1A),
-        appBar: AppBar(
-          title: Text('settings'.tr()),
-          backgroundColor: const Color(0xFF16162A),
-        ),
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(24),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(20),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF16162A),
-                    shape: BoxShape.circle,
-                  ),
-                  child: const Icon(Icons.lock_person_outlined, size: 48, color: Color(0xFFE63946)),
-                ),
-                const SizedBox(height: 24),
-                Text(
-                  'settings_locked'.tr(),
-                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  'enter_pass_to_access'.tr(),
-                  style: const TextStyle(color: Colors.white54, fontSize: 14),
-                  textAlign: TextAlign.center,
-                ),
-                const SizedBox(height: 32),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 300),
-                  child: TextField(
-                    controller: _promptCtrl,
-                    obscureText: true,
-                    autofocus: true,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      hintText: 'Password',
-                      hintStyle: const TextStyle(color: Colors.white24),
-                      filled: true,
-                      fillColor: Colors.white.withOpacity(0.05),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
-                      prefixIcon: const Icon(Icons.password, color: Colors.white54),
-                    ),
-                    onSubmitted: (val) {
-                      if (val == syncPass) {
-                        setState(() => _isUnlocked = true);
-                      } else {
-                        _showSnack('Incorrect password');
-                        _promptCtrl.clear();
-                      }
-                    },
-                  ),
-                ),
-                const SizedBox(height: 24),
-                ElevatedButton(
-                  onPressed: () {
-                    if (_promptCtrl.text == syncPass) {
-                      setState(() => _isUnlocked = true);
-                    } else {
-                      _showSnack('Incorrect password');
-                      _promptCtrl.clear();
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFE63946),
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                  ),
-                  child: Text('unlock'.tr()),
-                ),
-              ],
-            ),
-          ),
-        ),
-      );
-    }
+    final isDark = AppTheme.isDark(context);
+    final surface = AppTheme.surfaceColor(context);
+    final raised = AppTheme.surfaceRaisedColor(context);
+    final textPrimary = AppTheme.textPrimaryColor(context);
+    final textMuted = AppTheme.textMutedColor(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        title: Text('settings'.tr()),
-        backgroundColor: const Color(0xFF16162A),
-        foregroundColor: Colors.white,
+        title: Text('settings'.tr(), style: TextStyle(fontWeight: FontWeight.w800)),
+        backgroundColor: surface,
+        foregroundColor: textPrimary,
+        elevation: 0,
       ),
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // ── API Credentials ────────────────────────────────────────────
+            Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 18),
+              padding: const EdgeInsets.all(18),
+              decoration: BoxDecoration(
+                gradient: LinearGradient(
+                  colors: isDark
+                      ? AppTheme.panelGradient(context)
+                      : const [Color(0xFFFFFBF4), Color(0xFFF2E5D2)],
+                  begin: Alignment.topLeft,
+                  end: Alignment.bottomRight,
+                ),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: AppTheme.lineColor(context)),
+                boxShadow: AppTheme.softShadow(context),
+              ),
+              child: Text(
+                'Control theme, credentials, and data operations from one cleaner settings workspace.',
+                style: TextStyle(color: textMuted, fontSize: 13, fontWeight: FontWeight.w600, height: 1.35),
+              ),
+            ),
+            _sectionHeader('Appearance'),
+            _panel(
+              context,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Theme mode',
+                      style: TextStyle(
+                        fontWeight: FontWeight.w700,
+                        fontSize: 15,
+                        color: textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Choose a system, light, or dark look for the app shell.',
+                      style: TextStyle(fontSize: 12, color: textMuted),
+                    ),
+                    const SizedBox(height: 14),
+                    SegmentedButton<ThemeMode>(
+                      showSelectedIcon: false,
+                      segments: const [
+                        ButtonSegment(
+                          value: ThemeMode.system,
+                          icon: Icon(Icons.brightness_auto_outlined),
+                          label: Text('System'),
+                        ),
+                        ButtonSegment(
+                          value: ThemeMode.light,
+                          icon: Icon(Icons.light_mode_outlined),
+                          label: Text('Light'),
+                        ),
+                        ButtonSegment(
+                          value: ThemeMode.dark,
+                          icon: Icon(Icons.dark_mode_outlined),
+                          label: Text('Dark'),
+                        ),
+                      ],
+                      selected: {themeProvider.themeMode},
+                      onSelectionChanged: (selection) {
+                        themeProvider.setThemeMode(selection.first);
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(14),
+                      decoration: BoxDecoration(
+                        color: raised,
+                        borderRadius: BorderRadius.circular(18),
+                        border: Border.all(color: AppTheme.lineColor(context)),
+                      ),
+                      child: Row(
+                        children: [
+                          Icon(
+                            isDark
+                                ? Icons.nightlight_round
+                                : Icons.wb_sunny_outlined,
+                            color: AppTheme.accent,
+                          ),
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Text(
+                              isDark
+                                  ? 'Dark mode is active now.'
+                                  : 'Light mode is active now.',
+                              style: TextStyle(
+                                color: textPrimary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
             _sectionHeader('bybit_api_creds'.tr()),
-            Card(
-              color: const Color(0xFF16162A),
+            _panel(
+              context,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Form(
                   key: _formKey,
                   child: Column(
                     children: [
-                      // Status chip
                       Row(
                         children: [
                           Icon(
@@ -238,9 +250,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           ),
                           const SizedBox(width: 6),
                           Text(
-                            hasCredentials
-                                ? 'creds_configured'.tr()
-                                : 'no_creds'.tr(),
+                            hasCredentials ? 'creds_configured'.tr() : 'no_creds'.tr(),
                             style: TextStyle(
                               color: hasCredentials ? Colors.green : Colors.orange,
                               fontSize: 13,
@@ -251,7 +261,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       const SizedBox(height: 16),
                       TextFormField(
                         controller: _apiKeyCtrl,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: textPrimary),
                         decoration: InputDecoration(
                           labelText: 'api_key'.tr(),
                           prefixIcon: const Icon(Icons.vpn_key),
@@ -264,16 +274,16 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       TextFormField(
                         controller: _apiSecretCtrl,
                         obscureText: !_showSecret,
-                        style: const TextStyle(color: Colors.white),
+                        style: TextStyle(color: textPrimary),
                         decoration: InputDecoration(
                           labelText: 'api_secret'.tr(),
                           prefixIcon: const Icon(Icons.lock),
                           border: const OutlineInputBorder(),
                           suffixIcon: IconButton(
                             icon: Icon(
-                                _showSecret ? Icons.visibility_off : Icons.visibility),
-                            onPressed: () =>
-                                setState(() => _showSecret = !_showSecret),
+                              _showSecret ? Icons.visibility_off : Icons.visibility,
+                            ),
+                            onPressed: () => setState(() => _showSecret = !_showSecret),
                           ),
                         ),
                         validator: (v) =>
@@ -306,7 +316,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                               icon: const Icon(Icons.delete_outline),
                               label: Text('clear_creds'.tr()),
                               style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.red),
+                                foregroundColor: Colors.red,
+                              ),
                             ),
                           ],
                         ],
@@ -316,68 +327,33 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // ── Sync ───────────────────────────────────────────────────────
             _sectionHeader('bybit_sync'.tr()),
-            Card(
-              color: const Color(0xFF16162A),
+            _panel(
+              context,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    SwitchListTile(
-                      title: const Text('Server-Side Sync', style: TextStyle(color: Colors.white)),
-                      subtitle: const Text('Sync orders automatically in the cloud', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                      value: provider.useServerSync,
-                      activeColor: const Color(0xFFE63946),
-                      onChanged: (val) => provider.toggleServerSync(val),
+                    ListTile(
                       contentPadding: EdgeInsets.zero,
+                      leading: const Icon(Icons.cloud_done, color: Colors.green),
+                      title: Text(
+                        'Server-Side Sync',
+                        style: TextStyle(color: textPrimary),
+                      ),
+                      subtitle: Text(
+                        'Bybit sync now runs only in the cloud. API credentials are no longer stored on this device.',
+                        style: TextStyle(color: textMuted, fontSize: 12),
+                      ),
                     ),
                     const Divider(height: 12),
-                    TextFormField(
-                      controller: _syncPassCtrl,
-                      obscureText: true,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      decoration: InputDecoration(
-                        labelText: 'Sync Protection Password',
-                        labelStyle: const TextStyle(color: Colors.white54),
-                        hintText: 'Enter password to lock toggle',
-                        hintStyle: const TextStyle(color: Colors.white24),
-                        prefixIcon: const Icon(Icons.security, color: Colors.white54),
-                        border: const OutlineInputBorder(),
-                        enabledBorder: OutlineInputBorder(borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton.icon(
-                        onPressed: _isSavingSyncPass ? null : () async {
-                          setState(() => _isSavingSyncPass = true);
-                          try {
-                            final pass = _syncPassCtrl.text.trim();
-                            await context.read<AppProvider>().setSyncPassword(pass.isEmpty ? null : pass);
-                            _showSnack('Sync password updated!', isError: false);
-                          } finally {
-                            if (mounted) setState(() => _isSavingSyncPass = false);
-                          }
-                        },
-                        icon: _isSavingSyncPass 
-                          ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
-                          : const Icon(Icons.lock_outline),
-                        label: const Text('Save Sync Password'),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.blueGrey,
-                          foregroundColor: Colors.white,
-                        ),
-                      ),
+                    Text(
+                      'Sync control is now role-based. The app no longer exposes a shared sync password to clients.',
+                      style: TextStyle(color: textMuted, fontSize: 12),
                     ),
                     const Divider(height: 24),
-
-                    // Last sync info
                     if (lastSync != null) ...[
                       Row(
                         children: [
@@ -385,72 +361,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(width: 6),
                           Text(
                             'last_sync'.tr(args: [DateFormat('dd MMM yyyy, HH:mm').format(lastSync)]),
-                            style: const TextStyle(color: Colors.grey, fontSize: 13),
+                            style: TextStyle(color: textMuted, fontSize: 13),
                           ),
                         ],
                       ),
                       const SizedBox(height: 12),
                     ],
-
-                    // Live progress
                     if (syncStatus.isNotEmpty) ...[
-                      LinearProgressIndicator(
-                          color: const Color(0xFFE63946)),
+                      const LinearProgressIndicator(color: Color(0xFFE63946)),
                       const SizedBox(height: 8),
-                      Text(syncStatus,
-                          style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                      Text(
+                        syncStatus,
+                        style: const TextStyle(fontSize: 13, color: Colors.grey),
+                      ),
                       const SizedBox(height: 12),
                     ],
-
-                    // ── Auto Sync ──
                     Text(
                       'auto_sync_incremental'.tr(),
-                      style:
-                          const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                        style: TextStyle(
+                          fontWeight: FontWeight.bold,
+                          fontSize: 15,
+                          color: textPrimary,
+                        ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'auto_sync_desc'.tr(),
-                      style: const TextStyle(fontSize: 12, color: Colors.white54),
+                      style: TextStyle(fontSize: 12, color: textMuted),
                     ),
                     const SizedBox(height: 10),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed:
-                            (!hasCredentials || _isSyncing) ? null : _runAutoSync,
+                        onPressed: (!hasCredentials || _isSyncing) ? null : _runAutoSync,
                         icon: _isSyncing
                             ? const SizedBox(
                                 width: 18,
                                 height: 18,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(strokeWidth: 2),
                               )
                             : const Icon(Icons.sync),
                         label: Text('auto_sync_incremental'.tr()),
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE63946),
+                          backgroundColor: AppTheme.accent,
                           foregroundColor: Colors.white,
                         ),
                       ),
                     ),
-
                     const Divider(height: 32),
-
-                    // ── Full Sync ──
                     Text(
                       'full_sync_date'.tr(),
-                      style:
-                          const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: textPrimary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'full_sync_desc'.tr(),
-                      style: const TextStyle(fontSize: 12, color: Colors.white54),
+                      style: TextStyle(fontSize: 12, color: textMuted),
                     ),
                     const SizedBox(height: 10),
-
-                    // Date picker row
                     Row(
                       children: [
                         Expanded(
@@ -460,8 +432,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             label: Text(
                               _selectedDate == null
                                   ? 'pick_date'.tr()
-                                  : DateFormat('dd MMM yyyy')
-                                      .format(_selectedDate!),
+                                  : DateFormat('dd MMM yyyy').format(_selectedDate!),
                             ),
                           ),
                         ),
@@ -469,8 +440,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           const SizedBox(width: 8),
                           IconButton(
                             icon: const Icon(Icons.close),
-                            onPressed: () =>
-                                setState(() => _selectedDate = null),
+                            onPressed: () => setState(() => _selectedDate = null),
                           ),
                         ],
                       ],
@@ -479,9 +449,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton.icon(
-                        onPressed: (!hasCredentials ||
-                                _isSyncing ||
-                                _selectedDate == null)
+                        onPressed: (!hasCredentials || _isSyncing || _selectedDate == null)
                             ? null
                             : _runFullSync,
                         icon: const Icon(Icons.download_for_offline_outlined),
@@ -496,7 +464,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                       Padding(
                         padding: const EdgeInsets.only(top: 8),
                         child: Text(
-                          '⚠ ' + 'save_creds_first'.tr(),
+                          'save_creds_first'.tr(),
                           style: const TextStyle(color: Colors.orange, fontSize: 12),
                         ),
                       ),
@@ -504,12 +472,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 ),
               ),
             ),
-
             const SizedBox(height: 24),
-
-            // ── Data Management ───────────────────────────────────────────
             _sectionHeader('data_mgmt'.tr()),
-            Card(
+            _panel(
+              context,
               child: Padding(
                 padding: const EdgeInsets.all(16),
                 child: Column(
@@ -517,18 +483,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   children: [
                     Text(
                       'clear_history'.tr(),
-                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 15, color: Colors.white),
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                        color: textPrimary,
+                      ),
                     ),
                     const SizedBox(height: 4),
                     Text(
                       'clear_history_desc'.tr(),
-                      style: const TextStyle(fontSize: 12, color: Colors.white54),
+                      style: TextStyle(fontSize: 12, color: textMuted),
                     ),
                     const SizedBox(height: 12),
                     SizedBox(
                       width: double.infinity,
                       child: OutlinedButton.icon(
-                        onPressed: provider.isLoading ? null : () => _showDeleteAllConfirmation(context),
+                        onPressed: provider.isLoading
+                            ? null
+                            : () => _showDeleteAllConfirmation(context),
                         icon: const Icon(Icons.delete_sweep_outlined),
                         label: Text('delete_all_reset'.tr()),
                         style: OutlinedButton.styleFrom(
@@ -547,13 +519,38 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  Widget _panel(BuildContext context, {required Widget child}) {
+    return Container(
+      width: double.infinity,
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: AppTheme.isDark(context)
+              ? AppTheme.panelGradient(context)
+              : const [Color(0xFFFFFEFB), Color(0xFFF6EFE2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.lineColor(context)),
+        boxShadow: AppTheme.softShadow(context),
+      ),
+      child: child,
+    );
+  }
+
   void _showDeleteAllConfirmation(BuildContext context) {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16162A),
-        title: Text('delete_all_data_confirm'.tr(), style: const TextStyle(color: Colors.white)),
-        content: Text('delete_all_data_msg'.tr(), style: const TextStyle(color: Colors.white54)),
+        backgroundColor: AppTheme.surfaceColor(context),
+        title: Text(
+          'delete_all_data_confirm'.tr(),
+          style: TextStyle(color: AppTheme.textPrimaryColor(context)),
+        ),
+        content: Text(
+          'delete_all_data_msg'.tr(),
+          style: TextStyle(color: AppTheme.textMutedColor(context)),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
@@ -564,8 +561,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
               Navigator.pop(ctx);
               context.read<AppProvider>().deleteAllTransactions();
             },
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE63946)),
-            child: Text('delete_everything'.tr(), style: const TextStyle(color: Colors.white)),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFE63946),
+            ),
+            child: Text(
+              'delete_everything'.tr(),
+              style: const TextStyle(color: Colors.white),
+            ),
           ),
         ],
       ),
@@ -576,12 +578,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         padding: const EdgeInsets.only(bottom: 8),
         child: Text(
           title,
-          style: const TextStyle(
+          style: TextStyle(
             fontSize: 16,
-            fontWeight: FontWeight.bold,
-            color: Color(0xFFE63946),
+            fontWeight: FontWeight.w800,
+            color: AppTheme.textPrimaryColor(context),
           ),
         ),
       );
 }
-

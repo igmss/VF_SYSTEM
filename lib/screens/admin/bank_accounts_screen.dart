@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -11,9 +12,7 @@ import '../../models/financial_transaction.dart';
 const _kBlue    = Color(0xFF4CC9F0);
 const _kGreen   = Color(0xFF4ADE80);
 const _kRed     = Color(0xFFE63946);
-const _kBg      = Color(0xFF0F0F1A);
-const _kSurface = Color(0xFF16162A);
-const _kSurface2 = Color(0xFF1E1E3A);
+
 
 class BankAccountsScreen extends StatefulWidget {
   const BankAccountsScreen({Key? key}) : super(key: key);
@@ -44,19 +43,19 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
     }
 
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: AppTheme.scaffoldBg(context),
       body: CustomScrollView(
         physics: const AlwaysScrollableScrollPhysics(),
         slivers: [
           // ── Top AppBar ───────────────────────────────────────────────────
           SliverAppBar(
             pinned: true,
-            backgroundColor: _kSurface,
-            iconTheme: const IconThemeData(color: Colors.white),
+            backgroundColor: AppTheme.surfaceColor(context),
+            iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
             title: Text(
               'bank_accounts'.tr(),
-              style: const TextStyle(
-                  color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              style: TextStyle(
+                  color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 16),
             ),
             centerTitle: true,
             actions: [
@@ -89,7 +88,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                           const SizedBox(height: 20),
 
                           // ── Total Banner ─────────────────────────────
-                          _buildTotalBanner(dist.totalBankBalance, accounts.length),
+                          _buildTotalBanner(context, dist.totalBankBalance, accounts.length),
 
                           const SizedBox(height: 20),
 
@@ -100,22 +99,20 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
 
                           // ── Dot Indicators ───────────────────────────
                           if (accounts.length > 1)
-                            _buildDots(accounts.length),
+                            _buildDots(context, accounts.length),
 
                           const SizedBox(height: 28),
 
                           // ── Activity for selected bank ───────────────
                           Padding(
                             padding: const EdgeInsets.symmetric(horizontal: 20),
-                            child: _buildActivityHeader(
-                                accounts.isNotEmpty ? accounts[_selectedIndex] : null,
-                                dist),
+                            child: _buildActivityHeader(context, accounts.isNotEmpty ? accounts[_selectedIndex] : null, dist),
                           ),
                           const SizedBox(height: 12),
 
                           Padding(
                             padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
-                            child: _buildActivityList(dist, accounts),
+                            child: _buildActivityList(context, dist, accounts),
                           ),
                         ],
                       ),
@@ -129,15 +126,17 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
   //  Total Banner
   // ─────────────────────────────────────────────────────────────────────────
 
-  Widget _buildTotalBanner(double total, int count) {
+  Widget _buildTotalBanner(BuildContext context, double total, int count) {
     final fmt = NumberFormat('#,##0.00', 'en_US');
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
       child: Container(
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-            colors: [Color(0xFF0D2137), Color(0xFF0A1628)],
+          gradient: LinearGradient(
+            colors: AppTheme.isDark(context)
+                ? [const Color(0xFF0D2137), const Color(0xFF0A1628)]
+                : [const Color(0xFFDCEEF9), const Color(0xFFEBF5FC)],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
@@ -145,7 +144,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
           border: Border.all(color: _kBlue.withOpacity(0.25)),
           boxShadow: [
             BoxShadow(
-                color: _kBlue.withOpacity(0.15),
+                color: _kBlue.withOpacity(AppTheme.isDark(context) ? 0.15 : 0.10),
                 blurRadius: 20,
                 offset: const Offset(0, 6)),
           ],
@@ -168,13 +167,13 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                 children: [
                   Text(
                     'total_bank_balance'.tr(),
-                    style: const TextStyle(color: Colors.white54, fontSize: 12),
+                    style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     '${fmt.format(total)} EGP',
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: AppTheme.textPrimaryColor(context),
                       fontSize: 22,
                       fontWeight: FontWeight.w900,
                       letterSpacing: -0.5,
@@ -235,7 +234,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
   //  Dot Indicators
   // ─────────────────────────────────────────────────────────────────────────
 
-  Widget _buildDots(int count) {
+  Widget _buildDots(BuildContext context, int count) {
     return Row(
       mainAxisAlignment: MainAxisAlignment.center,
       children: List.generate(count, (i) {
@@ -246,7 +245,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
           width: active ? 22 : 7,
           height: 7,
           decoration: BoxDecoration(
-            color: active ? _kBlue : Colors.white.withOpacity(0.18),
+            color: active ? _kBlue : AppTheme.textPrimaryColor(context).withValues(alpha: 0.18),
             borderRadius: BorderRadius.circular(4),
           ),
         );
@@ -258,7 +257,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
   //  Activity Section Header
   // ─────────────────────────────────────────────────────────────────────────
 
-  Widget _buildActivityHeader(BankAccount? bank, DistributionProvider dist) {
+  Widget _buildActivityHeader(BuildContext context, BankAccount? bank, DistributionProvider dist) {
     // filter count for this bank
     final bankId = bank?.id;
     final count = bankId == null
@@ -285,8 +284,8 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
             children: [
               Text(
                 'recent_activity'.tr(),
-                style: const TextStyle(
-                  color: Colors.white,
+                style: TextStyle(
+                  color: AppTheme.textPrimaryColor(context),
                   fontSize: 16,
                   fontWeight: FontWeight.bold,
                 ),
@@ -294,7 +293,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
               if (bank != null)
                 Text(
                   bank.bankName,
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11),
                 ),
             ],
           ),
@@ -320,7 +319,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildActivityList(
-      DistributionProvider dist, List<BankAccount> accounts) {
+      BuildContext context, DistributionProvider dist, List<BankAccount> accounts) {
     if (accounts.isEmpty) return const SizedBox.shrink();
     final bank = accounts[_selectedIndex];
 
@@ -338,16 +337,16 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
           child: Column(
             children: [
               Icon(Icons.receipt_long_outlined,
-                  size: 48, color: Colors.white.withOpacity(0.08)),
+                  size: 48, color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.08)),
               const SizedBox(height: 12),
               Text(
                 'no_activity'.tr(),
-                style: const TextStyle(color: Colors.white38, fontSize: 14),
+                style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 14),
               ),
               const SizedBox(height: 4),
               Text(
                 bank.bankName,
-                style: const TextStyle(color: Colors.white24, fontSize: 12),
+                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 12),
               ),
             ],
           ),
@@ -359,7 +358,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
       itemCount: display.length,
-      itemBuilder: (_, i) => _buildTxRow(display[i]),
+      itemBuilder: (_, i) => _buildTxRow(context, display[i]),
     );
   }
 
@@ -367,7 +366,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
   //  Transaction Row  (logic unchanged)
   // ─────────────────────────────────────────────────────────────────────────
 
-  Widget _buildTxRow(FinancialTransaction tx) {
+  Widget _buildTxRow(BuildContext context, FinancialTransaction tx) {
     final isOut = tx.type == FlowType.BUY_USDT;
     final color = isOut ? _kRed : _kGreen;
     final icon  = isOut ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded;
@@ -386,7 +385,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
     return Container(
       margin: const EdgeInsets.only(bottom: 10),
       decoration: BoxDecoration(
-        color: _kSurface,
+        color: AppTheme.surfaceColor(context),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: color.withOpacity(0.12)),
       ),
@@ -409,8 +408,8 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: AppTheme.textPrimaryColor(context),
                           fontSize: 13,
                           fontWeight: FontWeight.w600),
                       overflow: TextOverflow.ellipsis),
@@ -418,7 +417,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                   Text(
                     DateFormat('dd/MM/yyyy HH:mm').format(tx.timestamp),
                     style:
-                        const TextStyle(color: Colors.white38, fontSize: 11),
+                        TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11),
                   ),
                 ],
               ),
@@ -437,7 +436,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                   Text(
                     '${tx.usdtQuantity!.toStringAsFixed(2)} USDT',
                     style:
-                        const TextStyle(color: Colors.white38, fontSize: 10),
+                        TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10),
                   ),
               ],
             ),
@@ -468,8 +467,8 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
             ),
             const SizedBox(height: 20),
             Text('no_data'.tr(),
-                style: const TextStyle(
-                    color: Colors.white60,
+                style: TextStyle(
+                    color: AppTheme.textMutedColor(context),
                     fontSize: 16,
                     fontWeight: FontWeight.w500)),
             const SizedBox(height: 8),
@@ -500,10 +499,10 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
       builder: (_) => _FormDialog(
         title: 'add_bank_account'.tr(),
         fields: [
-          _tf(nameCtrl,   'bank_name'.tr(),       Icons.business),
-          _tf(holderCtrl, 'account_holder'.tr(),  Icons.person),
-          _tf(numCtrl,    'account_number'.tr(),  Icons.credit_card),
-          _tf(balCtrl,    'opening_balance'.tr(), Icons.monetization_on,
+          _tf(context, nameCtrl,   'bank_name'.tr(),       Icons.business),
+          _tf(context, holderCtrl, 'account_holder'.tr(),  Icons.person),
+          _tf(context, numCtrl,    'account_number'.tr(),  Icons.credit_card),
+          _tf(context, balCtrl,    'opening_balance'.tr(), Icons.monetization_on,
               keyboard: TextInputType.number),
         ],
         onConfirm: () {
@@ -533,9 +532,9 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
       builder: (_) => _FormDialog(
         title: 'fund_bank_account'.tr(args: [bank.bankName]),
         fields: [
-          _tf(amtCtrl,   'amount_egp'.tr(), Icons.monetization_on,
+          _tf(context, amtCtrl,   'amount_egp'.tr(), Icons.monetization_on,
               keyboard: TextInputType.number),
-          _tf(notesCtrl, 'notes'.tr(),      Icons.notes),
+          _tf(context, notesCtrl, 'notes'.tr(),      Icons.notes),
         ],
         // Step 1 done — now show confirm dialog before touching data
         onConfirm: () {
@@ -546,7 +545,7 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
           showDialog(
             context: context,
             builder: (_) => AlertDialog(
-              backgroundColor: const Color(0xFF16162A),
+              backgroundColor: AppTheme.surfaceColor(context),
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(18)),
               title: Row(
@@ -555,8 +554,8 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                       color: _kGreen, size: 20),
                   const SizedBox(width: 8),
                   Text('confirm_fund'.tr(),
-                      style: const TextStyle(
-                          color: Colors.white,
+                      style: TextStyle(
+                          color: AppTheme.textPrimaryColor(context),
                           fontWeight: FontWeight.bold,
                           fontSize: 16)),
                 ],
@@ -577,21 +576,21 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(bank.bankName,
-                            style: const TextStyle(
-                                color: Colors.white,
+                            style: TextStyle(
+                                color: AppTheme.textPrimaryColor(context),
                                 fontWeight: FontWeight.bold,
                                 fontSize: 15)),
                         const SizedBox(height: 4),
                         Text(bank.accountNumber,
-                            style: const TextStyle(
-                                color: Colors.white38, fontSize: 11)),
-                        const Divider(color: Colors.white12, height: 20),
+                            style: TextStyle(
+                                color: AppTheme.textMutedColor(context), fontSize: 11)),
+                        Divider(color: AppTheme.lineColor(context), height: 20),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('Adding',
+                            Text('Adding',
                                 style: TextStyle(
-                                    color: Colors.white54, fontSize: 13)),
+                                    color: AppTheme.textMutedColor(context), fontSize: 13)),
                             Text('+ ${fmt.format(amount)} EGP',
                                 style: const TextStyle(
                                     color: _kGreen,
@@ -602,18 +601,18 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                         if (notes != null) ...[
                           const SizedBox(height: 6),
                           Text(notes,
-                              style: const TextStyle(
-                                  color: Colors.white38,
+                              style: TextStyle(
+                                  color: AppTheme.textMutedColor(context),
                                   fontSize: 11,
                                   fontStyle: FontStyle.italic)),
                         ],
-                        const Divider(color: Colors.white12, height: 20),
+                        Divider(color: AppTheme.lineColor(context), height: 20),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('New Balance',
+                            Text('New Balance',
                                 style: TextStyle(
-                                    color: Colors.white54, fontSize: 12)),
+                                    color: AppTheme.textMutedColor(context), fontSize: 12)),
                             Text(
                               '${fmt.format(bank.balance + amount)} EGP',
                               style: const TextStyle(
@@ -627,10 +626,10 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                     ),
                   ),
                   const SizedBox(height: 12),
-                  const Text(
+                  Text(
                     'This action will be recorded in the ledger and cannot be reversed.',
                     style: TextStyle(
-                        color: Colors.white38,
+                        color: AppTheme.textMutedColor(context),
                         fontSize: 11),
                     textAlign: TextAlign.center,
                   ),
@@ -640,13 +639,13 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: Text('cancel'.tr(),
-                      style: const TextStyle(color: Colors.white38)),
+                      style: TextStyle(color: AppTheme.textMutedColor(context))),
                 ),
                 ElevatedButton.icon(
-                  icon: const Icon(Icons.check_rounded,
-                      color: Colors.white, size: 16),
+                  icon: Icon(Icons.check_rounded,
+                      color: AppTheme.textPrimaryColor(context), size: 16),
                   label: Text('confirm'.tr(),
-                      style: const TextStyle(color: Colors.white)),
+                      style: TextStyle(color: AppTheme.textPrimaryColor(context))),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _kGreen,
                     shape: RoundedRectangleBorder(
@@ -681,9 +680,9 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
       builder: (_) => _FormDialog(
         title: context.locale.languageCode == 'ar' ? 'تصحيح رصيد ${bank.bankName}' : 'Correct ${bank.bankName} Balance',
         fields: [
-          _tf(balCtrl, context.locale.languageCode == 'ar' ? 'الرصيد الجديد' : 'New Balance', Icons.account_balance_wallet,
+          _tf(context, balCtrl, context.locale.languageCode == 'ar' ? 'الرصيد الجديد' : 'New Balance', Icons.account_balance_wallet,
               keyboard: const TextInputType.numberWithOptions(decimal: true)),
-          _tf(notesCtrl, 'notes'.tr(), Icons.notes),
+          _tf(context, notesCtrl, 'notes'.tr(), Icons.notes),
         ],
         onConfirm: () {
           final newBal = double.tryParse(balCtrl.text) ?? bank.balance;
@@ -698,26 +697,26 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
     );
   }
 
-  static Widget _tf(TextEditingController c, String label, IconData icon,
+  static Widget _tf(BuildContext context, TextEditingController c, String label, IconData icon,
           {TextInputType keyboard = TextInputType.text}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: TextField(
           controller: c,
           keyboardType: keyboard,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: AppTheme.textPrimaryColor(context)),
           decoration: InputDecoration(
             labelText: label,
-            labelStyle: const TextStyle(color: Colors.white54),
-            prefixIcon: Icon(icon, color: Colors.white38, size: 20),
+            labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
+            prefixIcon: Icon(icon, color: AppTheme.textMutedColor(context), size: 20),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.06),
+            fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
             border: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1))),
             enabledBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1))),
             focusedBorder: OutlineInputBorder(
                 borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: _kRed)),
@@ -758,15 +757,17 @@ class _BankSwipeCard extends StatelessWidget {
         borderRadius: BorderRadius.circular(24),
         gradient: LinearGradient(
           colors: isDefault
-              ? [const Color(0xFF0D2137), const Color(0xFF0A1628)]
-              : [_kSurface2, _kSurface],
+              ? (AppTheme.isDark(context)
+                  ? [const Color(0xFF0D2137), const Color(0xFF0A1628)]
+                  : [const Color(0xFFDCEEF9), const Color(0xFFEBF5FC)])
+              : [AppTheme.surfaceRaisedColor(context), AppTheme.surfaceColor(context)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
         border: Border.all(
           color: isDefault
               ? _kBlue.withOpacity(0.45)
-              : Colors.white.withOpacity(0.06),
+              : AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
           width: 1.5,
         ),
         boxShadow: [
@@ -805,8 +806,8 @@ class _BankSwipeCard extends StatelessWidget {
                         Flexible(
                           child: Text(
                             account.bankName,
-                            style: const TextStyle(
-                              color: Colors.white,
+                            style: TextStyle(
+                              color: AppTheme.textPrimaryColor(context),
                               fontWeight: FontWeight.bold,
                               fontSize: 16,
                             ),
@@ -840,8 +841,8 @@ class _BankSwipeCard extends StatelessWidget {
                       ],
                     ),
                     Text(account.accountHolder,
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12)),
+                        style: TextStyle(
+                            color: AppTheme.textMutedColor(context), fontSize: 12)),
                   ],
                 ),
               ),
@@ -849,7 +850,7 @@ class _BankSwipeCard extends StatelessWidget {
           ),
 
           const SizedBox(height: 18),
-          Container(height: 1, color: Colors.white.withOpacity(0.05)),
+          Container(height: 1, color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.05)),
           const SizedBox(height: 14),
 
           // ── Balance + Account Number ───────────────────────────────────
@@ -859,9 +860,9 @@ class _BankSwipeCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('BALANCE',
+                  Text('BALANCE',
                       style: TextStyle(
-                          color: Colors.white38,
+                          color: AppTheme.textMutedColor(context),
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1)),
@@ -879,17 +880,17 @@ class _BankSwipeCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.end,
                 children: [
-                  const Text('ACCOUNT',
+                  Text('ACCOUNT',
                       style: TextStyle(
-                          color: Colors.white38,
+                          color: AppTheme.textMutedColor(context),
                           fontSize: 10,
                           fontWeight: FontWeight.bold,
                           letterSpacing: 1)),
                   const SizedBox(height: 4),
                   Text(
                     account.accountNumber,
-                    style: const TextStyle(
-                        color: Colors.white60,
+                    style: TextStyle(
+                        color: AppTheme.textMutedColor(context),
                         fontSize: 12,
                         letterSpacing: 1.5),
                   ),
@@ -930,18 +931,18 @@ class _BankSwipeCard extends StatelessWidget {
                   onTap: () => showDialog(
                     context: context,
                     builder: (_) => AlertDialog(
-                      backgroundColor: _kSurface,
+                      backgroundColor: AppTheme.surfaceColor(context),
                       shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(18)),
                       title: Text('delete_confirm'.tr(),
-                          style: const TextStyle(color: Colors.white)),
+                          style: TextStyle(color: AppTheme.textPrimaryColor(context))),
                       content: Text('delete_msg'.tr(),
-                          style: const TextStyle(color: Colors.white54)),
+                          style: TextStyle(color: AppTheme.textMutedColor(context))),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(context),
                           child: Text('cancel'.tr(),
-                              style: const TextStyle(color: Colors.white38)),
+                              style: TextStyle(color: AppTheme.textMutedColor(context))),
                         ),
                         TextButton(
                           onPressed: () {
@@ -1046,11 +1047,11 @@ class _PremiumButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 16),
+            Icon(icon, color: AppTheme.textPrimaryColor(context), size: 16),
             const SizedBox(width: 5),
             Text(label,
-                style: const TextStyle(
-                    color: Colors.white,
+                style: TextStyle(
+                    color: AppTheme.textPrimaryColor(context),
                     fontSize: 12,
                     fontWeight: FontWeight.bold)),
           ],
@@ -1078,7 +1079,7 @@ class _FormDialog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: _kSurface,
+      backgroundColor: AppTheme.surfaceColor(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -1087,8 +1088,8 @@ class _FormDialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style: const TextStyle(
-                    color: Colors.white,
+                style: TextStyle(
+                    color: AppTheme.textPrimaryColor(context),
                     fontWeight: FontWeight.bold,
                     fontSize: 16)),
             const SizedBox(height: 18),
@@ -1099,7 +1100,7 @@ class _FormDialog extends StatelessWidget {
                 TextButton(
                   onPressed: () => Navigator.pop(context),
                   child: Text('cancel'.tr(),
-                      style: const TextStyle(color: Colors.white38)),
+                      style: TextStyle(color: AppTheme.textMutedColor(context))),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
@@ -1113,7 +1114,7 @@ class _FormDialog extends StatelessWidget {
                         borderRadius: BorderRadius.circular(10)),
                   ),
                   child: Text('save'.tr(),
-                      style: const TextStyle(color: Colors.white)),
+                      style: TextStyle(color: AppTheme.textPrimaryColor(context))),
                 ),
               ],
             ),

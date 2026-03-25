@@ -6,10 +6,12 @@ import 'models/app_user.dart';
 import 'providers/app_provider.dart';
 import 'providers/auth_provider.dart';
 import 'providers/distribution_provider.dart';
+import 'providers/theme_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/admin/admin_dashboard.dart';
 import 'screens/collector/collector_dashboard.dart';
 import 'screens/splash_screen.dart';
+import 'theme/app_theme.dart';
 import 'firebase_options.dart';
 
 Future<void> main() async {
@@ -43,6 +45,7 @@ class MyApp extends StatelessWidget {
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
         ChangeNotifierProvider(create: (_) => DistributionProvider()),
+        ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProxyProvider<DistributionProvider, AppProvider>(
           create: (_) => AppProvider(),
           update: (_, dist, app) {
@@ -85,32 +88,29 @@ class MyApp extends StatelessWidget {
                 timestamp: timestamp,
               );
             });
-            return app!;
+            return app;
           },
         ),
       ],
-      child: MaterialApp(
-        title: 'Vodafone Distribution',
-        debugShowCheckedModeBanner: false,
-        localizationsDelegates: context.localizationDelegates,
-        supportedLocales: context.supportedLocales,
-        locale: context.locale,
-        theme: ThemeData(
-          useMaterial3: true,
-          brightness: Brightness.dark,
-          colorScheme: ColorScheme.fromSeed(
-            seedColor: const Color(0xFFE63946),
-            brightness: Brightness.dark,
-          ),
-          scaffoldBackgroundColor: const Color(0xFF0F0F1A),
-        ),
-        home: const _AppRouter(),
+      child: Consumer<ThemeProvider>(
+        builder: (context, themeProvider, _) {
+          return MaterialApp(
+            title: 'Vodafone Distribution',
+            debugShowCheckedModeBanner: false,
+            localizationsDelegates: context.localizationDelegates,
+            supportedLocales: context.supportedLocales,
+            locale: context.locale,
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            themeMode: themeProvider.themeMode,
+            home: const _AppRouter(),
+          );
+        },
       ),
     );
   }
 }
 
-/// Listens to `AuthProvider` state and routes to the correct screen.
 class _AppRouter extends StatelessWidget {
   const _AppRouter();
 
@@ -126,13 +126,33 @@ class _AppRouter extends StatelessWidget {
       return const LoginScreen();
     }
 
-    // Route based on role:
-    // - COLLECTOR → dedicated CollectorDashboard (no admin access)
-    // - All others (ADMIN, FINANCE, OPERATOR) → AdminDashboard
     final role = auth.currentUser?.role;
     if (role == UserRole.COLLECTOR) {
       return const CollectorDashboard();
     }
-    return const AdminDashboard();
+    if (role == UserRole.ADMIN || role == UserRole.FINANCE) {
+      return const AdminDashboard();
+    }
+
+    return Scaffold(
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.lock_outline, size: 48),
+              const SizedBox(height: 12),
+              const Text('No dashboard is configured for this role.'),
+              const SizedBox(height: 12),
+              ElevatedButton(
+                onPressed: () => context.read<AuthProvider>().signOut(),
+                child: const Text('Sign out'),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }

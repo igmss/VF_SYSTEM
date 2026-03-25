@@ -6,6 +6,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/collector.dart';
 import '../../models/retailer.dart';
+import '../../theme/app_theme.dart';
 
 class CollectorsScreen extends StatelessWidget {
   const CollectorsScreen({Key? key}) : super(key: key);
@@ -14,30 +15,56 @@ class CollectorsScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final dist = context.watch<DistributionProvider>();
     final auth = context.watch<AuthProvider>();
+    final textPrimary = AppTheme.textPrimaryColor(context);
+    final surface = AppTheme.surfaceColor(context);
+    final isLight = !AppTheme.isDark(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF16162A),
-        title: Text('collectors'.tr(), style: const TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+        backgroundColor: surface,
+        elevation: 0,
+        title: Text('collectors'.tr(), style: TextStyle(color: textPrimary, fontWeight: FontWeight.w800)),
+        iconTheme: IconThemeData(color: textPrimary),
         actions: [
           if (auth.isAdmin)
             IconButton(
               tooltip: 'add_collector'.tr(),
-              icon: const Icon(Icons.person_add, color: Color(0xFFE63946)),
+              icon: Icon(Icons.person_add, color: isLight ? const Color(0xFF8C6239) : AppTheme.accent),
               onPressed: () => _showPickUserDialog(context),
             ),
         ],
       ),
       body: dist.collectors.isEmpty
-          ? _empty()
+          ? _empty(context)
           : Column(
               children: [
-                _cashBanner(dist.totalCollectorCash),
+                _cashBanner(context, dist.totalCollectorCash),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: AppTheme.isDark(context)
+                            ? AppTheme.panelGradient(context)
+                            : const [Color(0xFFFFFBF4), Color(0xFFF4E8D7)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: AppTheme.lineColor(context)),
+                    ),
+                    child: Text(
+                      'See cash exposure, collector limits, and assignment operations in a more structured control panel.',
+                      style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600, height: 1.35),
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: ListView.builder(
-                    padding: const EdgeInsets.all(16),
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
                     itemCount: dist.collectors.length,
                     itemBuilder: (ctx, i) => _CollectorCard(
                       collector: dist.collectors[i],
@@ -56,44 +83,62 @@ class CollectorsScreen extends StatelessWidget {
     );
   }
 
-  Widget _cashBanner(double total) => Container(
+  Widget _cashBanner(BuildContext context, double total) => Container(
         margin: const EdgeInsets.all(16),
-        padding: const EdgeInsets.all(18),
+        padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
-          gradient: const LinearGradient(
-              colors: [Color(0xFFA78BFA), Color(0xFF7C3AED)],
+          gradient: LinearGradient(
+              colors: AppTheme.isDark(context)
+                  ? const [Color(0xFF1F2937), Color(0xFF111827)]
+                  : const [Color(0xFFFFF6E2), Color(0xFFF0DFC2)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight),
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(
+            color: AppTheme.isDark(context)
+                ? Colors.white.withValues(alpha: 0.08)
+                : const Color(0xFF8C6239).withValues(alpha: 0.18),
+          ),
           boxShadow: [
             BoxShadow(
-                color: const Color(0xFFA78BFA).withOpacity(0.3),
-                blurRadius: 16,
-                offset: const Offset(0, 4))
+                color: AppTheme.isDark(context)
+                    ? Colors.black.withValues(alpha: 0.24)
+                    : const Color(0xFF8C6239).withValues(alpha: 0.12),
+                blurRadius: 24,
+                offset: const Offset(0, 10))
           ],
         ),
         child: Row(
           children: [
-            const Icon(Icons.delivery_dining, color: Colors.white, size: 30),
+            Container(
+              padding: const EdgeInsets.all(12),
+              decoration: BoxDecoration(
+                color: AppTheme.isDark(context)
+                    ? Colors.white.withValues(alpha: 0.08)
+                    : const Color(0xFF8C6239).withValues(alpha: 0.10),
+                borderRadius: BorderRadius.circular(16),
+              ),
+              child: Icon(Icons.delivery_dining, color: AppTheme.isDark(context) ? Colors.white : const Color(0xFF8C6239), size: 28),
+            ),
             const SizedBox(width: 14),
             Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text('total_cash_in_hand'.tr(),
-                  style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w600)),
               Text('${_fmt(total)} EGP',
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 22, fontWeight: FontWeight.bold)),
+                  style: TextStyle(
+                      color: AppTheme.textPrimaryColor(context), fontSize: 24, fontWeight: FontWeight.w900)),
             ])
           ],
         ),
       );
 
-  Widget _empty() => Center(
+  Widget _empty(BuildContext context) => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            const Icon(Icons.delivery_dining_outlined, size: 60, color: Colors.white24),
+            Icon(Icons.delivery_dining_outlined, size: 60, color: AppTheme.textMutedColor(context).withValues(alpha: 0.6)),
             const SizedBox(height: 12),
-            Text('no_data'.tr(), style: const TextStyle(color: Colors.white38)),
+            Text('no_data'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
           ],
         ),
       );
@@ -133,9 +178,9 @@ class CollectorsScreen extends StatelessWidget {
       showDialog(
         context: context,
         builder: (ctx) => AlertDialog(
-          backgroundColor: const Color(0xFF16162A),
+          backgroundColor: AppTheme.surfaceColor(context),
           title: Text('select_collector_user'.tr(),
-              style: const TextStyle(color: Colors.white, fontSize: 15)),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15)),
           content: SizedBox(
             width: double.maxFinite,
             child: ListView(
@@ -147,11 +192,11 @@ class CollectorsScreen extends StatelessWidget {
                       style: const TextStyle(color: Color(0xFFA78BFA))),
                 ),
                 title: Text(u.name,
-                    style: const TextStyle(color: Colors.white)),
+                    style: TextStyle(color: AppTheme.textPrimaryColor(context))),
                 subtitle: Text(u.email,
-                    style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                    style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
                 onTap: () async {
-                  Navigator.pop(ctx);
+                  Navigator.pop(context);
                   await dist.ensureCollectorRecord(
                     uid: u.uid,
                     name: u.name,
@@ -166,9 +211,9 @@ class CollectorsScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () => Navigator.pop(context),
               child: Text('cancel'.tr(),
-                  style: const TextStyle(color: Colors.white38)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context))),
             ),
           ],
         ),
@@ -191,39 +236,40 @@ class CollectorsScreen extends StatelessWidget {
       builder: (_) => _Dialog(
         title: 'Edit Collector',
         fields: [
-          _tf(nameCtrl, 'name'.tr(), Icons.person),
-          _tf(phoneCtrl, 'phone'.tr(), Icons.phone, keyboard: TextInputType.phone),
-          _tf(limitCtrl, 'Cash Limit (EGP)', Icons.account_balance_wallet, keyboard: TextInputType.number),
+          _tf(context, nameCtrl, 'name'.tr(), Icons.person),
+          _tf(context, phoneCtrl, 'phone'.tr(), Icons.phone, keyboard: TextInputType.phone),
+          _tf(context, limitCtrl, 'Cash Limit (EGP)', Icons.account_balance_wallet, keyboard: TextInputType.number),
         ],
-        onConfirm: () {
+        onConfirm: () async {
           final newLimit = double.tryParse(limitCtrl.text) ?? 50000.0;
-          dist.updateCollector(
+          await dist.updateCollector(
             collector.copyWith(
               name: nameCtrl.text.trim(),
               phone: phoneCtrl.text.trim(),
               cashLimit: newLimit,
             ),
           );
+          return true;
         },
       ),
     );
   }
 
-  void _showCollectDialog(BuildContext ctx, Collector collector,
+  void _showCollectDialog(BuildContext context, Collector collector,
       DistributionProvider dist, AuthProvider auth) {
     final amtCtrl = TextEditingController();
     // Show ALL active retailers — admin may collect more than the debt (credit)
     final retailers = dist.retailers;
     if (retailers.isEmpty) {
-      ScaffoldMessenger.of(ctx)
+      ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('no_data'.tr())));
       return;
     }
     String selectedRetailerId = retailers.first.id;
     showDialog(
-      context: ctx,
+      context: context,
       builder: (ctx2) => StatefulBuilder(
-        builder: (ctx2, setSt) {
+        builder: (context2, setSt) {
           final selectedRetailer =
               retailers.firstWhere((r) => r.id == selectedRetailerId);
           final entered   = double.tryParse(amtCtrl.text) ?? 0.0;
@@ -236,13 +282,13 @@ class CollectorsScreen extends StatelessWidget {
             fields: [
               DropdownButtonFormField<String>(
                 value: selectedRetailerId,
-                dropdownColor: const Color(0xFF1E1E3A),
-                style: const TextStyle(color: Colors.white),
+                dropdownColor: AppTheme.surfaceColor(context),
+                style: TextStyle(color: AppTheme.textPrimaryColor(context)),
                 decoration: InputDecoration(
                   labelText: 'retailers'.tr(),
-                  labelStyle: const TextStyle(color: Colors.white54),
+                  labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
                   filled: true,
-                  fillColor: Colors.white.withOpacity(0.06),
+                  fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
                   border:
                       OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
@@ -255,7 +301,7 @@ class CollectorsScreen extends StatelessWidget {
                     setSt(() => selectedRetailerId = v ?? selectedRetailerId),
               ),
               const SizedBox(height: 12),
-              _tf(amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
+              _tf(context, amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
                   keyboard: TextInputType.number,
                   onChanged: (_) => setSt(() {})),
               // Live breakdown
@@ -264,12 +310,12 @@ class CollectorsScreen extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.all(10),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.04),
+                    color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(10),
                     border: Border.all(
                       color: credit > 0
                           ? const Color(0xFF4ADE80).withOpacity(0.4)
-                          : Colors.white12,
+                          : AppTheme.lineColor(context),
                     ),
                   ),
                   child: Column(
@@ -277,9 +323,9 @@ class CollectorsScreen extends StatelessWidget {
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          const Text('↓ Debt Reduced',
+                          Text('↓ Debt Reduced',
                               style: TextStyle(
-                                  color: Colors.white54, fontSize: 12)),
+                                  color: AppTheme.textMutedColor(context), fontSize: 12)),
                           Text('${debtPaid.toStringAsFixed(0)} EGP',
                               style: const TextStyle(
                                   color: Color(0xFFFBBF24),
@@ -292,9 +338,9 @@ class CollectorsScreen extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Text('⊕ Credit Added',
+                            Text('⊕ Credit Added',
                                 style: TextStyle(
-                                    color: Colors.white54, fontSize: 12)),
+                                    color: AppTheme.textMutedColor(context), fontSize: 12)),
                             Text('+${credit.toStringAsFixed(0)} EGP',
                                 style: const TextStyle(
                                     color: Color(0xFF4ADE80),
@@ -308,15 +354,21 @@ class CollectorsScreen extends StatelessWidget {
                 ),
               ],
             ],
-            onConfirm: () {
+            onConfirm: () async {
               final amount = double.tryParse(amtCtrl.text) ?? 0;
-              if (amount <= 0) return;
-              dist.collectFromRetailer(
+              if (amount <= 0) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
+                );
+                return false;
+              }
+              await dist.collectFromRetailer(
                 collectorId: collector.id,
                 retailerId: selectedRetailerId,
                 amount: amount,
                 createdByUid: auth.currentUser?.uid ?? 'system',
               );
+              return true;
             },
           );
         },
@@ -324,32 +376,32 @@ class CollectorsScreen extends StatelessWidget {
     );
   }
 
-  void _showDepositDialog(BuildContext ctx, Collector collector,
+  void _showDepositDialog(BuildContext context, Collector collector,
       DistributionProvider dist, AuthProvider auth) {
     final amtCtrl = TextEditingController(
         text: collector.cashOnHand.toStringAsFixed(0));
     final banks = dist.bankAccounts;
     if (banks.isEmpty) {
-      ScaffoldMessenger.of(ctx)
+      ScaffoldMessenger.of(context)
           .showSnackBar(SnackBar(content: Text('no_data'.tr())));
       return;
     }
     String selectedBankId = banks.first.id;
     showDialog(
-      context: ctx,
+      context: context,
       builder: (ctx2) => StatefulBuilder(
-        builder: (ctx2, setSt) => _Dialog(
+        builder: (context2, setSt) => _Dialog(
           title: 'deposit_to_bank_action'.tr(args: [collector.name]),
           fields: [
             DropdownButtonFormField<String>(
               value: selectedBankId,
-              dropdownColor: const Color(0xFF1E1E3A),
-              style: const TextStyle(color: Colors.white),
+              dropdownColor: AppTheme.surfaceColor(context),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context)),
               decoration: InputDecoration(
                 labelText: 'banks'.tr(),
-                labelStyle: const TextStyle(color: Colors.white54),
+                labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.06),
+                fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
               items: banks
@@ -358,16 +410,24 @@ class CollectorsScreen extends StatelessWidget {
               onChanged: (v) => setSt(() => selectedBankId = v ?? selectedBankId),
             ),
             const SizedBox(height: 12),
-            _tf(amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
+            _tf(context, amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
                 keyboard: TextInputType.number),
           ],
-          onConfirm: () {
-            dist.depositToBank(
+          onConfirm: () async {
+            final amount = double.tryParse(amtCtrl.text) ?? 0;
+            if (amount <= 0) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
+              );
+              return false;
+            }
+            await dist.depositToBank(
               collectorId: collector.id,
               bankAccountId: selectedBankId,
-              amount: double.tryParse(amtCtrl.text) ?? 0,
+              amount: amount,
               createdByUid: auth.currentUser?.uid ?? 'system',
             );
+            return true;
           },
         ),
       ),
@@ -376,6 +436,7 @@ class CollectorsScreen extends StatelessWidget {
 
   void _showAssignRetailersDialog(
       BuildContext context, Collector collector, DistributionProvider dist) {
+    final surface = AppTheme.surfaceColor(context);
     final allRetailers = dist.retailers;
     // Which retailer IDs are currently assigned to this collector?
     final Set<String> assigned = allRetailers
@@ -387,16 +448,16 @@ class CollectorsScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
-          backgroundColor: const Color(0xFF16162A),
+          backgroundColor: surface,
           title: Text(
             '${'assign_retailers'.tr()} — ${collector.name}',
-            style: const TextStyle(color: Colors.white, fontSize: 15),
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15),
           ),
           content: SizedBox(
             width: double.maxFinite,
             child: allRetailers.isEmpty
                 ? Text('no_data'.tr(),
-                    style: const TextStyle(color: Colors.white38))
+                    style: TextStyle(color: AppTheme.textMutedColor(context)))
                 : ListView(
                     shrinkWrap: true,
                     children: allRetailers.map((r) {
@@ -413,17 +474,17 @@ class CollectorsScreen extends StatelessWidget {
                       return CheckboxListTile(
                         value: isChecked,
                         title: Text(r.name,
-                            style: const TextStyle(color: Colors.white)),
+                            style: TextStyle(color: AppTheme.textPrimaryColor(context))),
                         subtitle: currentCollector != null
                             ? Text(
                                 '${'assigned_to'.tr()}: $currentCollector',
                                 style: const TextStyle(
                                     color: Colors.orange, fontSize: 11))
                             : Text(r.area,
-                                style: const TextStyle(
-                                    color: Colors.white38, fontSize: 11)),
+                                style: TextStyle(
+                                    color: AppTheme.textMutedColor(context), fontSize: 11)),
                         activeColor: const Color(0xFFA78BFA),
-                        checkColor: Colors.white,
+                        checkColor: AppTheme.textPrimaryColor(context),
                         onChanged: (val) => setSt(() {
                           if (val == true) {
                             assigned.add(r.id);
@@ -437,13 +498,13 @@ class CollectorsScreen extends StatelessWidget {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(ctx),
+              onPressed: () => Navigator.pop(context),
               child: Text('cancel'.tr(),
-                  style: const TextStyle(color: Colors.white38)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context))),
             ),
             ElevatedButton(
               onPressed: () async {
-                Navigator.pop(ctx);
+                Navigator.pop(context);
                 final collectorUid = collector.uid;
                 if (collectorUid == null || collectorUid.isEmpty) {
                   ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -468,7 +529,7 @@ class CollectorsScreen extends StatelessWidget {
               style: ElevatedButton.styleFrom(
                   backgroundColor: const Color(0xFFA78BFA)),
               child: Text('save'.tr(),
-                  style: const TextStyle(color: Colors.white)),
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context))),
             ),
           ],
         ),
@@ -476,7 +537,7 @@ class CollectorsScreen extends StatelessWidget {
     );
   }
 
-  static Widget _tf(TextEditingController c, String label, IconData icon,
+  static Widget _tf(BuildContext context, TextEditingController c, String label, IconData icon,
       {TextInputType keyboard = TextInputType.text,
       void Function(String)? onChanged}) =>
       Padding(
@@ -484,18 +545,18 @@ class CollectorsScreen extends StatelessWidget {
         child: TextField(
           controller: c,
           keyboardType: keyboard,
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: AppTheme.textPrimaryColor(context)),
           onChanged: onChanged,
           decoration: InputDecoration(
             labelText: label,
-            labelStyle: const TextStyle(color: Colors.white54),
-            prefixIcon: Icon(icon, color: Colors.white38, size: 20),
+            labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
+            prefixIcon: Icon(icon, color: AppTheme.textMutedColor(context), size: 20),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.06),
+            fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1))),
             enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: Colors.white.withOpacity(0.1))),
+                borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1))),
             focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
                 borderSide: const BorderSide(color: Color(0xFFE63946))),
           ),
@@ -533,35 +594,46 @@ class _CollectorCard extends StatelessWidget {
       margin: const EdgeInsets.only(bottom: 12),
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: const Color(0xFF16162A),
-        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: AppTheme.isDark(context)
+              ? [AppTheme.surfaceColor(context), AppTheme.surfaceRaisedColor(context)]
+              : const [Color(0xFFFFFEFB), Color(0xFFF6EFE2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: isCritical ? Colors.red.withOpacity(0.4) : const Color(0xFFA78BFA).withOpacity(0.2),
+          color: isCritical
+              ? Colors.red.withOpacity(0.4)
+              : (AppTheme.isDark(context)
+                  ? Colors.white.withOpacity(0.08)
+                  : const Color(0xFF8C6239).withOpacity(0.18)),
           width: isCritical ? 2 : 1,
         ),
+        boxShadow: AppTheme.softShadow(context),
       ),
       child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
         Row(children: [
           Container(
             padding: const EdgeInsets.all(8),
             decoration: BoxDecoration(
-              color: const Color(0xFFA78BFA).withOpacity(0.12),
+              color: (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)).withOpacity(0.12),
               borderRadius: BorderRadius.circular(10),
             ),
-            child: const Icon(Icons.delivery_dining, color: Color(0xFFA78BFA), size: 20),
+            child: Icon(Icons.delivery_dining, color: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239), size: 20),
           ),
           const SizedBox(width: 10),
           Expanded(
             child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
               Text(collector.name,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
               Text(collector.phone,
-                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
             ]),
           ),
           if (onEdit != null)
             IconButton(
-              icon: const Icon(Icons.edit, color: Colors.white54, size: 18),
+              icon: Icon(Icons.edit, color: AppTheme.textMutedColor(context), size: 18),
               onPressed: onEdit,
               constraints: const BoxConstraints(),
               padding: const EdgeInsets.symmetric(horizontal: 8),
@@ -572,13 +644,13 @@ class _CollectorCard extends StatelessWidget {
               Text(
                 '${_f(collector.cashOnHand)} EGP',
                 style: TextStyle(
-                    color: isCritical ? Colors.redAccent : const Color(0xFFA78BFA),
+                    color: isCritical ? Colors.redAccent : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)),
                     fontWeight: FontWeight.bold,
                     fontSize: 15),
               ),
               Text(
                 'limit: ${_f(collector.cashLimit)}',
-                style: const TextStyle(color: Colors.white24, fontSize: 10),
+                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 10),
               ),
             ],
           ),
@@ -589,9 +661,9 @@ class _CollectorCard extends StatelessWidget {
           child: LinearProgressIndicator(
             value: percent,
             minHeight: 6,
-            backgroundColor: Colors.white10,
+            backgroundColor: AppTheme.lineColor(context),
             valueColor: AlwaysStoppedAnimation<Color>(
-                isCritical ? Colors.redAccent : const Color(0xFFA78BFA)),
+                isCritical ? Colors.redAccent : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239))),
           ),
         ),
         const SizedBox(height: 16),
@@ -634,8 +706,8 @@ class _CollectorCard extends StatelessWidget {
                   label: Text('assign_retailers'.tr(),
                       style: const TextStyle(fontSize: 12)),
                   style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFFA78BFA),
-                    side: const BorderSide(color: Color(0xFFA78BFA)),
+                    foregroundColor: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239),
+                    side: BorderSide(color: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)),
                     shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(8)),
                   ),
@@ -655,14 +727,14 @@ class _CollectorCard extends StatelessWidget {
 class _Dialog extends StatelessWidget {
   final String title;
   final List<Widget> fields;
-  final VoidCallback onConfirm;
+  final Future<bool> Function() onConfirm;
 
   const _Dialog({required this.title, required this.fields, required this.onConfirm});
 
   @override
   Widget build(BuildContext context) {
     return Dialog(
-      backgroundColor: const Color(0xFF16162A),
+      backgroundColor: AppTheme.surfaceColor(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: Padding(
         padding: const EdgeInsets.all(20),
@@ -671,8 +743,8 @@ class _Dialog extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(title,
-                style: const TextStyle(
-                    color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16)),
+                style: TextStyle(
+                    color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 16)),
             const SizedBox(height: 18),
             ...fields,
             Row(
@@ -680,13 +752,18 @@ class _Dialog extends StatelessWidget {
               children: [
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: Text('cancel'.tr(), style: const TextStyle(color: Colors.white38)),
+                  child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
                 ),
                 const SizedBox(width: 8),
                 ElevatedButton(
-                  onPressed: () { Navigator.pop(context); onConfirm(); },
+                  onPressed: () async {
+                    final shouldClose = await onConfirm();
+                    if (shouldClose && context.mounted) {
+                      Navigator.pop(context);
+                    }
+                  },
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFE63946),
+                    backgroundColor: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239),
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                   ),
                   child: Text('save'.tr(), style: const TextStyle(color: Colors.white)),
@@ -699,3 +776,4 @@ class _Dialog extends StatelessWidget {
     );
   }
 }
+

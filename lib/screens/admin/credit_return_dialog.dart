@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/distribution_provider.dart';
@@ -62,7 +63,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
     }
 
     return Dialog(
-      backgroundColor: const Color(0xFF16162A),
+      backgroundColor: AppTheme.surfaceColor(context),
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
       child: SingleChildScrollView(
         child: Padding(
@@ -86,13 +87,13 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text(
+                        Text(
                           'Credit Return',
-                          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 18),
                         ),
                         Text(
                           'Settling debt for ${widget.retailer.name}',
-                          style: const TextStyle(color: Colors.white54, fontSize: 12),
+                          style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                         ),
                       ],
                     ),
@@ -102,17 +103,17 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
               const SizedBox(height: 24),
               
               // VF Number Selection
-              const Text('Target VF Number', style: TextStyle(color: Colors.white70, fontSize: 13)),
+              Text('Target VF Number', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 13)),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: _selectedVfNumberId,
-                dropdownColor: const Color(0xFF1E1E3A),
-                style: const TextStyle(color: Colors.white),
+                dropdownColor: AppTheme.surfaceColor(context),
+                style: TextStyle(color: AppTheme.textPrimaryColor(context)),
                 decoration: InputDecoration(
                   filled: true,
-                  fillColor: Colors.white.withOpacity(0.06),
+                  fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
                   border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
-                  prefixIcon: const Icon(Icons.phone_android, color: Colors.white38, size: 20),
+                  prefixIcon: Icon(Icons.phone_android, color: AppTheme.textMutedColor(context), size: 20),
                 ),
                 items: vfNumbers.map((n) => DropdownMenuItem(
                   value: n.id,
@@ -138,15 +139,15 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        const Text('Fee Rate (per 1K)', style: TextStyle(color: Colors.white70, fontSize: 12)),
+                        Text('Fee Rate (per 1K)', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 12)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _feeRateController,
-                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14),
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: InputDecoration(
                             filled: true,
-                            fillColor: Colors.white.withOpacity(0.04),
+                            fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.04),
                             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
                             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                           ),
@@ -184,7 +185,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                 child: Column(
                   children: [
                     _summaryRow('Retailer Pays Total:', _totalAmount, isBold: true),
-                    const Divider(color: Colors.white10, height: 20),
+                    Divider(color: AppTheme.lineColor(context), height: 20),
                     _summaryRow('Debt Deduction:', _amountOnly),
                   ],
                 ),
@@ -204,14 +205,14 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                 children: [
                   TextButton(
                     onPressed: () => Navigator.pop(context),
-                    child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
+                    child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context))),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
                     onPressed: _submit,
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFE63946),
-                      foregroundColor: Colors.white,
+                      foregroundColor: AppTheme.textPrimaryColor(context),
                       padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
@@ -242,8 +243,8 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
     return Row(
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
-        Text(label, style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
-        Text(value, style: TextStyle(color: isBold ? const Color(0xFF4ADE80) : Colors.white70, fontWeight: FontWeight.bold, fontSize: 14)),
+        Text(label, style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 13, fontWeight: isBold ? FontWeight.bold : FontWeight.normal)),
+        Text(value, style: TextStyle(color: isBold ? const Color(0xFF4ADE80) : AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontWeight: FontWeight.bold, fontSize: 14)),
       ],
     );
   }
@@ -260,18 +261,18 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12)),
+          Text(label, style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 12)),
           const SizedBox(height: 6),
           TextField(
             controller: controller,
             keyboardType: keyboard,
-            style: const TextStyle(color: Colors.white, fontSize: 14),
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14),
             decoration: InputDecoration(
               hintText: hint,
-              hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
-              prefixIcon: Icon(icon, color: Colors.white38, size: 18),
+              hintStyle: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 13),
+              prefixIcon: Icon(icon, color: AppTheme.textMutedColor(context), size: 18),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.06),
+              fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
               border: OutlineInputBorder(borderRadius: BorderRadius.circular(12), borderSide: BorderSide.none),
               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             ),

@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:uuid/uuid.dart';
@@ -10,6 +11,8 @@ import '../models/financial_transaction.dart';
 
 class DistributionProvider extends ChangeNotifier {
   final FirebaseDatabase _db = FirebaseDatabase.instance;
+  final FirebaseFunctions _functions =
+      FirebaseFunctions.instanceFor(region: 'asia-east1');
 
   List<BankAccount> _bankAccounts = [];
   List<Retailer> _retailers = [];
@@ -92,6 +95,10 @@ class DistributionProvider extends ChangeNotifier {
 
     try {
       _initializeListeners();
+      await Future.wait([
+        _refreshOperationalData(),
+        _refreshUsdExchangeData(),
+      ]);
       if (!_syncCompleted) {
         await _syncCollectorsFromUsers();
         _syncCompleted = true;
@@ -113,8 +120,8 @@ class DistributionProvider extends ChangeNotifier {
       final snap = event.snapshot;
       if (snap.exists && snap.value != null && snap.value is Map) {
         final data = Map<String, dynamic>.from(snap.value as Map);
-        _usdtBalance = _asDouble(data['usdtBalance']);
-        _usdtLastPrice = _asDouble(data['lastPrice']);
+        _usdtBalance = _asDouble(data['usdtBalance'] ?? data['balance'] ?? data['usdt']);
+        _usdtLastPrice = _asDouble(data['lastPrice'] ?? data['price'] ?? data['egpPrice']);
       } else {
         _usdtBalance = 0.0;
         _usdtLastPrice = 0.0;
@@ -129,9 +136,10 @@ class DistributionProvider extends ChangeNotifier {
         _bankAccounts = [];
       } else {
         final map = snap.value as Map;
-        _bankAccounts = map.values.where((v) => v is Map).map((v) {
-          return BankAccount.fromMap(Map<String, dynamic>.from(v as Map));
-        }).toList();
+        _bankAccounts = map.values
+            .whereType<Map>()
+            .map((v) => BankAccount.fromMap(Map<String, dynamic>.from(v)))
+            .toList();
         _bankAccounts.sort((a, b) {
           if (a.isDefaultForBuy == b.isDefaultForBuy) {
             return a.bankName.compareTo(b.bankName);
@@ -150,8 +158,8 @@ class DistributionProvider extends ChangeNotifier {
       } else {
         final map = snap.value as Map;
         _retailers = map.values
-            .where((v) => v is Map)
-            .map((v) => Retailer.fromMap(Map<String, dynamic>.from(v as Map)))
+            .whereType<Map>()
+            .map((v) => Retailer.fromMap(Map<String, dynamic>.from(v)))
             .where((r) => r.isActive)
             .toList();
         _retailers.sort((a, b) => a.name.compareTo(b.name));
@@ -167,8 +175,8 @@ class DistributionProvider extends ChangeNotifier {
       } else {
         final map = snap.value as Map;
         _collectors = map.values
-            .where((v) => v is Map)
-            .map((v) => Collector.fromMap(Map<String, dynamic>.from(v as Map)))
+            .whereType<Map>()
+            .map((v) => Collector.fromMap(Map<String, dynamic>.from(v)))
             .where((c) => c.isActive)
             .toList();
         _collectors.sort((a, b) => a.name.compareTo(b.name));
@@ -184,13 +192,83 @@ class DistributionProvider extends ChangeNotifier {
       } else {
         final map = snap.value as Map;
         _ledger = map.values
-            .where((v) => v is Map)
-            .map((v) => FinancialTransaction.fromMap(Map<String, dynamic>.from(v as Map)))
+            .whereType<Map>()
+            .map((v) => FinancialTransaction.fromMap(Map<String, dynamic>.from(v)))
             .toList();
         _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp)); // newest first
       }
       notifyListeners();
     });
+  }
+
+  Future<void> _refreshOperationalData() async {
+    final results = await Future.wait([
+      _db.ref('bank_accounts').get(),
+      _db.ref('retailers').get(),
+      _db.ref('collectors').get(),
+    ]);
+
+    final banksSnap = results[0];
+    if (!banksSnap.exists || banksSnap.value == null || banksSnap.value is! Map) {
+      _bankAccounts = [];
+    } else {
+      final map = banksSnap.value as Map;
+      _bankAccounts = map.values
+          .whereType<Map>()
+          .map((v) => BankAccount.fromMap(Map<String, dynamic>.from(v)))
+          .toList();
+      _bankAccounts.sort((a, b) {
+        if (a.isDefaultForBuy == b.isDefaultForBuy) {
+          return a.bankName.compareTo(b.bankName);
+        }
+        return a.isDefaultForBuy ? -1 : 1;
+      });
+    }
+
+    final retailersSnap = results[1];
+    if (!retailersSnap.exists || retailersSnap.value == null || retailersSnap.value is! Map) {
+      _retailers = [];
+    } else {
+      final map = retailersSnap.value as Map;
+      _retailers = map.values
+          .whereType<Map>()
+          .map((v) => Retailer.fromMap(Map<String, dynamic>.from(v)))
+          .where((r) => r.isActive)
+          .toList();
+      _retailers.sort((a, b) => a.name.compareTo(b.name));
+    }
+
+    final collectorsSnap = results[2];
+    if (!collectorsSnap.exists || collectorsSnap.value == null || collectorsSnap.value is! Map) {
+      _collectors = [];
+    } else {
+      final map = collectorsSnap.value as Map;
+      _collectors = map.values
+          .whereType<Map>()
+          .map((v) => Collector.fromMap(Map<String, dynamic>.from(v)))
+          .where((c) => c.isActive)
+          .toList();
+      _collectors.sort((a, b) => a.name.compareTo(b.name));
+    }
+
+    notifyListeners();
+  }
+
+  Future<void> _refreshUsdExchangeData() async {
+    try {
+      final snap = await _db.ref('usd_exchange').get();
+      if (snap.exists && snap.value != null && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _usdtBalance = _asDouble(data['usdtBalance'] ?? data['balance'] ?? data['usdt']);
+        _usdtLastPrice = _asDouble(data['lastPrice'] ?? data['price'] ?? data['egpPrice']);
+      } else {
+        _usdtBalance = 0.0;
+        _usdtLastPrice = 0.0;
+      }
+      notifyListeners();
+    } catch (_) {
+      // Keep stream listener as source of truth if one-time fetch is not permitted.
+    }
   }
 
   @override
@@ -217,6 +295,7 @@ class DistributionProvider extends ChangeNotifier {
   Future<void> setUsdExchangeBalance(double usdtAmount) async {
     _usdtBalance = usdtAmount;
     await _db.ref('usd_exchange/usdtBalance').set(usdtAmount);
+    await _db.ref('usd_exchange/balance').set(usdtAmount);
     await _db.ref('usd_exchange/lastUpdatedAt').set(DateTime.now().toIso8601String());
     notifyListeners();
   }
@@ -227,6 +306,7 @@ class DistributionProvider extends ChangeNotifier {
     if (price > 0) _usdtLastPrice = price;
     await _db.ref('usd_exchange').update({
       'usdtBalance': _usdtBalance,
+      'balance': _usdtBalance,
       if (price > 0) 'lastPrice': price,
       'lastUpdatedAt': DateTime.now().toIso8601String(),
     });
@@ -238,6 +318,7 @@ class DistributionProvider extends ChangeNotifier {
     if (price > 0) _usdtLastPrice = price;
     await _db.ref('usd_exchange').update({
       'usdtBalance': _usdtBalance,
+      'balance': _usdtBalance,
       if (price > 0) 'lastPrice': price,
       'lastUpdatedAt': DateTime.now().toIso8601String(),
     });
@@ -534,22 +615,13 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    final bank = _bankAccounts.firstWhere((b) => b.id == bankAccountId);
-    final tx = FinancialTransaction(
-      type: FlowType.FUND_BANK,
-      amount: amount,
-      toId: bankAccountId,
-      toLabel: bank.bankName,
-      createdByUid: createdByUid,
-      notes: notes,
-    );
-    final updatedBalance = bank.balance + amount;
-    await Future.wait([
-      _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-      _db.ref('bank_accounts/$bankAccountId/balance').set(updatedBalance),
-      _db.ref('bank_accounts/$bankAccountId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-    ]);
+    final callable = _functions.httpsCallable('fundBankAccount');
+    await callable.call({
+      'bankAccountId': bankAccountId,
+      'amount': amount,
+      'createdByUid': createdByUid,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+    });
     await loadAll();
   }
 
@@ -561,22 +633,13 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    final bank = _bankAccounts.firstWhere((b) => b.id == bankAccountId);
-    final tx = FinancialTransaction(
-      type: FlowType.BANK_DEDUCTION,
-      amount: amount,
-      fromId: bankAccountId,
-      fromLabel: bank.bankName,
-      createdByUid: createdByUid,
-      notes: notes,
-    );
-    final updatedBalance = bank.balance - amount;
-    await Future.wait([
-      _db.ref('financial_ledger/${tx.id}').set(tx.toMap()),
-      _db.ref('bank_accounts/$bankAccountId/balance').set(updatedBalance),
-      _db.ref('bank_accounts/$bankAccountId/lastUpdatedAt')
-          .set(DateTime.now().toIso8601String()),
-    ]);
+    final callable = _functions.httpsCallable('deductBankBalance');
+    await callable.call({
+      'bankAccountId': bankAccountId,
+      'amount': amount,
+      'createdByUid': createdByUid,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+    });
     await loadAll();
   }
 
@@ -684,93 +747,25 @@ class DistributionProvider extends ChangeNotifier {
     _isDistributing = true;
     notifyListeners();
     try {
-      final retailer = _retailers.firstWhere((r) => r.id == retailerId);
-
-      // Calculate the actual debt increase based on the discount rate per 1000 EGP
-      final double discountAmount = (amount / 1000.0) * retailer.discountPer1000;
-
-      // If external wallet, the retailer pays the transfer fees
-      final double feeToCharge = chargeFeesToRetailer ? fees : 0.0;
-
-      // Round UP to nearest integer so collectors always deal with whole amounts
-      double actualDebtIncrease = (amount + discountAmount + feeToCharge).ceilToDouble();
-
-      double creditUsed = 0.0;
-      if (applyCredit && retailer.credit > 0) {
-        creditUsed = retailer.credit > actualDebtIncrease ? actualDebtIncrease : retailer.credit;
-        actualDebtIncrease -= creditUsed;
-      }
-
-      String feeNotes = chargeFeesToRetailer && fees > 0 ? ', +$fees Fee' : '';
-      String creditNotes = creditUsed > 0 ? ', -$creditUsed Credit Used' : '';
-      final String appliedNotes = notes != null && notes.isNotEmpty
-          ? '$notes (Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP)'
-          : 'Rate: ${retailer.discountPer1000}/1K$feeNotes$creditNotes, Debt +$actualDebtIncrease EGP';
-
-      final tx = FinancialTransaction(
-        type: FlowType.DISTRIBUTE_VFCASH,
-        amount: amount,
-        fromId: fromVfNumberId,
-        fromLabel: fromVfPhone,
-        toId: retailerId,
-        toLabel: retailer.name,
-        createdByUid: createdByUid,
-        notes: appliedNotes,
-      );
-
-      // The VF number ALWAYS loses (amount + fees) — that is the physical transfer cost.
-      final cashTxId = const Uuid().v4();
-      final double totalDeduction = amount + fees;
-      final cashTxMap = {
-        'id': cashTxId,
-        'phoneNumber': fromVfPhone,
-        'amount': totalDeduction,
-        'currency': 'EGP',
-        'timestamp': DateTime.now().toIso8601String(),
-        'bybitOrderId': 'DIST-${tx.id.substring(0, 8)}',
-        'status': 'completed',
-        'paymentMethod': 'Vodafone Distribution',
-        'side': 0, // Outgoing
-        'chatHistory': fees > 0
-            ? 'Automated Distribution to ${retailer.name} (Includes $fees EGP transfer fees${chargeFeesToRetailer ? " – charged to retailer" : ""})'
-            : 'Automated Distribution to ${retailer.name}',
-      };
-
-      // Build atomic multi-path update
-      final now = DateTime.now().toIso8601String();
-      final updates = <String, dynamic>{
-        'financial_ledger/${tx.id}': tx.toMap(),
-        'transactions/$cashTxId': cashTxMap,
-        'retailers/$retailerId/totalAssigned': retailer.totalAssigned + actualDebtIncrease,
-        'retailers/$retailerId/lastUpdatedAt': now,
-      };
-
-      if (creditUsed > 0) {
-        updates['retailers/$retailerId/credit'] = retailer.credit - creditUsed;
-      }
-
-      if (fees > 0) {
-        final feeTx = FinancialTransaction(
-          type: FlowType.EXPENSE_VFCASH_FEE,
-          amount: fees,
-          fromId: fromVfNumberId,
-          fromLabel: fromVfPhone,
-          createdByUid: createdByUid,
-          notes: chargeFeesToRetailer
-              ? 'Vodafone Transfer Fee for assigning $amount EGP to ${retailer.name} (charged to retailer debt)'
-              : 'Vodafone Transfer Fee for assigning $amount EGP to ${retailer.name}',
-        );
-        updates['financial_ledger/${feeTx.id}'] = feeTx.toMap();
-      }
-
-      await _db.ref().update(updates);
+      final callable = _functions.httpsCallable('distributeVfCash');
+      await callable.call({
+        'retailerId': retailerId,
+        'fromVfNumberId': fromVfNumberId,
+        'fromVfPhone': fromVfPhone,
+        'amount': amount,
+        'fees': fees,
+        'chargeFeesToRetailer': chargeFeesToRetailer,
+        'applyCredit': applyCredit,
+        'createdByUid': createdByUid,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      });
+      await loadAll();
     } finally {
       _isDistributing = false;
       notifyListeners();
     }
   }
-
-  // ─── Collector CRUD ────────────────────────────────────────────────────────
+  // ??? Collector CRUD ????????????????????????????????????????????????????????? ────────────────────────────────────────────────────────
 
   Future<void> addCollector(Collector collector) async {
     await _db.ref('collectors/${collector.id}').set(collector.toMap());
@@ -798,67 +793,29 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    if (_isCollecting) return;
+    if (_isCollecting) {
+      throw StateError('A collection is already in progress.');
+    }
+    if (amount <= 0) {
+      throw ArgumentError('Collection amount must be greater than zero.');
+    }
     _isCollecting = true;
     notifyListeners();
     try {
-      final collector = _collectors.firstWhere((c) => c.id == collectorId);
-      final retailer = _retailers.firstWhere((r) => r.id == retailerId);
-
-      // Handle excess credit
-      double addedToCollected = amount;
-      double addedToCredit = 0.0;
-
-      if (amount > retailer.pendingDebt) {
-        // Retailer pays more than what they owe
-        addedToCollected = retailer.pendingDebt > 0 ? retailer.pendingDebt : 0.0;
-        addedToCredit = amount - addedToCollected;
-      }
-
-      String? appliedNotes = notes;
-      if (addedToCredit > 0) {
-        final creditNote = '(+${addedToCredit.toStringAsFixed(0)} EGP added to Credit)';
-        appliedNotes = notes != null && notes.isNotEmpty ? '$notes $creditNote' : creditNote;
-      }
-
-      final tx = FinancialTransaction(
-        type: FlowType.COLLECT_CASH,
-        amount: amount,
-        fromId: retailerId,
-        fromLabel: retailer.name,
-        toId: collectorId,
-        toLabel: collector.name,
-        createdByUid: createdByUid,
-        notes: appliedNotes,
-      );
-
-      final now = DateTime.now().toIso8601String();
-      final updates = <String, dynamic>{
-        'financial_ledger/${tx.id}': tx.toMap(),
-        'retailers/$retailerId/lastUpdatedAt': now,
-        'collectors/$collectorId/cashOnHand': collector.cashOnHand + amount,
-        'collectors/$collectorId/totalCollected': collector.totalCollected + amount,
-        'collectors/$collectorId/lastUpdatedAt': now,
-      };
-
-      if (addedToCollected > 0) {
-        updates['retailers/$retailerId/totalCollected'] =
-            retailer.totalCollected + addedToCollected;
-      }
-      if (addedToCredit > 0) {
-        updates['retailers/$retailerId/credit'] =
-            retailer.credit + addedToCredit;
-      }
-
-      // Single atomic multi-path update — Firebase applies all fields at once,
-      // triggers each .onValue listener once with the final state.
-      await _db.ref().update(updates);
+      final callable = _functions.httpsCallable('collectRetailerCash');
+      await callable.call({
+        'collectorId': collectorId,
+        'retailerId': retailerId,
+        'amount': amount,
+        'createdByUid': createdByUid,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      });
+      await _refreshOperationalData();
     } finally {
       _isCollecting = false;
       notifyListeners();
     }
   }
-
   /// Collector deposits cash into a Bank Account.
   Future<void> depositToBank({
     required String collectorId,
@@ -867,39 +824,30 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    if (_isDepositing) return;
+    if (_isDepositing) {
+      throw StateError('A deposit is already in progress.');
+    }
+    if (amount <= 0) {
+      throw ArgumentError('Deposit amount must be greater than zero.');
+    }
     _isDepositing = true;
     notifyListeners();
     try {
-      final collector = _collectors.firstWhere((c) => c.id == collectorId);
-      final bank = _bankAccounts.firstWhere((b) => b.id == bankAccountId);
-    final tx = FinancialTransaction(
-      type: FlowType.DEPOSIT_TO_BANK,
-      amount: amount,
-      fromId: collectorId,
-      fromLabel: collector.name,
-      toId: bankAccountId,
-      toLabel: bank.bankName,
-      createdByUid: createdByUid,
-      notes: notes,
-    );
-    final now = DateTime.now().toIso8601String();
-    await _db.ref().update({
-      'financial_ledger/${tx.id}': tx.toMap(),
-      'collectors/$collectorId/cashOnHand': collector.cashOnHand - amount,
-      'collectors/$collectorId/totalDeposited': collector.totalDeposited + amount,
-      'collectors/$collectorId/lastUpdatedAt': now,
-      'bank_accounts/$bankAccountId/balance': bank.balance + amount,
-      'bank_accounts/$bankAccountId/lastUpdatedAt': now,
-    });
+      final callable = _functions.httpsCallable('depositCollectorCash');
+      await callable.call({
+        'collectorId': collectorId,
+        'bankAccountId': bankAccountId,
+        'amount': amount,
+        'createdByUid': createdByUid,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      });
+      await _refreshOperationalData();
     } finally {
       _isDepositing = false;
       notifyListeners();
     }
   }
-
-  /// Admin: Correct a mistaken "Collect Cash" or "Deposit to Bank" transaction.
-  /// This creates an adjustment entry and corrects the affected balances.
+  /// Admin: Correct a mistaken transaction using the hardened server flow.
   Future<void> correctTransaction({
     required FinancialTransaction originalTx,
     required double correctAmount,
@@ -909,92 +857,13 @@ class DistributionProvider extends ChangeNotifier {
     if (_isCorrecting) return;
     _isCorrecting = true;
     try {
-      final double diff = correctAmount - originalTx.amount;
-      if (diff == 0) return;
-
-      final now = DateTime.now();
-      final adjustmentTx = FinancialTransaction(
-        type: FlowType.ADMIN_ADJUSTMENT,
-        amount: diff.abs(),
-        fromId: originalTx.fromId,
-        fromLabel: originalTx.fromLabel,
-        toId: originalTx.toId,
-        toLabel: originalTx.toLabel,
-        bybitOrderId: originalTx.bybitOrderId,
-        notes: 'CORRECTION for ${originalTx.id}: ${reason ?? "Amount adjusted from ${originalTx.amount} to $correctAmount"}',
-        createdByUid: adminUid,
-        timestamp: now,
-      );
-
-      final futures = <Future<void>>[];
-      // 0. Update the ORIGINAL transaction amount in the ledger to reflect truth
-      futures.add(_db.ref('financial_ledger/${originalTx.id}/amount').set(correctAmount));
-      futures.add(_db.ref('financial_ledger/${originalTx.id}/notes')
-          .set('${originalTx.notes ?? ""} (Corrected from ${originalTx.amount} by Admin)'.trim()));
-
-      // 1. Create an ADJUSTMENT entry for the audit trail
-      futures.add(_db.ref('financial_ledger/${adjustmentTx.id}').set(adjustmentTx.toMap()));
-
-      if (originalTx.type == FlowType.COLLECT_CASH) {
-        final retailerId = originalTx.fromId;
-        final collectorId = originalTx.toId;
-        debugPrint('Correcting COLLECT_CASH for Retailer: $retailerId, Collector: $collectorId, Diff: $diff');
-
-        if (retailerId != null) {
-          final rIndex = _retailers.indexWhere((r) => r.id == retailerId);
-          if (rIndex != -1) {
-            final r = _retailers[rIndex];
-            final newVal = r.totalCollected + diff;
-            debugPrint('Retailer ${r.name}: Current collected=${r.totalCollected}, Diff=$diff, New Total=$newVal');
-            futures.add(_db.ref('retailers/$retailerId/totalCollected').set(newVal));
-            futures.add(_db.ref('retailers/$retailerId/lastUpdatedAt').set(now.toIso8601String()));
-          }
-        }
-        if (collectorId != null) {
-          final cIndex = _collectors.indexWhere((c) => c.uid == collectorId || c.id == collectorId);
-          if (cIndex != -1) {
-            final c = _collectors[cIndex];
-            futures.add(_db.ref('collectors/${c.id}/cashOnHand').set(c.cashOnHand + diff));
-            futures.add(_db.ref('collectors/${c.id}/totalCollected').set(c.totalCollected + diff));
-            futures.add(_db.ref('collectors/${c.id}/lastUpdatedAt').set(now.toIso8601String()));
-          }
-        }
-      } else if (originalTx.type == FlowType.DEPOSIT_TO_BANK) {
-        final collectorId = originalTx.fromId;
-        final bankId = originalTx.toId;
-        debugPrint('Correcting DEPOSIT_TO_BANK for Collector: $collectorId, Bank: $bankId, Diff: $diff');
-
-        if (bankId != null) {
-          final bIndex = _bankAccounts.indexWhere((b) => b.id == bankId);
-          if (bIndex != -1) {
-            final b = _bankAccounts[bIndex];
-            futures.add(_db.ref('bank_accounts/$bankId/balance').set(b.balance + diff));
-            futures.add(_db.ref('bank_accounts/$bankId/lastUpdatedAt').set(now.toIso8601String()));
-          }
-        }
-        if (collectorId != null) {
-          final cIndex = _collectors.indexWhere((c) => c.uid == collectorId || c.id == collectorId);
-          if (cIndex != -1) {
-            final c = _collectors[cIndex];
-            futures.add(_db.ref('collectors/${c.id}/cashOnHand').set(c.cashOnHand - diff));
-            futures.add(_db.ref('collectors/${c.id}/totalDeposited').set(c.totalDeposited + diff));
-            futures.add(_db.ref('collectors/${c.id}/lastUpdatedAt').set(now.toIso8601String()));
-          }
-        }
-      } else if (originalTx.type == FlowType.CREDIT_RETURN) {
-        final retailerId = originalTx.fromId;
-        debugPrint('Correcting CREDIT_RETURN for Retailer: $retailerId, Diff: $diff');
-        if (retailerId != null) {
-          final rIndex = _retailers.indexWhere((r) => r.id == retailerId);
-          if (rIndex != -1) {
-            final r = _retailers[rIndex];
-            futures.add(_db.ref('retailers/$retailerId/totalCollected').set(r.totalCollected + diff));
-            futures.add(_db.ref('retailers/$retailerId/lastUpdatedAt').set(now.toIso8601String()));
-          }
-        }
-      }
-
-      await Future.wait(futures);
+      final callable = _functions.httpsCallable('correctFinancialTransaction');
+      await callable.call({
+        'transactionId': originalTx.id,
+        'correctAmount': correctAmount,
+        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      });
+      await loadAll();
     } catch (e) {
       debugPrint('Correction error: $e');
       rethrow;
@@ -1079,24 +948,15 @@ class DistributionProvider extends ChangeNotifier {
     required String createdByUid,
     String? notes,
   }) async {
-    final bank = _bankAccounts.firstWhere((b) => b.id == bankAccountId);
-    final currentBal = bank.balance;
-    final diff = newBalance - currentBal;
-
-    final correctionTx = FinancialTransaction(
-      type: FlowType.FUND_BANK,
-      amount: diff.abs(),
-      toId: diff >= 0 ? bankAccountId : null,
-      fromId: diff < 0 ? bankAccountId : null,
-      toLabel: diff >= 0 ? bank.bankName : 'Balance Correction',
-      fromLabel: diff < 0 ? bank.bankName : 'Balance Correction',
-      createdByUid: createdByUid,
-      notes: 'BALANCE_CORRECTION: ${notes ?? "Manual Adjustment"}',
-    );
-    await _db.ref('bank_accounts/$bankAccountId/balance').set(newBalance);
-    await _db.ref('financial_ledger/${correctionTx.id}').set(correctionTx.toMap());
+    final callable = _functions.httpsCallable('correctBankBalance');
+    await callable.call({
+      'bankAccountId': bankAccountId,
+      'newBalance': newBalance,
+      'createdByUid': createdByUid,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+    });
+    await loadAll();
   }
-
   /// Record a Bybit Sell USDT order (synced from Bybit).
   /// Adds EGP to the matched VF Cash number (tracked in app_provider).
   Future<void> recordBybitSellOrder({
@@ -1167,8 +1027,8 @@ class DistributionProvider extends ChangeNotifier {
     required String retailerId,
     required String vfNumberId,
     required String vfPhone,
-    required double amount, // base amount (debt reduction)
-    required double fees,   // isolated fees
+    required double amount,
+    required double fees,
     required String createdByUid,
     String? notes,
   }) async {
@@ -1176,175 +1036,35 @@ class DistributionProvider extends ChangeNotifier {
     _isCreditReturning = true;
     notifyListeners();
     try {
-      final retailer = _retailers.firstWhere((r) => r.id == retailerId);
-      final totalReceived = amount + fees;
-
-      final now = DateTime.now();
-
-      // 1. Transaction for the base amount (Debt Settlement)
-      final tx = FinancialTransaction(
-        type: FlowType.CREDIT_RETURN,
-        amount: amount,
-        fromId: retailerId,
-        fromLabel: retailer.name,
-        toId: vfNumberId,
-        toLabel: vfPhone,
-        createdByUid: createdByUid,
-        notes: notes ?? 'Debt Settlement via VF Cash',
-        timestamp: now,
-      );
-
-      // 2. Transaction for the isolated fee
-      final feeTx = FinancialTransaction(
-        type: FlowType.CREDIT_RETURN_FEE,
-        amount: fees,
-        fromId: retailerId,
-        fromLabel: retailer.name,
-        toId: vfNumberId,
-        toLabel: vfPhone,
-        createdByUid: createdByUid,
-        notes: 'Credit Return Fee',
-        timestamp: now,
-      );
-
-      // 3. CashTransaction for VF Number balance tracking (Total Received)
-      final cashTxId = const Uuid().v4();
-      final cashTxMap = {
-        'id': cashTxId,
-        'phoneNumber': vfPhone,
-        'amount': totalReceived,
-        'currency': 'EGP',
-        'timestamp': now.toIso8601String(),
-        'bybitOrderId': 'CRTN-${tx.id.substring(0, 8)}',
-        'status': 'completed',
-        'paymentMethod': 'VF Credit Return',
-        'side': 1, // Incoming
-        'chatHistory': 'Credit Return from ${retailer.name} (Amount: $amount, Fee: $fees)',
-      };
-
-      final updates = <String, dynamic>{
-        'financial_ledger/${tx.id}': tx.toMap(),
-        'transactions/$cashTxId': cashTxMap,
-        'retailers/$retailerId/totalCollected': retailer.totalCollected + amount,
-        'retailers/$retailerId/lastUpdatedAt': now.toIso8601String(),
-      };
-      if (fees > 0) {
-        updates['financial_ledger/${feeTx.id}'] = feeTx.toMap();
-      }
-
-      await _db.ref().update(updates);
+      final callable = _functions.httpsCallable('creditReturn');
+      await callable.call({
+        'retailerId': retailerId,
+        'vfNumberId': vfNumberId,
+        'vfPhone': vfPhone,
+        'amount': amount,
+        'fees': fees,
+        'createdByUid': createdByUid,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      });
+      await loadAll();
     } catch (e) {
-      debugPrint('Credit Return error: $e');
+      debugPrint('Credit Return error: ');
       rethrow;
     } finally {
       _isCreditReturning = false;
       notifyListeners();
     }
   }
-
-  /// Admin: Delete a transaction and reverse its financial impact.
+  /// Admin: Delete a transaction and reverse its financial impact on the server.
   Future<void> deleteTransaction(FinancialTransaction tx) async {
     if (_isDeleting) return;
     _isDeleting = true;
     try {
-      final futures = <Future<void>>[];
-
-      // 1. Determine reversal impact based on transaction type
-      if (tx.type == FlowType.COLLECT_CASH) {
-        final retailerId = tx.fromId;
-        final collectorId = tx.toId;
-        final amount = tx.amount;
-
-        if (retailerId != null) {
-          final rIndex = _retailers.indexWhere((r) => r.id == retailerId);
-          if (rIndex != -1) {
-            final r = _retailers[rIndex];
-            futures.add(_db.ref('retailers/$retailerId/totalCollected').set(r.totalCollected - amount));
-          }
-        }
-        if (collectorId != null) {
-          final cIndex = _collectors.indexWhere((c) => c.id == collectorId);
-          if (cIndex != -1) {
-            final c = _collectors[cIndex];
-            futures.add(_db.ref('collectors/${c.id}/cashOnHand').set(c.cashOnHand - amount));
-            futures.add(_db.ref('collectors/${c.id}/totalCollected').set(c.totalCollected - amount));
-          }
-        }
-      } else if (tx.type == FlowType.DEPOSIT_TO_BANK) {
-        final collectorId = tx.fromId;
-        final bankId = tx.toId;
-        final amount = tx.amount;
-
-        if (bankId != null) {
-          final bIndex = _bankAccounts.indexWhere((b) => b.id == bankId);
-          if (bIndex != -1) {
-            final b = _bankAccounts[bIndex];
-            futures.add(_db.ref('bank_accounts/$bankId/balance').set(b.balance - amount));
-          }
-        }
-        if (collectorId != null) {
-          final cIndex = _collectors.indexWhere((c) => c.id == collectorId);
-          if (cIndex != -1) {
-            final c = _collectors[cIndex];
-            futures.add(_db.ref('collectors/${c.id}/cashOnHand').set(c.cashOnHand + amount));
-            futures.add(_db.ref('collectors/${c.id}/totalDeposited').set(c.totalDeposited - amount));
-          }
-        }
-      } else if (tx.type == FlowType.DISTRIBUTE_VFCASH) {
-        final retailerId = tx.toId;
-        final amount = tx.amount;
-        if (retailerId != null) {
-          final rIndex = _retailers.indexWhere((r) => r.id == retailerId);
-          if (rIndex != -1) {
-            final r = _retailers[rIndex];
-            futures.add(_db.ref('retailers/$retailerId/totalAssigned').set(r.totalAssigned - amount));
-          }
-        }
-      } else if (tx.type == FlowType.FUND_BANK || tx.type == FlowType.BUY_USDT) {
-        if (tx.type == FlowType.FUND_BANK) {
-          final bankId = tx.toId;
-          if (bankId != null) {
-            final bIndex = _bankAccounts.indexWhere((b) => b.id == bankId);
-            if (bIndex != -1) {
-              futures.add(_db.ref('bank_accounts/$bankId/balance').set(_bankAccounts[bIndex].balance - tx.amount));
-            }
-          }
-        } else {
-          final bankId = tx.fromId;
-          if (bankId != null) {
-            final bIndex = _bankAccounts.indexWhere((b) => b.id == bankId);
-            if (bIndex != -1) {
-              futures.add(_db.ref('bank_accounts/$bankId/balance').set(_bankAccounts[bIndex].balance + tx.amount));
-            }
-          }
-        }
-      } else if (tx.type == FlowType.CREDIT_RETURN || tx.type == FlowType.CREDIT_RETURN_FEE) {
-        final retailerId = tx.fromId;
-        final amount = tx.amount;
-        if (retailerId != null) {
-          final rIndex = _retailers.indexWhere((r) => r.id == retailerId);
-          if (rIndex != -1) {
-            final r = _retailers[rIndex];
-            futures.add(_db.ref('retailers/$retailerId/totalCollected').set(r.totalCollected - amount));
-          }
-        }
-      } else if (tx.type == FlowType.BANK_DEDUCTION) {
-        // Reversal: add the deducted amount back to the bank
-        final bankId = tx.fromId;
-        if (bankId != null) {
-          final bIndex = _bankAccounts.indexWhere((b) => b.id == bankId);
-          if (bIndex != -1) {
-            futures.add(_db.ref('bank_accounts/$bankId/balance').set(_bankAccounts[bIndex].balance + tx.amount));
-            futures.add(_db.ref('bank_accounts/$bankId/lastUpdatedAt').set(DateTime.now().toIso8601String()));
-          }
-        }
-      }
-
-
-      // 2. Delete the record from the ledger
-      futures.add(_db.ref('financial_ledger/${tx.id}').remove());
-
-      await Future.wait(futures);
+      final callable = _functions.httpsCallable('deleteFinancialTransaction');
+      await callable.call({
+        'transactionId': tx.id,
+      });
+      await loadAll();
     } catch (e) {
       debugPrint('Delete transaction error: $e');
       rethrow;
@@ -1353,4 +1073,7 @@ class DistributionProvider extends ChangeNotifier {
     }
   }
 }
+
+
+
 

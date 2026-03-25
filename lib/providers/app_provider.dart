@@ -1,12 +1,10 @@
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:firebase_database/firebase_database.dart';
 import '../models/models.dart';
 import '../services/database_service.dart';
-import '../services/bybit_service.dart';
 
 class SyncResult {
   final int added;
@@ -30,7 +28,6 @@ class AppProvider extends ChangeNotifier {
   bool _isSyncing = false;
 
   final DatabaseService _dbService = DatabaseService();
-  BybitService? _bybitService;
 
   List<MobileNumber> _mobileNumbers = [];
   List<CashTransaction> _transactions = [];
@@ -39,34 +36,30 @@ class AppProvider extends ChangeNotifier {
   String? _error;
 
   // Sync state
-  String _apiKey = '';
-  String _apiSecret = '';
+  bool _hasApiCredentials = false;
   DateTime? _lastSyncTime;      // when we last ran a sync (for display)
   int _lastSyncedOrderTs = 0;   // createTime of newest order synced (for next beginTime)
   String _syncStatus = '';      // live progress text e.g. "Fetching page 2..."
   bool _isLiveSyncEnabled = false;
   Timer? _liveSyncTimer;
 
-  bool _useServerSync = true; // Default to server sync now
-  String? _syncPassword; // Password to protect the live sync toggle
-
   // ── Getters ───────────────────────────────────────────────────────────────
   // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
   StreamSubscription<List<MobileNumber>>? _numbersSub;
   StreamSubscription<List<CashTransaction>>? _transactionsSub;
   StreamSubscription<DatabaseEvent>? _syncDataSub;
+  StreamSubscription<DatabaseEvent>? _bybitMetadataSub;
 
   List<MobileNumber> get mobileNumbers => _mobileNumbers;
   List<CashTransaction> get transactions => _transactions;
   MobileNumber? get defaultNumber => _defaultNumber;
-  String? get syncPassword => _syncPassword;
   bool get isLoading => _isLoading;
   String? get error => _error;
-  bool get hasApiCredentials => _apiKey.isNotEmpty && _apiSecret.isNotEmpty;
+  bool get hasApiCredentials => _hasApiCredentials;
   DateTime? get lastSyncTime => _lastSyncTime;
   String get syncStatus => _syncStatus;
   bool get isLiveSyncEnabled => _isLiveSyncEnabled;
-  bool get useServerSync => _useServerSync;
+  bool get useServerSync => true;
 
   // Callback to trigger Bank logic in DistributionProvider
   Future<void> Function({
@@ -121,11 +114,10 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> _initialize() async {
     try {
-      await _loadApiCredentials();
       _initializeListeners();
       await _loadLiveSyncState();
     } catch (e) {
-      print('Initialization error (non-fatal): $e');
+      debugPrint('Initialization error (non-fatal): $e');
       _error = 'Could not connect to database. Check your internet connection.';
       notifyListeners();
     }
@@ -168,6 +160,21 @@ class AppProvider extends ChangeNotifier {
       }
       notifyListeners();
     });
+
+    _bybitMetadataSub?.cancel();
+    _bybitMetadataSub = FirebaseDatabase.instance
+        .ref('system/api_credentials/bybit_metadata')
+        .onValue
+        .listen((event) {
+      final snap = event.snapshot;
+      if (snap.exists && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _hasApiCredentials = data['configured'] == true;
+      } else {
+        _hasApiCredentials = false;
+      }
+      notifyListeners();
+    });
   }
 
   @override
@@ -176,6 +183,7 @@ class AppProvider extends ChangeNotifier {
     _numbersSub?.cancel();
     _transactionsSub?.cancel();
     _syncDataSub?.cancel();
+    _bybitMetadataSub?.cancel();
     _syncConfigSub?.cancel();
     super.dispose();
   }
@@ -183,53 +191,20 @@ class AppProvider extends ChangeNotifier {
 
   // ── API Credentials ───────────────────────────────────────────────────────
 
-  Future<void> _loadApiCredentials() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _apiKey = prefs.getString('bybit_api_key') ?? '';
-      _apiSecret = prefs.getString('bybit_api_secret') ?? '';
-      _initBybitService();
-    } catch (e) {
-      print('Error loading API credentials: $e');
-    }
-  }
-
-  void _initBybitService() {
-    if (_apiKey.isNotEmpty && _apiSecret.isNotEmpty) {
-      _bybitService = BybitService(apiKey: _apiKey, apiSecret: _apiSecret);
-    } else {
-      _bybitService = null;
-    }
-  }
-
   Future<void> saveApiCredentials(String apiKey, String apiSecret) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('bybit_api_key', apiKey);
-    await prefs.setString('bybit_api_secret', apiSecret);
-
-    // Also save to Firebase for server-side sync
-    await FirebaseDatabase.instance.ref('system/api_credentials/bybit').set({
+    final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
+    await functions.httpsCallable('setBybitCredentials').call({
       'apiKey': apiKey,
       'apiSecret': apiSecret,
-      'updatedAt': DateTime.now().toIso8601String(),
     });
-
-    _apiKey = apiKey;
-    _apiSecret = apiSecret;
-    _initBybitService();
+    _hasApiCredentials = true;
     notifyListeners();
   }
 
   Future<void> clearApiCredentials() async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('bybit_api_key');
-    await prefs.remove('bybit_api_secret');
-
-    await FirebaseDatabase.instance.ref('system/api_credentials/bybit').remove();
-
-    _apiKey = '';
-    _apiSecret = '';
-    _bybitService = null;
+    final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
+    await functions.httpsCallable('clearBybitCredentials').call();
+    _hasApiCredentials = false;
     notifyListeners();
   }
 
@@ -282,18 +257,10 @@ class AppProvider extends ChangeNotifier {
   StreamSubscription? _syncConfigSub;
 
   Future<void> _loadLiveSyncState() async {
-    final prefs = await SharedPreferences.getInstance();
-    _useServerSync = prefs.getBool('use_server_sync') ?? true;
-
-    // Enforce recommended setup: if server sync is the chosen mode,
-    // always ensure the Firebase scheduler flag is ON so the Cloud
-    // Function runs automatically. This is a no-op if already true.
-    if (_useServerSync) {
-      FirebaseDatabase.instance
-          .ref('system/sync_config/enabled')
-          .set(true)
-          .catchError((e) => print('Sync: Could not enforce enabled flag: $e'));
-    }
+    FirebaseDatabase.instance
+        .ref('system/sync_config/enabled')
+        .set(true)
+        .catchError((e) => debugPrint('Sync: Could not enforce enabled flag: $e'));
 
     // Listen to Firebase for the central sync switch
     _syncConfigSub?.cancel();
@@ -302,41 +269,18 @@ class AppProvider extends ChangeNotifier {
       if (snap.exists && snap.value is Map) {
         final data = Map<String, dynamic>.from(snap.value as Map);
         _isLiveSyncEnabled = data['enabled'] == true;
-        _syncPassword = data['password']?.toString();
       } else {
         _isLiveSyncEnabled = false;
-        _syncPassword = null;
-      }
-
-      if (_isLiveSyncEnabled && !_useServerSync) {
-        _startLiveSyncTimer();
-      } else {
-        _stopLiveSyncTimer();
       }
       notifyListeners();
     });
   }
 
-  Future<void> setSyncPassword(String? password) async {
-    await FirebaseDatabase.instance.ref('system/sync_config/password').set(password);
-    _syncPassword = password;
-    notifyListeners();
-  }
-
   Future<void> toggleServerSync(bool enabled) async {
-    _useServerSync = enabled;
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setBool('use_server_sync', enabled);
-
     if (enabled) {
-      // Switching TO server sync: ensure the Firebase scheduler flag is ON
-      // so the Cloud Function picks up orders automatically.
       await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(true);
-      _stopLiveSyncTimer();
-    } else if (_isLiveSyncEnabled) {
-      _startLiveSyncTimer();
+      notifyListeners();
     }
-    notifyListeners();
   }
 
   void _startLiveSyncTimer() {
@@ -344,25 +288,17 @@ class AppProvider extends ChangeNotifier {
     _liveSyncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
       syncOrders(isSilent: true);
     });
-    print('Sync: Live Monitoring STARTED (30s interval) from TS $_lastSyncedOrderTs');
+    debugPrint('Sync: Live Monitoring STARTED (30s interval) from TS $_lastSyncedOrderTs');
   }
 
   void _stopLiveSyncTimer() {
     _liveSyncTimer?.cancel();
     _liveSyncTimer = null;
-    print('Sync: Live Monitoring STOPPED');
+    debugPrint('Sync: Live Monitoring STOPPED');
   }
 
   Future<void> toggleLiveSync(bool enabled) async {
-    // This now updates Firebase centrally so the Cloud Function also knows
     await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(enabled);
-    
-    if (enabled && !_useServerSync) {
-      // For local sync only: Reset marker to now to avoid syncing old history
-      _lastSyncedOrderTs = DateTime.now().millisecondsSinceEpoch;
-      await _dbService.saveLastSyncedOrderTimestamp(_lastSyncedOrderTs);
-    }
-    // _isLiveSyncEnabled will be updated by the listener in _loadLiveSyncState
   }
 
   //  dispose method moved to top
@@ -440,7 +376,7 @@ class AppProvider extends ChangeNotifier {
       }
       await loadMobileNumbers(); // reload so UI reflects new values
     } catch (e) {
-      print('Error recalculating usage: $e');
+      debugPrint('Error recalculating usage: $e');
     }
   }
 
@@ -484,7 +420,7 @@ class AppProvider extends ChangeNotifier {
       _lastSyncTime = null;
       notifyListeners();
     } catch (e) {
-      print('Error resetting markers: $e');
+      debugPrint('Error resetting markers: $e');
     }
   }
 
@@ -497,305 +433,7 @@ class AppProvider extends ChangeNotifier {
   ///
   /// Orders are always deduplicated by `bybitOrderId` before saving.
   Future<SyncResult> syncOrders({DateTime? fromDate, bool isSilent = false}) async {
-    if (_useServerSync) {
-      return _syncOrdersServer(fromDate: fromDate, isSilent: isSilent);
-    }
-
-    if (_bybitService == null) {
-      return const SyncResult(error: 'No API credentials. Set them in Settings.');
-    }
-    if (_defaultNumber == null) {
-      return const SyncResult(error: 'No default number set. Add a number first.');
-    }
-    if (_isSyncing) {
-      return const SyncResult(error: 'Sync already in progress. Please wait.');
-    }
-    
-    _isSyncing = true;
-
-    if (!isSilent) {
-      _isLoading = true;
-      _syncStatus = 'Starting sync…';
-      _error = null;
-      notifyListeners();
-    }
-
-    try {
-      // 0. Ensure local clock is synced with Bybit to prevent HMAC timestamp rejection
-      await _bybitService!.syncServerTime();
-
-      // Determine beginTime
-      int? beginTime;
-      if (fromDate != null) {
-        // Full sync from chosen date — UTC midnight of that day
-        final utcDate = DateTime.utc(fromDate.year, fromDate.month, fromDate.day);
-        beginTime = utcDate.millisecondsSinceEpoch;
-        
-        final displayDate = _fmtDate(fromDate);
-        print('Sync: Starting FULL SYNC from $displayDate (UTC: $utcDate, ms: $beginTime)');
-        _syncStatus = 'Full Sync from $displayDate…';
-        
-        // IMPORTANT: For a full sync, we should ignore the local markers
-        // to ensure we don't accidentally skip anything if markers were ahead.
-      } else if (_lastSyncedOrderTs > 0) {
-        // Incremental — overlap by 5 s so orders sharing the last timestamp
-        // are never skipped. The DB dedup (bybitOrderId Set) prevents doubles.
-        beginTime = _lastSyncedOrderTs - 5000;
-        print('Sync: Starting INCREMENTAL sync from TS $beginTime (5 s overlap from $_lastSyncedOrderTs)');
-        _syncStatus = 'Checking for new orders…';
-      } else {
-        // No history — fetch last 30 days by default
-        final thirtyDaysAgo = DateTime.now().subtract(const Duration(days: 30));
-        beginTime = thirtyDaysAgo.millisecondsSinceEpoch;
-        print('Sync: Starting DEFAULT sync (last 30 days) from ${_fmtDate(thirtyDaysAgo)}');
-        _syncStatus = 'First sync — fetching last 30 days…';
-      }
-      if (!isSilent) notifyListeners();
-
-      // Fetch all pages
-      print('Sync: Starting fetch with beginTime=$beginTime (${beginTime != null ? DateTime.fromMillisecondsSinceEpoch(beginTime) : 'none'})');
-      
-      final orders = await _bybitService!.getAllOrdersSince(
-        beginTime: beginTime,
-        onProgress: (page, fetched) {
-          _syncStatus = 'Fetching page $page… ($fetched orders so far)';
-          if (!isSilent) notifyListeners();
-        },
-      );
-
-      if (!isSilent) {
-        print('Sync: Fetched ${orders.length} orders total from Bybit.');
-        _syncStatus = 'Fetching full order details for accuracy…';
-        notifyListeners();
-      }
-
-      // Fetch high-fidelity details for ALL fetched orders to get accurate paymentMethod.
-      // IMPORTANT: If getOrderById fails/returns null, fall back to the original order
-      // so we never lose a BUY order just because the detail endpoint timed out.
-      final detailedOrders = <BybitOrder>[];
-      const chunkSize = 10;
-      for (var i = 0; i < orders.length; i += chunkSize) {
-        final chunk = orders.sublist(i, i + chunkSize > orders.length ? orders.length : i + chunkSize);
-        final results = await Future.wait(chunk.map((o) => _bybitService!.getOrderById(o.orderId)));
-        for (var j = 0; j < chunk.length; j++) {
-          // Use detailed result if available, otherwise fall back to original order
-          detailedOrders.add(results[j] ?? chunk[j]);
-        }
-      }
-
-      if (!isSilent) {
-        print('Sync: High-fidelity details fetched for ${detailedOrders.length} orders.');
-        _syncStatus = 'Saving ${detailedOrders.length} orders to database…';
-        notifyListeners();
-      }
-
-      int added = 0;
-      int skipped = 0;
-      int notVodaMethod = 0; // skipped because payment mode wasn't Voda
-      int notVodaChat = 0;   // skipped because no Voda number found in chat
-
-      final knownNumbers = _mobileNumbers.map((n) => n.phoneNumber).toList();
-      print('Sync: Starting assignment loop. Known numbers in app: $knownNumbers');
-
-      // Pre-load all existing bybit order IDs in ONE read for O(1) dedup.
-      // Falls back to empty Set (triggering per-order DB checks) on error.
-      final knownIds = await _dbService.getExistingBybitOrderIds();
-
-      // Track the new high-water mark locally; only commit it after the
-      // entire batch succeeds so a mid-batch crash doesn't advance the cursor.
-      int newMaxTs = _lastSyncedOrderTs;
-
-      for (int i = 0; i < detailedOrders.length; i++) {
-        final order = detailedOrders[i];
-        
-        // Final sanity check before processing
-        // We must check if the order is genuinely older than the requested beginTime,
-        // but we allow equal timestamps because an order might have been created EXACTLY
-        // on the millisecond of beginTime.
-        // The overlap window means we may receive orders that were already saved.
-        // The Set-based dedup inside addTransaction will handle those cheaply.
-        // We keep a 6-second guard (1 s buffer over the 5-second overlap) to
-        // skip orders that are clearly too old even with overlap.
-        if (beginTime != null && order.createTime.millisecondsSinceEpoch < beginTime - 6000) {
-           print('Sync: Skipping order ${order.orderId} - Outside date window (${order.createTime.millisecondsSinceEpoch} < $beginTime).');
-           continue;
-        }
-        // Skip non-EGP orders
-        if (order.currency.toUpperCase() != 'EGP') {
-           print('Sync: Skipping order ${order.orderId} - Fiat currency is not EGP (${order.currency}).');
-           continue;
-        }
-
-        // 1. Identification
-        final pm = order.paymentMethod.toLowerCase();
-        final isVoda = pm.contains('vodafone') || pm.contains('voda');
-        final isBankTransfer = pm.contains('instapay') || pm.contains('bank transfer') || pm.contains('bank');
-        final sideStr = order.side == 0 ? 'BUY' : 'SELL';
-
-        if (!isSilent) {
-          _syncStatus =
-              'Order ${i + 1}/${detailedOrders.length} [$sideStr]: "${order.paymentMethod}" — syncing all data…';
-          notifyListeners();
-        }
-
-        // Track the newest timestamp seen — commit to _lastSyncedOrderTs only
-        // AFTER the full batch completes so a mid-batch error doesn't advance
-        // the cursor past unsaved orders.
-        final orderTs = order.createTime.millisecondsSinceEpoch;
-        if (orderTs > newMaxTs) newMaxTs = orderTs;
-
-        // 2. Scan chat/terms for assignment
-        String? matchedNumber;
-        if (order.orderId.isNotEmpty && knownNumbers.isNotEmpty) {
-          matchedNumber = await _bybitService!.findPhoneNumberInChat(
-            order,
-            knownNumbers,
-          );
-        }
-
-        // 3. Fetch full chat history for the database mirror
-        String chatSummary = '';
-        if (order.orderId.isNotEmpty) {
-          chatSummary = await _bybitService!.getChatSummary(order.orderId);
-        }
-
-        if (matchedNumber == null) {
-          // No match found in chat or terms.
-          print('Sync: No match for $sideStr order ${order.orderId}. Saving as Unassigned.');
-          notVodaChat++;
-        } else {
-           print('Sync: Matched order ${order.orderId} to number $matchedNumber.');
-        }
-
-        // Handle BUY vs SELL logic separately
-        if (order.side == 0) {
-          // BUY USDT: We send EGP from bank, receive USDT
-          if (isBankTransfer) {
-             print('Sync: Processing BUY order ${order.orderId} via ${order.paymentMethod} (Bank/Instapay).');
-          } else {
-             print('Sync: Processing BUY order ${order.orderId} via ${order.paymentMethod}.');
-          }
-          
-          // 1. Record transaction with or without a matched number
-          final tx = CashTransaction(
-            id: const Uuid().v4(),
-            phoneNumber: matchedNumber,
-            amount: order.amount,
-            currency: order.currency.isEmpty ? 'EGP' : order.currency,
-            timestamp: order.createTime,
-            bybitOrderId: order.orderId,
-            status: 'completed',
-            paymentMethod: order.paymentMethod,
-            side: order.side,
-            chatHistory: chatSummary,
-            price: order.price,
-            quantity: order.quantity,
-            token: order.token,
-          );
-
-          final wasAdded = await _dbService.addTransaction(tx, knownIds: knownIds);
-          if (wasAdded) {
-             added++;
-          } else {
-             skipped++;
-          }
-
-          // 2. Trigger Bank deduction ONLY if it's explicitly a Bank Transfer / Instapay method
-          // We call this even if wasAdded is false, because DistributionProvider handles its own
-          // deduplication via the ledger. This ensures missed ledger entries are caught.
-          if (isBankTransfer) {
-              await _onBuyOrderCallback?.call(
-                 bybitOrderId: order.orderId,
-                 usdtQuantity: order.quantity,
-                 egpAmount: order.amount,
-                 usdtPrice: order.price,
-                 timestamp: order.createTime,
-              );
-          }
-          continue; // Done processing BUY order
-        }
-
-        // SELL USDT: We receive EGP into Vodafone Cash
-        if (!isVoda) {
-          print('Sync: Skipping order ${order.orderId} - Mode: "${order.paymentMethod}" is NOT Vodafone Cash.');
-          notVodaMethod++;
-          continue;
-        }
-
-        final tx = CashTransaction(
-          id: const Uuid().v4(),
-          phoneNumber: matchedNumber,
-          amount: order.amount,
-          currency: order.currency.isEmpty ? 'EGP' : order.currency,
-          timestamp: order.createTime,
-          bybitOrderId: order.orderId,
-          status: 'completed',
-          paymentMethod: order.paymentMethod,
-          side: order.side,
-          chatHistory: chatSummary,
-          price: order.price,
-          quantity: order.quantity,
-          token: order.token,
-        );
-
-        final wasAdded = await _dbService.addTransaction(tx, knownIds: knownIds);
-        if (wasAdded) {
-          added++;
-        } else {
-          skipped++;
-        }
-
-        // Trigger SELL deduction logic (Vodafone Cash received)
-        // We call this even if wasAdded is false, because DistributionProvider handles its own
-        // deduplication via the ledger. This ensures missed ledger entries are caught.
-        final matchedVf = _mobileNumbers.firstWhere(
-          (n) => n.phoneNumber == matchedNumber,
-          orElse: () => MobileNumber(id: 'unknown', phoneNumber: matchedNumber ?? 'unknown', isDefault: false, createdAt: DateTime.now())
-        );
-        
-        await _onSellOrderCallback?.call(
-          bybitOrderId: order.orderId,
-          egpAmount: order.amount,
-          usdtQuantity: order.quantity,
-          usdtPrice: order.price,
-          paymentMethod: order.paymentMethod,
-          vfNumberId: matchedVf.id == 'unknown' ? null : matchedVf.id,
-          vfNumberLabel: matchedVf.phoneNumber,
-          createdByUid: 'system_sync',
-          timestamp: order.createTime,
-        );
-      }
-
-      print('Sync Result: $added total records, $skipped duplicates. (Vodafone: ${added - notVodaMethod}, Other: $notVodaMethod, Unassigned: $notVodaChat)');
-
-      // Commit the high-water mark only now that every order in this batch
-      // has been successfully written to Firebase.
-      _lastSyncedOrderTs = newMaxTs;
-
-      // Persist sync metadata
-      _lastSyncTime = DateTime.now();
-      await _dbService.saveLastSyncedOrderTimestamp(_lastSyncedOrderTs);
-      await _dbService.saveLastSyncTime(_lastSyncTime!.millisecondsSinceEpoch);
-
-      // Reload UI data
-      await loadAllTransactions();
-      await loadMobileNumbers();
-
-      _syncStatus = '';
-      if (!isSilent) notifyListeners();
-      return SyncResult(added: added, skipped: skipped);
-    } catch (e) {
-      _error = e.toString();
-      _syncStatus = '';
-      if (!isSilent) notifyListeners();
-      return SyncResult(error: e.toString());
-    } finally {
-      _isSyncing = false;
-      if (!isSilent) {
-        _isLoading = false;
-        notifyListeners();
-      }
-    }
+    return _syncOrdersServer(fromDate: fromDate, isSilent: isSilent);
   }
 
   // ── Limit Helpers ─────────────────────────────────────────────────────────
@@ -837,8 +475,4 @@ class AppProvider extends ChangeNotifier {
   double getOutMonthlyUsagePercentage(MobileNumber n) => n.outMonthlyLimit == 0
       ? 0
       : (n.outMonthlyUsed / n.outMonthlyLimit).clamp(0, 1);
-
-  // ── Helpers ───────────────────────────────────────────────────────────────
-  String _fmtDate(DateTime d) =>
-      '${d.day.toString().padLeft(2, '0')}/${d.month.toString().padLeft(2, '0')}/${d.year}';
 }

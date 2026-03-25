@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:intl/intl.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -14,30 +15,64 @@ class LedgerScreen extends StatelessWidget {
     final dist = context.watch<DistributionProvider>();
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF16162A),
+        backgroundColor: AppTheme.surfaceColor(context),
+        elevation: 0,
         title: Text('financial_ledger'.tr(),
-            style: const TextStyle(color: Colors.white)),
-        iconTheme: const IconThemeData(color: Colors.white),
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
+        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
       ),
       body: dist.ledger.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  const Icon(Icons.receipt_long_outlined,
-                      size: 60, color: Colors.white24),
+                  Icon(Icons.receipt_long_outlined,
+                      size: 60,
+                      color: AppTheme.textMutedColor(context)
+                          .withValues(alpha: 0.6)),
                   const SizedBox(height: 12),
                   Text('no_data'.tr(),
-                      style: const TextStyle(color: Colors.white38)),
+                      style:
+                          TextStyle(color: AppTheme.textMutedColor(context))),
                 ],
               ),
             )
-          : ListView.builder(
-              padding: const EdgeInsets.all(16),
-              itemCount: dist.ledger.length,
-              itemBuilder: (ctx, i) => _LedgerTile(tx: dist.ledger[i]),
+          : Column(
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: AppTheme.isDark(context)
+                            ? AppTheme.panelGradient(context)
+                            : const [Color(0xFFFFFBF4), Color(0xFFF2E5D2)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(24),
+                      border: Border.all(color: AppTheme.lineColor(context)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(child: _LedgerStat(label: 'Entries', value: dist.ledger.length.toString())),
+                        Expanded(child: _LedgerStat(label: 'Latest', value: DateFormat('dd MMM').format(dist.ledger.first.timestamp))),
+                      ],
+                    ),
+                  ),
+                ),
+                Expanded(
+                  child: ListView.builder(
+                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
+                    itemCount: dist.ledger.length,
+                    itemBuilder: (ctx, i) => _LedgerTile(tx: dist.ledger[i]),
+                  ),
+                ),
+              ],
             ),
     );
   }
@@ -50,15 +85,15 @@ class _LedgerTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final color   = _color(tx.type);
-    final icon    = _icon(tx.type);
-    final fmt     = NumberFormat('#,##0.00');
+    final color = _color(context, tx.type);
+    final icon = _icon(tx.type);
+    final fmt = NumberFormat('#,##0.00');
     final dateFmt = DateFormat('dd MMM, HH:mm');
 
     // Detect deleted labels
-    final fromDeleted  = tx.fromLabel?.contains('[Deleted Account]') == true;
-    final toDeleted    = tx.toLabel?.contains('[Deleted Account]') == true;
-    final anyDeleted   = fromDeleted || toDeleted;
+    final fromDeleted = tx.fromLabel?.contains('[Deleted Account]') == true;
+    final toDeleted = tx.toLabel?.contains('[Deleted Account]') == true;
+    final anyDeleted = fromDeleted || toDeleted;
 
     String label = tx.type.label.tr();
     if (tx.type == FlowType.FUND_BANK || tx.type == FlowType.DEPOSIT_TO_BANK) {
@@ -82,17 +117,24 @@ class _LedgerTile extends StatelessWidget {
         (raw ?? '').replaceAll(' [Deleted Account]', '').trim();
 
     return Container(
-        margin: const EdgeInsets.only(bottom: 10),
-        padding: const EdgeInsets.all(14),
-        decoration: BoxDecoration(
-          color: const Color(0xFF16162A),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: anyDeleted
-                ? Colors.red.withOpacity(0.25)
-                : color.withOpacity(0.15),
-          ),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: AppTheme.isDark(context)
+              ? AppTheme.panelGradient(context)
+              : const [Color(0xFFFFFEFB), Color(0xFFF7F0E5)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
         ),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: anyDeleted
+              ? Colors.red.withOpacity(0.25)
+              : color.withOpacity(0.15),
+        ),
+        boxShadow: AppTheme.softShadow(context),
+      ),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -115,8 +157,8 @@ class _LedgerTile extends StatelessWidget {
                 // Type label
                 Text(
                   label,
-                  style: const TextStyle(
-                      color: Colors.white,
+                  style: TextStyle(
+                      color: AppTheme.textPrimaryColor(context),
                       fontWeight: FontWeight.bold,
                       fontSize: 13),
                 ),
@@ -134,15 +176,9 @@ class _LedgerTile extends StatelessWidget {
                     runSpacing: 4,
                     children: [
                       if (tx.fromLabel != null)
-                        _labelChip(
-                          '← ${cleanLabel(tx.fromLabel)}',
-                          fromDeleted,
-                        ),
+                        _labelChip(context, '← ${cleanLabel(tx.fromLabel)}', fromDeleted),
                       if (tx.toLabel != null)
-                        _labelChip(
-                          '→ ${cleanLabel(tx.toLabel)}',
-                          toDeleted,
-                        ),
+                        _labelChip(context, '→ ${cleanLabel(tx.toLabel)}', toDeleted),
                     ],
                   ),
                 ],
@@ -151,8 +187,10 @@ class _LedgerTile extends StatelessWidget {
                 if (tx.paymentMethod != null) ...[
                   const SizedBox(height: 2),
                   Text(tx.paymentMethod!,
-                      style:
-                          const TextStyle(color: Colors.white24, fontSize: 10)),
+                      style: TextStyle(
+                          color: AppTheme.textMutedColor(context)
+                              .withValues(alpha: 0.6),
+                          fontSize: 10)),
                 ],
 
                 // Notes
@@ -160,8 +198,8 @@ class _LedgerTile extends StatelessWidget {
                   const SizedBox(height: 2),
                   Text(
                     tx.notes!,
-                    style: const TextStyle(
-                        color: Colors.white38,
+                    style: TextStyle(
+                        color: AppTheme.textMutedColor(context),
                         fontSize: 10,
                         fontStyle: FontStyle.italic),
                     maxLines: 1,
@@ -173,7 +211,8 @@ class _LedgerTile extends StatelessWidget {
                 const SizedBox(height: 3),
                 Text(
                   dateFmt.format(tx.timestamp),
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  style: TextStyle(
+                      color: AppTheme.textMutedColor(context), fontSize: 11),
                 ),
               ],
             ),
@@ -191,7 +230,8 @@ class _LedgerTile extends StatelessWidget {
               if (tx.usdtQuantity != null)
                 Text(
                   '${tx.usdtQuantity!.toStringAsFixed(2)} USDT',
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  style: TextStyle(
+                      color: AppTheme.textMutedColor(context), fontSize: 11),
                 ),
               const SizedBox(height: 6),
               _buildAdminActions(context),
@@ -209,7 +249,7 @@ class _LedgerTile extends StatelessWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (tx.type == FlowType.COLLECT_CASH || 
+        if (tx.type == FlowType.COLLECT_CASH ||
             tx.type == FlowType.DEPOSIT_TO_BANK ||
             tx.type == FlowType.CREDIT_RETURN)
           _buildCorrectButton(context),
@@ -224,9 +264,9 @@ class _LedgerTile extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
         decoration: BoxDecoration(
-          color: Colors.white.withOpacity(0.05),
+          color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.05),
           borderRadius: BorderRadius.circular(6),
-          border: Border.all(color: Colors.white10),
+          border: Border.all(color: AppTheme.lineColor(context)),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
@@ -235,7 +275,10 @@ class _LedgerTile extends StatelessWidget {
             const SizedBox(width: 4),
             Text(
               context.locale.languageCode == 'ar' ? 'تعديل' : 'Correct',
-              style: const TextStyle(color: Colors.orangeAccent, fontSize: 10, fontWeight: FontWeight.bold),
+              style: const TextStyle(
+                  color: Colors.orangeAccent,
+                  fontSize: 10,
+                  fontWeight: FontWeight.bold),
             ),
           ],
         ),
@@ -251,40 +294,48 @@ class _LedgerTile extends StatelessWidget {
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16162A),
-        title: Text('Correct Transaction', style: const TextStyle(color: Colors.white)),
+        backgroundColor: AppTheme.surfaceColor(context),
+        title: Text('Correct Transaction',
+            style: TextStyle(color: AppTheme.textPrimaryColor(context))),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
               'Original Amount: ${tx.amount.toStringAsFixed(0)} EGP',
-              style: const TextStyle(color: Colors.white70, fontSize: 13),
+              style: TextStyle(
+                  color:
+                      AppTheme.textPrimaryColor(context).withValues(alpha: 0.7),
+                  fontSize: 13),
             ),
             const SizedBox(height: 16),
             TextField(
               controller: ctrl,
               keyboardType: TextInputType.number,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context)),
               decoration: InputDecoration(
                 labelText: 'Correct Amount',
-                labelStyle: const TextStyle(color: Colors.white54),
+                labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
                 suffixText: 'EGP',
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.06),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                fillColor:
+                    AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
             const SizedBox(height: 12),
             TextField(
               controller: reasonCtrl,
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context)),
               decoration: InputDecoration(
                 labelText: 'Reason',
-                labelStyle: const TextStyle(color: Colors.white54),
+                labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
                 filled: true,
-                fillColor: Colors.white.withOpacity(0.06),
-                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                fillColor:
+                    AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
+                border:
+                    OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
@@ -292,7 +343,8 @@ class _LedgerTile extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(ctx),
-            child: Text('cancel'.tr(), style: const TextStyle(color: Colors.white38)),
+            child: Text('cancel'.tr(),
+                style: TextStyle(color: AppTheme.textMutedColor(context))),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -303,7 +355,7 @@ class _LedgerTile extends StatelessWidget {
               }
               final dist = context.read<DistributionProvider>();
               final auth = context.read<AuthProvider>();
-              
+
               try {
                 await dist.correctTransaction(
                   originalTx: tx,
@@ -313,16 +365,20 @@ class _LedgerTile extends StatelessWidget {
                 );
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('Correction applied successfully')),
+                  const SnackBar(
+                      content: Text('Correction applied successfully')),
                 );
               } catch (e) {
                 ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                  SnackBar(
+                      content: Text('Error: $e'), backgroundColor: Colors.red),
                 );
               }
             },
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
-            child: const Text('Apply Fix', style: TextStyle(color: Colors.white)),
+            style:
+                ElevatedButton.styleFrom(backgroundColor: Colors.orangeAccent),
+            child: Text('Apply Fix',
+                style: TextStyle(color: AppTheme.textPrimaryColor(context))),
           ),
         ],
       ),
@@ -330,11 +386,11 @@ class _LedgerTile extends StatelessWidget {
   }
 
   /// Renders a small label pill; red + strikethrough-style if deleted.
-  Widget _labelChip(String text, bool deleted) {
+  Widget _labelChip(BuildContext context, String text, bool deleted) {
     if (!deleted) {
       return Text(
         text,
-        style: const TextStyle(color: Colors.white54, fontSize: 11),
+        style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11),
       );
     }
     return Container(
@@ -362,35 +418,76 @@ class _LedgerTile extends StatelessWidget {
     );
   }
 
-  Color _color(FlowType t) {
+  Color _color(BuildContext context, FlowType t) {
     switch (t) {
-      case FlowType.FUND_BANK:           return const Color(0xFF4CC9F0);
-      case FlowType.BUY_USDT:            return const Color(0xFFFBBF24);
-      case FlowType.SELL_USDT:           return const Color(0xFF4ADE80);
-      case FlowType.DISTRIBUTE_VFCASH:   return const Color(0xFFE63946);
-      case FlowType.COLLECT_CASH:        return const Color(0xFFA78BFA);
-      case FlowType.DEPOSIT_TO_BANK:     return const Color(0xFF4CC9F0);
-      case FlowType.EXPENSE_VFCASH_FEE:  return const Color(0xFFFF9800);
-      case FlowType.ADMIN_ADJUSTMENT:    return Colors.orangeAccent;
-      case FlowType.CREDIT_RETURN:       return const Color(0xFF4ADE80);
-      case FlowType.CREDIT_RETURN_FEE:   return const Color(0xFFFBBF24);
-      case FlowType.BANK_DEDUCTION:      return const Color(0xFFE63946);
+      case FlowType.FUND_BANK:
+        return AppTheme.infoColor(context);
+      case FlowType.BUY_USDT:
+        return AppTheme.warningColor(context);
+      case FlowType.SELL_USDT:
+        return AppTheme.positiveColor(context);
+      case FlowType.DISTRIBUTE_VFCASH:
+        return const Color(0xFFE63946);
+      case FlowType.COLLECT_CASH:
+        return const Color(0xFFA78BFA);
+      case FlowType.DEPOSIT_TO_BANK:
+        return AppTheme.infoColor(context);
+      case FlowType.EXPENSE_VFCASH_FEE:
+        return const Color(0xFFFF9800);
+      case FlowType.ADMIN_ADJUSTMENT:
+        return Colors.orangeAccent;
+      case FlowType.CREDIT_RETURN:
+        return AppTheme.positiveColor(context);
+      case FlowType.CREDIT_RETURN_FEE:
+        return AppTheme.warningColor(context);
+      case FlowType.BANK_DEDUCTION:
+        return const Color(0xFFE63946);
     }
   }
 
   IconData _icon(FlowType t) {
     switch (t) {
-      case FlowType.FUND_BANK:           return Icons.add_card;
-      case FlowType.BUY_USDT:            return Icons.arrow_upward;
-      case FlowType.SELL_USDT:           return Icons.arrow_downward;
-      case FlowType.DISTRIBUTE_VFCASH:   return Icons.phone_android;
-      case FlowType.COLLECT_CASH:        return Icons.delivery_dining;
-      case FlowType.DEPOSIT_TO_BANK:     return Icons.account_balance;
-      case FlowType.EXPENSE_VFCASH_FEE:  return Icons.money_off;
-      case FlowType.ADMIN_ADJUSTMENT:    return Icons.admin_panel_settings;
-      case FlowType.CREDIT_RETURN:       return Icons.keyboard_return;
-      case FlowType.CREDIT_RETURN_FEE:   return Icons.add_chart;
-      case FlowType.BANK_DEDUCTION:      return Icons.remove_circle_outline;
+      case FlowType.FUND_BANK:
+        return Icons.add_card;
+      case FlowType.BUY_USDT:
+        return Icons.arrow_upward;
+      case FlowType.SELL_USDT:
+        return Icons.arrow_downward;
+      case FlowType.DISTRIBUTE_VFCASH:
+        return Icons.phone_android;
+      case FlowType.COLLECT_CASH:
+        return Icons.delivery_dining;
+      case FlowType.DEPOSIT_TO_BANK:
+        return Icons.account_balance;
+      case FlowType.EXPENSE_VFCASH_FEE:
+        return Icons.money_off;
+      case FlowType.ADMIN_ADJUSTMENT:
+        return Icons.admin_panel_settings;
+      case FlowType.CREDIT_RETURN:
+        return Icons.keyboard_return;
+      case FlowType.CREDIT_RETURN_FEE:
+        return Icons.add_chart;
+      case FlowType.BANK_DEDUCTION:
+        return Icons.remove_circle_outline;
     }
+  }
+}
+
+class _LedgerStat extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _LedgerStat({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w800)),
+      ],
+    );
   }
 }

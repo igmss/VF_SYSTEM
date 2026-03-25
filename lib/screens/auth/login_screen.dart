@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/auth_provider.dart';
+import '../../theme/app_theme.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({Key? key}) : super(key: key);
@@ -32,134 +33,197 @@ class _LoginScreenState extends State<LoginScreen> {
   @override
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
+    final isDark = AppTheme.isDark(context);
+    final textPrimary = AppTheme.textPrimaryColor(context);
+    final textMuted = AppTheme.textMutedColor(context);
+    final surface = AppTheme.surfaceColor(context);
+    final line = AppTheme.lineColor(context);
+
     return Scaffold(
-      backgroundColor: const Color(0xFF0F0F1A),
-      body: SafeArea(
-        child: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.all(28),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                // Logo / Icon
-                Container(
-                  width: 90,
-                  height: 90,
-                  decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    gradient: const LinearGradient(
-                      colors: [Color(0xFFE63946), Color(0xFFFF6B6B)],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    ),
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFFE63946).withOpacity(0.4),
-                        blurRadius: 24,
-                        spreadRadius: 4,
-                      )
-                    ],
-                  ),
-                  child: const Icon(Icons.currency_exchange, color: Colors.white, size: 42),
-                ),
-                const SizedBox(height: 28),
-                Text(
-                  'app_name'.tr(),
-                  style: const TextStyle(
-                    color: Colors.white,
-                    fontSize: 26,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 0.5,
-                  ),
-                ),
-                const SizedBox(height: 6),
-                Text(
-                  'login'.tr(),
-                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14),
-                ),
-                const SizedBox(height: 40),
-                Form(
-                  key: _formKey,
-                  child: Column(
-                    children: [
-                      _buildField(
-                        controller: _emailCtrl,
-                        label: 'email'.tr(),
-                        icon: Icons.email_outlined,
-                        keyboard: TextInputType.emailAddress,
-                        validator: (v) =>
-                            (v == null || !v.contains('@')) ? 'error'.tr() : null,
-                      ),
-                      const SizedBox(height: 16),
-                      _buildField(
-                        controller: _passCtrl,
-                        label: 'password'.tr(),
-                        icon: Icons.lock_outline,
-                        obscure: _obscure,
-                        suffix: IconButton(
-                          icon: Icon(
-                            _obscure ? Icons.visibility_off : Icons.visibility,
-                            color: Colors.white38,
-                          ),
-                          onPressed: () => setState(() => _obscure = !_obscure),
-                        ),
-                        validator: (v) =>
-                            (v == null || v.length < 6) ? 'error'.tr() : null,
-                      ),
-                    ],
-                  ),
-                ),
-                if (auth.error != null) ...[
-                  const SizedBox(height: 16),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.red.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.red.withOpacity(0.4)),
-                    ),
-                    child: Text(
-                      auth.error!,
-                      style: const TextStyle(color: Color(0xFFFF6B6B), fontSize: 13),
-                      textAlign: TextAlign.center,
-                    ),
-                  ),
-                ],
-                const SizedBox(height: 28),
-                SizedBox(
-                  width: double.infinity,
-                  height: 52,
-                  child: ElevatedButton(
-                    onPressed: auth.isLoading ? null : _submit,
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: const Color(0xFFE63946),
-                      shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(14)),
-                      elevation: 0,
-                    ),
-                    child: auth.isLoading
-                        ? const SizedBox(
-                            height: 22,
-                            width: 22,
-                            child: CircularProgressIndicator(
-                                strokeWidth: 2.5, color: Colors.white),
-                          )
-                        : Text(
-                            'login'.tr(),
-                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                  ),
-                ),
-              ],
-            ),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: AppTheme.backgroundGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
           ),
+        ),
+        child: Stack(
+          children: [
+            Positioned(
+              top: -120,
+              right: -40,
+              child: Container(
+                width: 260,
+                height: 260,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppTheme.glowColor(context),
+                ),
+              ),
+            ),
+            Positioned(
+              bottom: -80,
+              left: -20,
+              child: Container(
+                width: 220,
+                height: 220,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: AppTheme.secondaryGlowColor(context),
+                ),
+              ),
+            ),
+            SafeArea(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(24),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 460),
+                    child: Container(
+                      padding: const EdgeInsets.all(28),
+                      decoration: BoxDecoration(
+                        color: surface.withValues(alpha: isDark ? 0.92 : 0.97),
+                        borderRadius: BorderRadius.circular(32),
+                        border: Border.all(color: line),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: isDark ? 0.28 : 0.10),
+                            blurRadius: 40,
+                            offset: const Offset(0, 18),
+                          ),
+                        ],
+                      ),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Container(
+                            width: 68,
+                            height: 68,
+                            decoration: BoxDecoration(
+                              borderRadius: BorderRadius.circular(22),
+                              gradient: LinearGradient(
+                                colors: AppTheme.heroGradient(context),
+                                begin: Alignment.topLeft,
+                                end: Alignment.bottomRight,
+                              ),
+                            ),
+                            child: const Icon(
+                              Icons.currency_exchange_rounded,
+                              color: Colors.white,
+                              size: 30,
+                            ),
+                          ),
+                          const SizedBox(height: 24),
+                          Text(
+                            'app_name'.tr(),
+                            style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                                  fontSize: 32,
+                                ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            'Secure operations, premium clarity, zero noise.',
+                            style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                                  fontSize: 14,
+                                  color: textMuted,
+                                ),
+                          ),
+                          const SizedBox(height: 28),
+                          Form(
+                            key: _formKey,
+                            child: Column(
+                              children: [
+                                _buildField(
+                                  context: context,
+                                  controller: _emailCtrl,
+                                  label: 'email'.tr(),
+                                  icon: Icons.alternate_email_rounded,
+                                  keyboard: TextInputType.emailAddress,
+                                  validator: (v) =>
+                                      (v == null || !v.contains('@')) ? 'error'.tr() : null,
+                                ),
+                                const SizedBox(height: 16),
+                                _buildField(
+                                  context: context,
+                                  controller: _passCtrl,
+                                  label: 'password'.tr(),
+                                  icon: Icons.lock_outline_rounded,
+                                  obscure: _obscure,
+                                  suffix: IconButton(
+                                    icon: Icon(
+                                      _obscure ? Icons.visibility_off : Icons.visibility,
+                                    ),
+                                    onPressed: () => setState(() => _obscure = !_obscure),
+                                  ),
+                                  validator: (v) =>
+                                      (v == null || v.length < 6) ? 'error'.tr() : null,
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (auth.error != null) ...[
+                            const SizedBox(height: 16),
+                            Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.all(14),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFD84343).withValues(alpha: 0.10),
+                                borderRadius: BorderRadius.circular(18),
+                                border: Border.all(
+                                  color: const Color(0xFFD84343).withValues(alpha: 0.20),
+                                ),
+                              ),
+                              child: Text(
+                                auth.error!,
+                                style: const TextStyle(
+                                  color: Color(0xFFC95B57),
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w500,
+                                ),
+                                textAlign: TextAlign.center,
+                              ),
+                            ),
+                          ],
+                          const SizedBox(height: 24),
+                          SizedBox(
+                            width: double.infinity,
+                            height: 56,
+                            child: ElevatedButton(
+                              onPressed: auth.isLoading ? null : _submit,
+                              child: auth.isLoading
+                                  ? const SizedBox(
+                                      height: 22,
+                                      width: 22,
+                                      child: CircularProgressIndicator(
+                                        strokeWidth: 2.5,
+                                        color: Colors.white,
+                                      ),
+                                    )
+                                  : Text(
+                                      'login'.tr(),
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.w700,
+                                      ),
+                                    ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildField({
+    required BuildContext context,
     required TextEditingController controller,
     required String label,
     required IconData icon,
@@ -172,35 +236,13 @@ class _LoginScreenState extends State<LoginScreen> {
       controller: controller,
       obscureText: obscure,
       keyboardType: keyboard,
-      style: const TextStyle(color: Colors.white),
+      style: TextStyle(color: AppTheme.textPrimaryColor(context)),
       validator: validator,
       decoration: InputDecoration(
         labelText: label,
-        labelStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
-        prefixIcon: Icon(icon, color: Colors.white38),
+        prefixIcon: Icon(icon),
         suffixIcon: suffix,
-        filled: true,
-        fillColor: Colors.white.withOpacity(0.06),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-        ),
-        enabledBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
-        ),
-        focusedBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Color(0xFFE63946)),
-        ),
-        errorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.redAccent),
-        ),
-        focusedErrorBorder: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: const BorderSide(color: Colors.redAccent),
-        ),
+        hintText: label,
       ),
     );
   }

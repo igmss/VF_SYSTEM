@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -10,8 +11,8 @@ import '../../models/financial_transaction.dart';
 class UsdExchangeScreen extends StatelessWidget {
   const UsdExchangeScreen({Key? key}) : super(key: key);
 
-  static const _bg    = Color(0xFF0F0F1A);
-  static const _card  = Color(0xFF16162A);
+
+
   static const _gold  = Color(0xFFF59E0B);
 
   @override
@@ -29,24 +30,47 @@ class UsdExchangeScreen extends StatelessWidget {
         .toList();
 
     return Scaffold(
-      backgroundColor: _bg,
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        backgroundColor: const Color(0xFF16162A),
-        title: const Text('USD Exchange', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-        iconTheme: const IconThemeData(color: Colors.white),
-
+        backgroundColor: AppTheme.surfaceColor(context),
+        elevation: 0,
+        title: Text('USD Exchange', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
+        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
       ),
       body: dist.isLoading
           ? const Center(child: CircularProgressIndicator(color: _gold))
           : Column(
               children: [
-                _buildHeader(balance, totalEgp),
-                const SizedBox(height: 4),
+                _buildHeader(context, balance, totalEgp),
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 18, 6),
+                  child: Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: AppTheme.isDark(context)
+                            ? AppTheme.panelGradient(context)
+                            : const [Color(0xFFFFFBF3), Color(0xFFF4E8CF)],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      ),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(color: AppTheme.lineColor(context)),
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(child: _MiniStat(label: 'Holdings', value: '${_fmt(balance)} USDT')),
+                        Expanded(child: _MiniStat(label: 'EGP Value', value: '${_fmt(totalEgp)} EGP')),
+                      ],
+                    ),
+                  ),
+                ),
                 Expanded(
                   child: history.isEmpty
-                      ? _buildEmpty()
+                      ? _buildEmpty(context)
                       : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+                          padding: const EdgeInsets.fromLTRB(16, 10, 16, 28),
                           itemCount: history.length + 1,
                           itemBuilder: (ctx, i) {
                             if (i == 0) {
@@ -54,8 +78,8 @@ class UsdExchangeScreen extends StatelessWidget {
                                 padding: const EdgeInsets.only(bottom: 10, top: 4),
                                 child: Text(
                                   'recent_activity'.tr(),
-                                  style: const TextStyle(
-                                    color: Colors.white,
+                                  style: TextStyle(
+                                    color: AppTheme.textPrimaryColor(context),
                                     fontSize: 16,
                                     fontWeight: FontWeight.bold,
                                   ),
@@ -72,17 +96,18 @@ class UsdExchangeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildHeader(double balance, double totalEgp) {
+  Widget _buildHeader(BuildContext context, double balance, double totalEgp) {
     return Container(
-      margin: const EdgeInsets.all(16),
-      padding: const EdgeInsets.all(20),
+      margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
         gradient: const LinearGradient(
           colors: [Color(0xFFF59E0B), Color(0xFFD97706)],
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
         ),
-        borderRadius: BorderRadius.circular(20),
+        borderRadius: BorderRadius.circular(28),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
         boxShadow: [
           BoxShadow(
             color: const Color(0xFFF59E0B).withOpacity(0.35),
@@ -96,18 +121,18 @@ class UsdExchangeScreen extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: const Icon(Icons.currency_exchange, color: Colors.white, size: 28),
+            child: Icon(Icons.currency_exchange, color: AppTheme.textPrimaryColor(context), size: 28),
           ),
           const SizedBox(width: 16),
           Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              const Text(
+              Text(
                 'USD Exchange',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
+                style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 13),
               ),
               const SizedBox(height: 4),
               Row(
@@ -116,18 +141,18 @@ class UsdExchangeScreen extends StatelessWidget {
                 children: [
                   Text(
                     _fmt(balance),
-                    style: const TextStyle(
-                      color: Colors.white,
+                    style: TextStyle(
+                      color: AppTheme.textPrimaryColor(context),
                       fontSize: 28,
                       fontWeight: FontWeight.bold,
                       letterSpacing: 0.3,
                     ),
                   ),
                   const SizedBox(width: 6),
-                  const Text(
+                  Text(
                     'USDT',
                     style: TextStyle(
-                      color: Colors.white70,
+                      color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7),
                       fontSize: 16,
                       fontWeight: FontWeight.w600,
                     ),
@@ -137,7 +162,7 @@ class UsdExchangeScreen extends StatelessWidget {
               const SizedBox(height: 2),
               Text(
                 '≈ ${_fmt(totalEgp)} EGP',
-                style: const TextStyle(color: Colors.white60, fontSize: 13),
+                style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13),
               ),
             ],
           ),
@@ -146,16 +171,16 @@ class UsdExchangeScreen extends StatelessWidget {
     );
   }
 
-  Widget _buildEmpty() {
+  Widget _buildEmpty(BuildContext context) {
     return Center(
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
-        children: const [
-          Icon(Icons.currency_exchange, size: 56, color: Colors.white12),
-          SizedBox(height: 12),
+        children: [
+          Icon(Icons.currency_exchange, size: 56, color: AppTheme.lineColor(context)),
+          const SizedBox(height: 12),
           Text(
             'No transactions yet',
-            style: TextStyle(color: Colors.white38, fontSize: 15),
+            style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 15),
           ),
         ],
       ),
@@ -167,25 +192,25 @@ class UsdExchangeScreen extends StatelessWidget {
     showDialog(
       context: context,
       builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF16162A),
+        backgroundColor: AppTheme.surfaceColor(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Set USDT Balance',
-            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: Text('Set USDT Balance',
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
         content: TextField(
           controller: ctrl,
           keyboardType: const TextInputType.numberWithOptions(decimal: true),
-          style: const TextStyle(color: Colors.white),
+          style: TextStyle(color: AppTheme.textPrimaryColor(context)),
           decoration: InputDecoration(
             labelText: 'Balance (USDT)',
-            labelStyle: const TextStyle(color: Colors.white54),
+            labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
             suffixText: 'USDT',
-            suffixStyle: const TextStyle(color: Colors.white38),
+            suffixStyle: TextStyle(color: AppTheme.textMutedColor(context)),
             filled: true,
-            fillColor: Colors.white.withOpacity(0.06),
+            fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
             border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
             enabledBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
-              borderSide: BorderSide(color: Colors.white.withOpacity(0.1)),
+              borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1)),
             ),
             focusedBorder: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
@@ -196,7 +221,7 @@ class UsdExchangeScreen extends StatelessWidget {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: Text('cancel'.tr(), style: const TextStyle(color: Colors.white38)),
+            child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(
@@ -208,7 +233,7 @@ class UsdExchangeScreen extends StatelessWidget {
               dist.setUsdExchangeBalance(val);
               Navigator.pop(context);
             },
-            child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: Text('Save', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -227,18 +252,25 @@ class _TxCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final isBuy = tx.type == FlowType.BUY_USDT;
-    final color = isBuy ? const Color(0xFF4ADE80) : const Color(0xFFF59E0B);
+    final color = isBuy ? AppTheme.positiveColor(context) : AppTheme.warningColor(context);
     final icon  = isBuy ? Icons.arrow_downward_rounded : Icons.arrow_upward_rounded;
     final label = isBuy ? 'Buy USDT' : 'Sell USDT';
     final sign  = isBuy ? '+' : '-';
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
       decoration: BoxDecoration(
-        color: const Color(0xFF16162A),
-        borderRadius: BorderRadius.circular(14),
+        gradient: LinearGradient(
+          colors: AppTheme.isDark(context)
+              ? AppTheme.panelGradient(context)
+              : const [Color(0xFFFFFEFB), Color(0xFFF6EFE2)],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: BorderRadius.circular(20),
         border: Border.all(color: color.withOpacity(0.18)),
+        boxShadow: AppTheme.softShadow(context),
       ),
       child: Row(
         children: [
@@ -256,13 +288,13 @@ class _TxCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(label,
-                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14)),
+                    style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600, fontSize: 14)),
                 if (tx.fromLabel != null || tx.toLabel != null)
                   Text(
                     isBuy
                         ? '${tx.fromLabel ?? ''} → ${tx.toLabel ?? 'USD Exchange'}'
                         : '${tx.fromLabel ?? 'USD Exchange'} → ${tx.toLabel ?? ''}',
-                    style: const TextStyle(color: Colors.white38, fontSize: 11),
+                    style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11),
                     overflow: TextOverflow.ellipsis,
                   ),
               ],
@@ -282,16 +314,35 @@ class _TxCard extends StatelessWidget {
               if (tx.usdtQuantity != null && tx.usdtQuantity! > 0)
                 Text(
                   '${tx.usdtQuantity!.toStringAsFixed(2)} USDT',
-                  style: const TextStyle(color: Colors.white38, fontSize: 10),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10),
                 ),
               Text(
                 DateFormat('dd/MM HH:mm').format(tx.timestamp),
-                style: const TextStyle(color: Colors.white24, fontSize: 10),
+                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 10),
               ),
             ],
           ),
         ],
       ),
+    );
+  }
+}
+
+class _MiniStat extends StatelessWidget {
+  final String label;
+  final String value;
+
+  const _MiniStat({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, fontWeight: FontWeight.w600)),
+        const SizedBox(height: 4),
+        Text(value, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14, fontWeight: FontWeight.w800)),
+      ],
     );
   }
 }

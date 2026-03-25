@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
+import '../../theme/app_theme.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
-const _kBg      = Color(0xFF0F0F1A);
-const _kSurface = Color(0xFF16162A);
+
 const _kBlue    = Color(0xFF4CC9F0);
 const _kGreen   = Color(0xFF4ADE80);
 const _kRed     = Color(0xFFE63946);
@@ -103,17 +103,17 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: _kBg,
+      backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        backgroundColor: _kSurface,
-        iconTheme: const IconThemeData(color: Colors.white),
-        title: const Text(
+        backgroundColor: AppTheme.surfaceColor(context),
+        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
+        title: Text(
           'EGP / USDT Rate',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 16),
         ),
         actions: [
           IconButton(
-            icon: const Icon(Icons.refresh, color: Colors.white70),
+            icon: Icon(Icons.refresh, color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7)),
             onPressed: _loadHistory,
           ),
         ],
@@ -134,8 +134,8 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
           children: [
             const Icon(Icons.error_outline, size: 48, color: _kRed),
             const SizedBox(height: 12),
-            const Text('Could not load rate history.',
-                style: TextStyle(color: Colors.white54)),
+            Text('Could not load rate history.',
+                style: TextStyle(color: AppTheme.textMutedColor(context))),
             const SizedBox(height: 8),
             TextButton(
               onPressed: _loadHistory,
@@ -149,13 +149,13 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.show_chart, size: 60, color: Colors.white.withOpacity(0.08)),
+            Icon(Icons.show_chart, size: 60, color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.08)),
             const SizedBox(height: 16),
-            const Text('No price data found.',
-                style: TextStyle(color: Colors.white38, fontSize: 16)),
+            Text('No price data found.',
+                style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 16)),
             const SizedBox(height: 8),
-            const Text('Sync a Bybit order to start tracking.',
-                style: TextStyle(color: Colors.white24, fontSize: 13)),
+            Text('Sync a Bybit order to start tracking.',
+                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 13)),
           ],
         ),
       );
@@ -220,27 +220,27 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
           // ── Chart ─────────────────────────────────────────────────────
           Row(
             children: [
-              const Text('Price Chart',
-                  style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              Text('Price Chart',
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 16, fontWeight: FontWeight.bold)),
               const SizedBox(width: 8),
               Text(rangeLabel,
-                  style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
             ],
           ),
           const SizedBox(height: 12),
           Container(
             height: 200,
             decoration: BoxDecoration(
-              color: _kSurface,
+              color: AppTheme.surfaceColor(context),
               borderRadius: BorderRadius.circular(18),
-              border: Border.all(color: Colors.white.withOpacity(0.06)),
+              border: Border.all(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06)),
             ),
             padding: const EdgeInsets.fromLTRB(12, 16, 12, 12),
             child: _points.length < 2
-                ? const Center(
+                ? Center(
                     child: Text(
                       'Need at least 2 data points to draw a chart.',
-                      style: TextStyle(color: Colors.white38, fontSize: 12),
+                      style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                     ))
                 : CustomPaint(
                     size: const Size(double.infinity, double.infinity),
@@ -248,6 +248,7 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
                       points: _points,
                       minPrice: minP,
                       maxPrice: maxP,
+                      textColor: AppTheme.textPrimaryColor(context),
                     ),
                   ),
           ),
@@ -257,9 +258,9 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(DateFormat('d MMM').format(_points.first.time),
-                  style: const TextStyle(color: Colors.white24, fontSize: 10)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 10)),
               Text(DateFormat('d MMM HH:mm').format(_points.last.time),
-                  style: const TextStyle(color: Colors.white24, fontSize: 10)),
+                  style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 10)),
             ],
           ),
 
@@ -267,8 +268,8 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
 
           // ── Recent Orders ─────────────────────────────────────────────
           Text('Recent Orders (${_points.length})',
-              style: const TextStyle(
-                  color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+              style: TextStyle(
+                  color: AppTheme.textPrimaryColor(context), fontSize: 16, fontWeight: FontWeight.bold)),
           const SizedBox(height: 12),
           ..._points.reversed.take(30).map((p) => _buildPriceRow(p, fmt)),
           const SizedBox(height: 40),
@@ -284,7 +285,7 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
       decoration: BoxDecoration(
-        color: _kSurface,
+        color: AppTheme.surfaceColor(context),
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: color.withOpacity(0.15)),
       ),
@@ -308,12 +309,12 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
               children: [
                 Text(
                   isBuy ? 'Buy USDT' : 'Sell USDT',
-                  style: const TextStyle(
-                      color: Colors.white, fontWeight: FontWeight.w600, fontSize: 13),
+                  style: TextStyle(
+                      color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600, fontSize: 13),
                 ),
                 Text(
                   DateFormat('dd/MM/yyyy HH:mm').format(p.time),
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11),
                 ),
               ],
             ),
@@ -343,7 +344,7 @@ class _StatCard extends StatelessWidget {
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: _kSurface,
+          color: AppTheme.surfaceColor(context),
           borderRadius: BorderRadius.circular(14),
           border: Border.all(color: color.withOpacity(0.2)),
         ),
@@ -363,7 +364,7 @@ class _StatCard extends StatelessWidget {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(label,
-                      style: const TextStyle(color: Colors.white38, fontSize: 10)),
+                      style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10)),
                   const SizedBox(height: 2),
                   Text(value,
                       style: TextStyle(
@@ -385,8 +386,9 @@ class _LinePainter extends CustomPainter {
   final List<_PricePoint> points;
   final double minPrice;
   final double maxPrice;
+  final Color textColor;
 
-  _LinePainter({required this.points, required this.minPrice, required this.maxPrice});
+  _LinePainter({required this.points, required this.minPrice, required this.maxPrice, required this.textColor});
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -405,7 +407,7 @@ class _LinePainter extends CustomPainter {
 
     // ── Grid lines (min / max / mid) ──────────────────────────────────
     final gridPaint = Paint()
-      ..color = Colors.white.withOpacity(0.04)
+      ..color = textColor.withValues(alpha: 0.04)
       ..strokeWidth = 1;
     for (final yFrac in [0.0, 0.5, 1.0]) {
       final y = (size.height - padding) - yFrac * (size.height - padding * 2);
@@ -467,7 +469,7 @@ class _LinePainter extends CustomPainter {
     canvas.drawCircle(
       last, 5,
       Paint()
-        ..color = Colors.white
+        ..color = textColor
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2,
     );

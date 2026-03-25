@@ -6,11 +6,11 @@ import '../../providers/distribution_provider.dart';
 import '../../models/retailer.dart';
 import '../../models/collector.dart';
 import '../../models/bank_account.dart';
-import '../../models/financial_transaction.dart';
 import '../admin/retailer_details_screen.dart';
+import '../../theme/app_theme.dart';
 
 class CollectorDashboard extends StatefulWidget {
-  const CollectorDashboard({Key? key}) : super(key: key);
+  const CollectorDashboard({super.key});
 
   @override
   State<CollectorDashboard> createState() => _CollectorDashboardState();
@@ -19,10 +19,16 @@ class CollectorDashboard extends StatefulWidget {
 class _CollectorDashboardState extends State<CollectorDashboard> {
   int _tab = 0;
 
-  static const _bg = Color(0xFF0F0F1A);
-  static const _card = Color(0xFF16162A);
-  static const _accent = Color(0xFFE63946);
-  static const _purple = Color(0xFFA78BFA);
+  static Color _collectorAccent(BuildContext context) =>
+      AppTheme.isDark(context) ? const Color(0xFFB8925A) : const Color(0xFF8C6239);
+
+  static List<Color> _headerGradient(BuildContext context) => AppTheme.isDark(context)
+      ? AppTheme.panelGradient(context)
+      : const [Color(0xFFFFFBF3), Color(0xFFF3E3C2)];
+
+  static List<Color> _heroCardGradient(BuildContext context) => AppTheme.isDark(context)
+      ? [const Color(0xFF2E261A), const Color(0xFF1B1A18)]
+      : const [Color(0xFFFFF4DA), Color(0xFFF5E2B8)];
 
   @override
   void initState() {
@@ -37,30 +43,38 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
     final auth = context.watch<AuthProvider>();
     final dist = context.watch<DistributionProvider>();
     final uid = auth.currentUser?.uid ?? '';
-
     final collector = dist.getMyCollector(uid);
     final myRetailers = dist.getMyRetailers(uid);
 
     return Scaffold(
-      backgroundColor: _bg,
-      body: SafeArea(
-        child: Column(
-          children: [
-            _buildHeader(context, auth, collector),
-            _buildTabs(),
-            Expanded(
-              child: _tab == 0
-                  ? _RetailersTab(
-                      retailers: myRetailers,
-                      collector: collector,
-                      bankAccounts: dist.bankAccounts,
-                    )
-                  : _DepositTab(
-                      collector: collector,
-                      bankAccounts: dist.bankAccounts,
-                    ),
-            ),
-          ],
+      backgroundColor: AppTheme.scaffoldBg(context),
+      body: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: AppTheme.backgroundGradient(context),
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+          ),
+        ),
+        child: SafeArea(
+          child: Column(
+            children: [
+              _buildHeader(context, auth, collector),
+              _buildTabs(),
+              Expanded(
+                child: _tab == 0
+                    ? _RetailersTab(
+                        retailers: myRetailers,
+                        collector: collector,
+                        bankAccounts: dist.bankAccounts,
+                      )
+                    : _DepositTab(
+                        collector: collector,
+                        bankAccounts: dist.bankAccounts,
+                      ),
+              ),
+            ],
+          ),
         ),
       ),
     );
@@ -68,20 +82,33 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
 
   Widget _buildHeader(
       BuildContext context, AuthProvider auth, Collector? collector) {
+    final textPrimary = AppTheme.textPrimaryColor(context);
+    final textMuted = AppTheme.textMutedColor(context);
+    final accent = _collectorAccent(context);
     final cashOnHand = collector?.cashOnHand ?? 0;
     final cashLimit = collector?.cashLimit ?? 50000;
     final progress = cashLimit > 0 ? (cashOnHand / cashLimit).clamp(0.0, 1.0) : 0.0;
-    final progressColor = progress > 0.85
-        ? Colors.redAccent
-        : progress > 0.6
-            ? Colors.orange
-            : const Color(0xFF4ADE80);
+    
+    final Color progressColor;
+    if (progress > 0.85) {
+      progressColor = const Color(0xFFE63946);
+    } else if (progress > 0.6) {
+      progressColor = AppTheme.warningColor(context);
+    } else {
+      progressColor = AppTheme.positiveColor(context);
+    }
 
     return Container(
       padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
-        color: Color(0xFF16162A),
-        borderRadius: BorderRadius.vertical(bottom: Radius.circular(24)),
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: _headerGradient(context),
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        borderRadius: const BorderRadius.vertical(bottom: Radius.circular(32)),
+        border: Border(bottom: BorderSide(color: AppTheme.lineColor(context))),
+        boxShadow: AppTheme.softShadow(context),
       ),
       child: Column(
         children: [
@@ -89,8 +116,8 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
             children: [
               CircleAvatar(
                 radius: 24,
-                backgroundColor: _purple.withOpacity(0.15),
-                child: const Icon(Icons.person, color: _purple),
+                backgroundColor: accent.withValues(alpha: 0.14),
+                child: Icon(Icons.person, color: accent),
               ),
               const SizedBox(width: 14),
               Expanded(
@@ -99,37 +126,35 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                   children: [
                     Text(
                       auth.currentUser?.name ?? 'Collector',
-                      style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 17),
+                      style: TextStyle(
+                        color: textPrimary,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 17,
+                      ),
                     ),
                     Text(
                       'collector_dashboard'.tr(),
-                      style: const TextStyle(color: Colors.white54, fontSize: 12),
+                      style: TextStyle(color: textMuted, fontSize: 12),
                     ),
                   ],
                 ),
               ),
-              // Language toggle
               GestureDetector(
                 onTap: () {
                   final isAr = context.locale.languageCode == 'ar';
-                  context.setLocale(
-                      isAr ? const Locale('en') : const Locale('ar'));
+                  context.setLocale(isAr ? const Locale('en') : const Locale('ar'));
                 },
                 child: Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                   decoration: BoxDecoration(
-                    color: Colors.white.withOpacity(0.08),
+                    color: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.7),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(color: Colors.white24),
+                    border: Border.all(color: AppTheme.lineColor(context)),
                   ),
                   child: Text(
                     context.locale.languageCode == 'ar' ? 'EN' : 'ع',
-                    style: const TextStyle(
-                        color: Colors.white,
+                    style: TextStyle(
+                        color: textPrimary,
                         fontWeight: FontWeight.bold,
                         fontSize: 13),
                   ),
@@ -137,23 +162,22 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
               ),
               const SizedBox(width: 8),
               IconButton(
-                icon: const Icon(Icons.logout, color: Colors.white54),
+                icon: Icon(Icons.logout, color: textMuted),
                 onPressed: () => context.read<AuthProvider>().signOut(),
               ),
             ],
           ),
           const SizedBox(height: 16),
-          // Cash on hand card
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(18),
             decoration: BoxDecoration(
               gradient: LinearGradient(
-                colors: [_purple.withOpacity(0.25), _purple.withOpacity(0.05)],
+                colors: _heroCardGradient(context),
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: _purple.withOpacity(0.3)),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: accent.withValues(alpha: 0.22)),
             ),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -162,8 +186,8 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text('cash_on_hand'.tr(),
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13)),
+                        style: TextStyle(
+                            color: textMuted, fontSize: 13)),
                     Text(
                       '${cashOnHand.toStringAsFixed(0)} / ${cashLimit.toStringAsFixed(0)} EGP',
                       style: TextStyle(
@@ -178,9 +202,9 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                   borderRadius: BorderRadius.circular(6),
                   child: LinearProgressIndicator(
                     value: progress,
-                    backgroundColor: Colors.white12,
+                    backgroundColor: AppTheme.isDark(context) ? Colors.white12 : Colors.black.withValues(alpha: 0.05),
                     valueColor: AlwaysStoppedAnimation(progressColor),
-                    minHeight: 8,
+                    minHeight: 10,
                   ),
                 ),
                 if (progress > 0.85) ...[
@@ -226,8 +250,6 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
   }
 }
 
-// ─── Retailers Tab ────────────────────────────────────────────────────────────
-
 class _RetailersTab extends StatelessWidget {
   final List<Retailer> retailers;
   final Collector? collector;
@@ -246,13 +268,13 @@ class _RetailersTab extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            const Icon(Icons.store_outlined, color: Colors.white24, size: 56),
+            Icon(Icons.store_outlined, color: AppTheme.textMutedColor(context).withValues(alpha: 0.15), size: 64),
             const SizedBox(height: 14),
             Text('no_assigned_retailers'.tr(),
-                style: const TextStyle(color: Colors.white38, fontSize: 15)),
+                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.5), fontSize: 16, fontWeight: FontWeight.bold)),
             const SizedBox(height: 8),
             Text('contact_admin_to_assign'.tr(),
-                style: const TextStyle(color: Colors.white24, fontSize: 12)),
+                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.3), fontSize: 13)),
           ],
         ),
       );
@@ -286,8 +308,11 @@ class _RetailerCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final dist = context.watch<DistributionProvider>();
     final debt = retailer.pendingDebt;
-    final debtColor = debt > 0 ? const Color(0xFFFBBF24) : const Color(0xFF4ADE80);
+    final debtColor = debt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
+    final isBusy = dist.isCollecting;
+    final isLight = !AppTheme.isDark(context);
 
     return InkWell(
       onTap: () => Navigator.push(
@@ -298,101 +323,118 @@ class _RetailerCard extends StatelessWidget {
       ),
       borderRadius: BorderRadius.circular(16),
       child: Container(
-        margin: const EdgeInsets.only(bottom: 12),
+        margin: const EdgeInsets.only(bottom: 16),
         decoration: BoxDecoration(
-          color: const Color(0xFF16162A),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: debtColor.withOpacity(0.2)),
+          gradient: LinearGradient(
+            colors: isLight
+                ? const [Color(0xFFFFFEFB), Color(0xFFF6EFE2)]
+                : AppTheme.panelGradient(context),
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          borderRadius: BorderRadius.circular(26),
+          border: Border.all(color: AppTheme.lineColor(context)),
+          boxShadow: AppTheme.softShadow(context),
         ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: debtColor.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Icon(Icons.store, color: debtColor, size: 20),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(retailer.name,
-                          style: const TextStyle(
-                              color: Colors.white,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15)),
-                      Text(retailer.area.isEmpty ? retailer.phone : '${retailer.area} • ${retailer.phone}',
-                          style: const TextStyle(
-                              color: Colors.white54, fontSize: 12)),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 16),
-            Container(
-              padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.03),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
                 children: [
-                  _buildStatColumn('total_assigned'.tr(), retailer.totalAssigned, Colors.white70),
-                  Container(width: 1, height: 30, color: Colors.white12),
-                  _buildStatColumn('collected'.tr(), retailer.totalCollected, const Color(0xFF4ADE80)),
-                  Container(width: 1, height: 30, color: Colors.white12),
-                  _buildStatColumn('pending'.tr(), debt, debtColor),
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: debtColor.withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Icon(Icons.store, color: debtColor, size: 20),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(retailer.name,
+                            style: TextStyle(
+                                color: AppTheme.textPrimaryColor(context),
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15)),
+                        Text(retailer.area.isEmpty ? retailer.phone : '${retailer.area} • ${retailer.phone}',
+                            style: TextStyle(
+                                color: AppTheme.textMutedColor(context), fontSize: 12)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
-            ),
-            if (debt > 0) ...[
-              const SizedBox(height: 12),
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton.icon(
-                  icon: const Icon(Icons.payments_outlined, size: 16),
-                  label: Text('collect_from'.tr()),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFA78BFA),
-                    foregroundColor: Colors.white,
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(10)),
-                    padding: const EdgeInsets.symmetric(vertical: 10),
-                  ),
-                  onPressed: () =>
-                      _showCollectDialog(context, retailer, collector),
+              const SizedBox(height: 16),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.lineColor(context).withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(16),
                 ),
-              ),
-            ] else
-              Padding(
-                padding: const EdgeInsets.only(top: 10),
                 child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    const Icon(Icons.check_circle, color: Color(0xFF4ADE80), size: 16),
-                    const SizedBox(width: 6),
-                    Text('fully_collected'.tr(),
-                        style: const TextStyle(
-                            color: Color(0xFF4ADE80), fontSize: 12)),
+                    _buildStatColumn(context, 'total_assigned'.tr(), retailer.totalAssigned, AppTheme.textPrimaryColor(context).withValues(alpha: 0.8)),
+                    Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
+                    _buildStatColumn(context, 'collected'.tr(), retailer.totalCollected, AppTheme.positiveColor(context)),
+                    Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
+                    _buildStatColumn(context, 'pending'.tr(), debt, debtColor),
                   ],
                 ),
               ),
-          ],
+              if (debt > 0) ...[
+                const SizedBox(height: 12),
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton.icon(
+                    icon: isBusy
+                        ? SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.payments_outlined, size: 16),
+                    label: Text(isBusy ? 'Processing...' : 'collect_from'.tr()),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: debtColor,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14)),
+                      padding: const EdgeInsets.symmetric(vertical: 12),
+                      elevation: 0,
+                    ),
+                    onPressed: isBusy ? null : () => _showCollectDialog(context, retailer, collector),
+                  ),
+                ),
+              ] else
+                Padding(
+                  padding: const EdgeInsets.only(top: 10),
+                  child: Row(
+                    children: [
+                      Icon(Icons.check_circle, color: AppTheme.positiveColor(context), size: 16),
+                      const SizedBox(width: 6),
+                      Text('fully_collected'.tr(),
+                          style: TextStyle(
+                              color: AppTheme.positiveColor(context), fontSize: 12, fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                ),
+            ],
+          ),
         ),
       ),
-    ),);
+    );
   }
 
-  Widget _buildStatColumn(String label, double amount, Color color) {
+  Widget _buildStatColumn(BuildContext context, String label, double amount, Color color) {
     return Column(
       children: [
         Text(
@@ -406,8 +448,8 @@ class _RetailerCard extends StatelessWidget {
         const SizedBox(height: 4),
         Text(
           label,
-          style: const TextStyle(
-            color: Colors.white38,
+          style: TextStyle(
+            color: AppTheme.textMutedColor(context),
             fontSize: 11,
           ),
         ),
@@ -419,85 +461,82 @@ class _RetailerCard extends StatelessWidget {
       BuildContext context, Retailer retailer, Collector? collector) {
     if (collector == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('no_collector_record'.tr()),
-            backgroundColor: Colors.red),
+        SnackBar(content: Text('no_collector_record'.tr()), backgroundColor: Colors.red),
       );
       return;
     }
-    final ctrl = TextEditingController(
-        text: retailer.pendingDebt.toStringAsFixed(0));
+    
+    final ctrl = TextEditingController(text: retailer.pendingDebt.toStringAsFixed(0));
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) {
+          final dist = Provider.of<DistributionProvider>(ctx);
           final entered  = double.tryParse(ctrl.text) ?? 0.0;
           final debt     = retailer.pendingDebt;
           final debtPaid = entered > debt ? debt : entered;
           final credit   = entered > debt ? entered - debt : 0.0;
+          final currentColor = debt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
+          final isSubmitting = dist.isCollecting;
 
           return AlertDialog(
-            backgroundColor: const Color(0xFF16162A),
+            backgroundColor: AppTheme.surfaceColor(context),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
             title: Text(
               '${'collect_from'.tr()} ${retailer.name}',
-              style: const TextStyle(color: Colors.white),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800),
             ),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                // Pending debt label
                 Text(
                   '${'pending_debt'.tr()}: ${debt.toStringAsFixed(0)} EGP',
-                  style: const TextStyle(color: Colors.white70),
+                  style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 14),
                 TextField(
                   controller: ctrl,
                   keyboardType: TextInputType.number,
-                  style: const TextStyle(color: Colors.white),
+                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
                   onChanged: (_) => setSt(() {}),
                   decoration: InputDecoration(
                     labelText: 'amount'.tr(),
-                    labelStyle: const TextStyle(color: Colors.white54),
                     suffixText: 'EGP',
-                    suffixStyle: const TextStyle(color: Colors.white38),
                     filled: true,
-                    fillColor: Colors.white.withOpacity(0.06),
-                    border: OutlineInputBorder(
-                        borderRadius: BorderRadius.circular(10)),
+                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
                   ),
                 ),
-
-                // Live breakdown — only shown when amount is valid
                 if (entered > 0) ...[
                   const SizedBox(height: 12),
                   Container(
-                    padding: const EdgeInsets.all(10),
+                    padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.04),
-                      borderRadius: BorderRadius.circular(10),
+                      color: AppTheme.lineColor(context).withValues(alpha: 0.1),
+                      borderRadius: BorderRadius.circular(16),
                       border: Border.all(
                         color: credit > 0
-                            ? const Color(0xFF4ADE80).withOpacity(0.4)
-                            : Colors.white12,
+                            ? AppTheme.positiveColor(context).withValues(alpha: 0.4)
+                            : AppTheme.lineColor(context),
                       ),
                     ),
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         _breakdownRow(
+                          context,
                           '↓ Debt Reduced',
                           '${debtPaid.toStringAsFixed(0)} EGP',
-                          const Color(0xFFFBBF24),
+                          AppTheme.warningColor(context),
                         ),
                         if (credit > 0) ...[
                           const SizedBox(height: 4),
                           _breakdownRow(
+                            context,
                             '⊕ Credit Added',
                             '+${credit.toStringAsFixed(0)} EGP',
-                            const Color(0xFF4ADE80),
+                            AppTheme.positiveColor(context),
                           ),
                         ],
                       ],
@@ -508,49 +547,43 @@ class _RetailerCard extends StatelessWidget {
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.pop(ctx),
-                child: Text('cancel'.tr(),
-                    style: const TextStyle(color: Colors.white38)),
+                onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
+                child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
               ),
               ElevatedButton(
-                onPressed: () async {
+                onPressed: isSubmitting ? null : () async {
                   final amount = double.tryParse(ctrl.text) ?? 0;
                   if (amount <= 0) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                          content: Text('invalid_amount'.tr()),
-                          backgroundColor: Colors.red),
+                      SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
                     );
                     return;
                   }
-                  // Confirmation dialog — mention credit if applicable
-                  final creditAmt = amount > debt ? amount - debt : 0.0;
-                  final confirmMsg = creditAmt > 0
-                      ? 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?\n\n'
-                        '• Debt reduced by ${debt.toStringAsFixed(0)} EGP\n'
-                        '• ${creditAmt.toStringAsFixed(0)} EGP stored as credit'
-                      : 'Are you sure you collected ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?';
-
+                  
                   final confirm = await showDialog<bool>(
                     context: context,
-                    builder: (ctx) => AlertDialog(
-                      backgroundColor: const Color(0xFF16162A),
-                      title: const Text('Confirm Action',
-                          style: TextStyle(color: Colors.white)),
-                      content: Text(confirmMsg,
-                          style: const TextStyle(color: Colors.white70)),
+                    builder: (c) => AlertDialog(
+                      backgroundColor: AppTheme.surfaceColor(context),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                      title: Text('Confirm Action', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
+                      content: Text(
+                        amount > debt
+                            ? 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?\n\n• Debt reduced: ${debt.toStringAsFixed(0)} EGP\n• Credit added: ${(amount - debt).toStringAsFixed(0)} EGP'
+                            : 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?',
+                        style: TextStyle(color: AppTheme.textMutedColor(context)),
+                      ),
                       actions: [
                         TextButton(
-                          onPressed: () => Navigator.pop(ctx, false),
-                          child: const Text('Cancel',
-                              style: TextStyle(color: Colors.white38)),
+                          onPressed: () => Navigator.pop(c, false),
+                          child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context))),
                         ),
                         ElevatedButton(
-                          onPressed: () => Navigator.pop(ctx, true),
+                          onPressed: () => Navigator.pop(c, true),
                           style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFA78BFA)),
-                          child: const Text('Confirm',
-                              style: TextStyle(color: Colors.white)),
+                              backgroundColor: currentColor,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                          child: const Text('Confirm', style: TextStyle(color: Colors.white)),
                         ),
                       ],
                     ),
@@ -558,32 +591,37 @@ class _RetailerCard extends StatelessWidget {
 
                   if (confirm != true) return;
 
-                  final auth = context.read<AuthProvider>();
                   try {
-                    await context
-                        .read<DistributionProvider>()
+                    await Provider.of<DistributionProvider>(context, listen: false)
                         .collectFromRetailer(
                           collectorId: collector.id,
                           retailerId: retailer.id,
                           amount: amount,
-                          createdByUid: auth.currentUser?.uid ?? '',
+                          createdByUid: Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ?? '',
                         );
+                    if (!ctx.mounted) return;
                     Navigator.pop(ctx);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('collect_success'.tr())),
-                    );
+                    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('collect_success'.tr())));
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(
-                          content: Text('Error: $e'),
-                          backgroundColor: Colors.red),
+                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
                     );
                   }
                 },
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFFA78BFA)),
-                child: Text('collect'.tr(),
-                    style: const TextStyle(color: Colors.white)),
+                    backgroundColor: currentColor,
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+                child: isSubmitting
+                    ? const SizedBox(
+                        width: 18,
+                        height: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                        ),
+                      )
+                    : Text('collect'.tr(), style: const TextStyle(color: Colors.white)),
               ),
             ],
           );
@@ -592,21 +630,14 @@ class _RetailerCard extends StatelessWidget {
     );
   }
 
-  Widget _breakdownRow(String label, String value, Color color) => Row(
+  Widget _breakdownRow(BuildContext context, String label, String value, Color color) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label,
-              style: const TextStyle(color: Colors.white54, fontSize: 12)),
-          Text(value,
-              style: TextStyle(
-                  color: color,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold)),
+          Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
+          Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
         ],
       );
 }
-
-// ─── Deposit Tab ──────────────────────────────────────────────────────────────
 
 class _DepositTab extends StatefulWidget {
   final Collector? collector;
@@ -632,89 +663,100 @@ class _DepositTabState extends State<_DepositTab> {
   Widget build(BuildContext context) {
     final collector = widget.collector;
     final cashOnHand = collector?.cashOnHand ?? 0;
+    final dist = context.watch<DistributionProvider>();
+    final isDepositing = dist.isDepositing;
+    final isLight = !AppTheme.isDark(context);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Cash available
           Container(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(20),
             decoration: BoxDecoration(
-              color: const Color(0xFF16162A),
-              borderRadius: BorderRadius.circular(14),
-              border: Border.all(color: const Color(0xFF4ADE80).withOpacity(0.2)),
+              gradient: LinearGradient(
+                colors: isLight
+                    ? const [Color(0xFFF7FBFF), Color(0xFFE4EEF8)]
+                    : AppTheme.panelGradient(context),
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(24),
+              border: Border.all(color: AppTheme.positiveColor(context).withValues(alpha: 0.2)),
+              boxShadow: AppTheme.softShadow(context),
             ),
             child: Row(
               children: [
-                const Icon(Icons.account_balance_wallet,
-                    color: Color(0xFF4ADE80)),
-                const SizedBox(width: 12),
+                Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: AppTheme.positiveColor(context).withValues(alpha: 0.1),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Icon(Icons.account_balance_wallet, color: AppTheme.positiveColor(context), size: 28),
+                ),
+                const SizedBox(width: 16),
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('cash_on_hand'.tr(),
-                        style: const TextStyle(
-                            color: Colors.white54, fontSize: 12)),
+                    Text('cash_on_hand'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
+                    const SizedBox(height: 2),
                     Text(
                       '${cashOnHand.toStringAsFixed(0)} EGP',
-                      style: const TextStyle(
-                          color: Color(0xFF4ADE80),
-                          fontSize: 22,
-                          fontWeight: FontWeight.bold),
+                      style: TextStyle(color: AppTheme.positiveColor(context), fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5),
                     ),
                   ],
                 ),
               ],
             ),
           ),
-          const SizedBox(height: 20),
-          Text('select_bank'.tr(),
-              style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600)),
-          const SizedBox(height: 10),
+          const SizedBox(height: 24),
+          Text('select_bank'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w700)),
+          const SizedBox(height: 12),
           if (widget.bankAccounts.isEmpty)
-            Text('no_bank_accounts'.tr(),
-                style: const TextStyle(color: Colors.white38))
+            Text('no_bank_accounts'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context)))
           else
             ...widget.bankAccounts.map((b) => _BankOption(
                   bank: b,
                   selected: _selectedBank?.id == b.id,
                   onTap: () => setState(() => _selectedBank = b),
                 )),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
           TextField(
             controller: _amountCtrl,
             keyboardType: TextInputType.number,
-            style: const TextStyle(color: Colors.white),
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
             decoration: InputDecoration(
               labelText: 'deposit_amount'.tr(),
-              labelStyle: const TextStyle(color: Colors.white54),
               suffixText: 'EGP',
-              suffixStyle: const TextStyle(color: Colors.white38),
               filled: true,
-              fillColor: Colors.white.withOpacity(0.06),
-              border:
-                  OutlineInputBorder(borderRadius: BorderRadius.circular(12)),
+              fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
             ),
           ),
-          const SizedBox(height: 20),
+          const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
             child: ElevatedButton.icon(
-              icon: const Icon(Icons.upload_rounded),
-              label: Text('deposit_to_bank'.tr()),
+              icon: isDepositing
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Icon(Icons.upload_rounded),
+              label: Text(isDepositing ? 'Processing...' : 'deposit_to_bank'.tr()),
               style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF4CC9F0),
+                backgroundColor: AppTheme.infoColor(context),
                 foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12)),
+                padding: const EdgeInsets.symmetric(vertical: 16),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                elevation: 0,
               ),
-              onPressed: collector == null ? null : _doDeposit,
+              onPressed: collector == null || isDepositing ? null : _doDeposit,
             ),
           ),
         ],
@@ -728,48 +770,30 @@ class _DepositTabState extends State<_DepositTab> {
     final amount = double.tryParse(_amountCtrl.text) ?? 0;
 
     if (bank == null) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('select_bank_first'.tr())),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('select_bank_first'.tr())));
       return;
     }
     if (amount <= 0) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('invalid_amount'.tr()),
-            backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red));
       return;
     }
     if (amount > collector.cashOnHand) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-            content: Text('deposit_exceeds_cash'.tr(
-              args: [collector.cashOnHand.toStringAsFixed(0)]
-            )),
-            backgroundColor: Colors.orange),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('deposit_exceeds_cash'.tr(args: [collector.cashOnHand.toStringAsFixed(0)])), backgroundColor: Colors.orange));
       return;
     }
 
-    // Confirmation Dialog
     final confirm = await showDialog<bool>(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF16162A),
-        title: const Text('Confirm Action', style: TextStyle(color: Colors.white)),
-        content: Text(
-          'Are you sure you want to deposit ${amount.toStringAsFixed(0)} EGP to ${bank.bankName}?',
-          style: const TextStyle(color: Colors.white70),
-        ),
+        backgroundColor: AppTheme.surfaceColor(context),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+        title: Text('Confirm Action', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
+        content: Text('Are you sure you want to deposit ${amount.toStringAsFixed(0)} EGP to ${bank.bankName}?', style: TextStyle(color: AppTheme.textMutedColor(context))),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx, false),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white38)),
-          ),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context)))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF4CC9F0)),
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.infoColor(context), elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
             child: const Text('Confirm', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -779,22 +803,18 @@ class _DepositTabState extends State<_DepositTab> {
     if (confirm != true) return;
 
     try {
-      final auth = context.read<AuthProvider>();
-      await context.read<DistributionProvider>().depositToBank(
+      await Provider.of<DistributionProvider>(context, listen: false).depositToBank(
             collectorId: collector.id,
             bankAccountId: bank.id,
             amount: amount,
-            createdByUid: auth.currentUser?.uid ?? '',
+            createdByUid: Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ?? '',
           );
+      if (!mounted) return;
       _amountCtrl.clear();
       setState(() => _selectedBank = null);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('deposit_success'.tr())),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('deposit_success'.tr())));
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
   }
 }
@@ -804,49 +824,32 @@ class _BankOption extends StatelessWidget {
   final bool selected;
   final VoidCallback onTap;
 
-  const _BankOption(
-      {required this.bank, required this.selected, required this.onTap});
+  const _BankOption({required this.bank, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
+    final infoColor = AppTheme.infoColor(context);
+    final isDark = AppTheme.isDark(context);
     return GestureDetector(
       onTap: onTap,
       child: Container(
-        margin: const EdgeInsets.only(bottom: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        margin: const EdgeInsets.only(bottom: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
         decoration: BoxDecoration(
-          color: selected
-              ? const Color(0xFF4CC9F0).withOpacity(0.1)
-              : const Color(0xFF16162A),
-          borderRadius: BorderRadius.circular(12),
-          border: Border.all(
-            color: selected
-                ? const Color(0xFF4CC9F0)
-                : Colors.white.withOpacity(0.08),
-          ),
+          color: selected ? infoColor.withValues(alpha: 0.1) : AppTheme.surfaceRaisedColor(context).withValues(alpha: isDark ? 0.8 : 0.5),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: selected ? infoColor : AppTheme.lineColor(context), width: selected ? 1.5 : 1.0),
         ),
         child: Row(
           children: [
-            Icon(Icons.account_balance,
-                color: selected
-                    ? const Color(0xFF4CC9F0)
-                    : Colors.white54,
-                size: 20),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(bank.bankName,
-                  style: TextStyle(
-                      color: selected ? const Color(0xFF4CC9F0) : Colors.white70,
-                      fontWeight: selected
-                          ? FontWeight.bold
-                          : FontWeight.normal)),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: selected ? infoColor.withValues(alpha: 0.1) : Colors.transparent, borderRadius: BorderRadius.circular(10)),
+              child: Icon(Icons.account_balance, color: selected ? infoColor : AppTheme.textMutedColor(context), size: 22),
             ),
-            // Bank balance intentionally hidden from collectors
-            if (selected) ...[
-              const SizedBox(width: 8),
-              const Icon(Icons.check_circle,
-                  color: Color(0xFF4CC9F0), size: 18),
-            ],
+            const SizedBox(width: 14),
+            Expanded(child: Text(bank.bankName, style: TextStyle(color: selected ? infoColor : AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: selected ? FontWeight.w800 : FontWeight.w600))),
+            if (selected) ...[const SizedBox(width: 8), Icon(Icons.check_circle, color: infoColor, size: 20)],
           ],
         ),
       ),
@@ -854,46 +857,35 @@ class _BankOption extends StatelessWidget {
   }
 }
 
-// ─── Tab chip ────────────────────────────────────────────────────────────────
-
 class _TabChip extends StatelessWidget {
   final String label;
   final IconData icon;
   final bool selected;
   final VoidCallback onTap;
 
-  const _TabChip(
-      {required this.label,
-      required this.icon,
-      required this.selected,
-      required this.onTap});
+  const _TabChip({required this.label, required this.icon, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    const accent = Color(0xFFA78BFA);
+    final accent = AppTheme.accent;
+    final isDark = AppTheme.isDark(context);
     return GestureDetector(
       onTap: onTap,
       child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
+        duration: const Duration(milliseconds: 250),
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
         decoration: BoxDecoration(
-          color: selected ? accent.withOpacity(0.15) : Colors.white.withOpacity(0.05),
-          borderRadius: BorderRadius.circular(30),
-          border: Border.all(
-            color: selected ? accent : Colors.white.withOpacity(0.1),
-          ),
+          color: selected ? accent.withValues(alpha: 0.12) : AppTheme.surfaceRaisedColor(context).withValues(alpha: isDark ? 0.6 : 1.0),
+          borderRadius: BorderRadius.circular(32),
+          border: Border.all(color: selected ? accent : AppTheme.lineColor(context), width: selected ? 1.5 : 1.0),
+          boxShadow: selected ? [BoxShadow(color: accent.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 4))] : null,
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 16, color: selected ? accent : Colors.white54),
-            const SizedBox(width: 7),
-            Text(label,
-                style: TextStyle(
-                    color: selected ? accent : Colors.white54,
-                    fontWeight:
-                        selected ? FontWeight.bold : FontWeight.normal,
-                    fontSize: 13)),
+            Icon(icon, size: 18, color: selected ? accent : AppTheme.textMutedColor(context)),
+            const SizedBox(width: 8),
+            Text(label, style: TextStyle(color: selected ? accent : AppTheme.textMutedColor(context), fontWeight: selected ? FontWeight.w800 : FontWeight.w600, fontSize: 14)),
           ],
         ),
       ),

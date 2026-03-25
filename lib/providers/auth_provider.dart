@@ -7,10 +7,9 @@ class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
 
   AppUser? _currentUser;
-  bool _isLoading = true; // Start true — we don't know auth state yet
+  bool _isLoading = true;
   String? _error;
 
-  // Guard to prevent signIn's catch from firing on successful auth state change
   bool _signingIn = false;
 
   AppUser? get currentUser => _currentUser;
@@ -22,7 +21,6 @@ class AuthProvider extends ChangeNotifier {
   bool get isCollector => _currentUser?.isCollector ?? false;
 
   AuthProvider() {
-    // Listen to auth changes — this fires immediately with current state
     _authService.authStateChanges.listen(_onAuthStateChanged);
   }
 
@@ -30,38 +28,36 @@ class AuthProvider extends ChangeNotifier {
     if (firebaseUser == null) {
       _currentUser = null;
       _isLoading = false;
-      _error = null;
+      if (!_signingIn) {
+        _error = null;
+      }
       _signingIn = false;
       notifyListeners();
       return;
     }
 
     _isLoading = true;
-    _error = null; // Clear any previous error on new state change
+    _error = null;
     notifyListeners();
 
     try {
-      _currentUser = await _authService.getUserData(firebaseUser.uid);
-
-      // If no user profile in DB yet, create a default one (fallback)
-      if (_currentUser == null) {
-        _currentUser = AppUser(
-          uid: firebaseUser.uid,
-          email: firebaseUser.email ?? '',
-          name: firebaseUser.displayName ?? 'User',
-          role: UserRole.OPERATOR,
-          createdAt: DateTime.now(),
-        );
+      final user = await _authService.getUserData(firebaseUser.uid);
+      if (user == null) {
+        _currentUser = null;
+        _error =
+            'This account is missing its access profile. Contact an administrator.';
+        await _authService.signOut();
+      } else if (!user.isActive) {
+        _currentUser = null;
+        _error = 'This account has been deactivated.';
+        await _authService.signOut();
+      } else {
+        _currentUser = user;
       }
     } catch (_) {
-      // DB read failed — still allow login with fallback profile
-      _currentUser = AppUser(
-        uid: firebaseUser.uid,
-        email: firebaseUser.email ?? '',
-        name: 'User',
-        role: UserRole.OPERATOR,
-        createdAt: DateTime.now(),
-      );
+      _currentUser = null;
+      _error = 'Could not verify your account permissions. Please try again.';
+      await _authService.signOut();
     }
 
     _isLoading = false;
@@ -76,7 +72,6 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
     try {
       await _authService.signIn(email, password);
-      // Success will be handled by the authStateChanges stream
       return true;
     } on FirebaseAuthException catch (e) {
       _error = _friendlyError(e.code);
@@ -85,9 +80,8 @@ class AuthProvider extends ChangeNotifier {
       notifyListeners();
       return false;
     } catch (e, stackTrace) {
-      print('Sign in Exception: $e');
-      print('Stack Trace: $stackTrace');
-      // Only show error if this wasn't a successful sign-in triggering the stream
+      debugPrint('Sign in Exception: $e');
+      debugPrint('Stack Trace: $stackTrace');
       if (_signingIn) {
         _error = 'Login failed: $e';
         _isLoading = false;

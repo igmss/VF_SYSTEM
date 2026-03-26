@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
+import '../../providers/auth_provider.dart';
+import 'package:provider/provider.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
 
@@ -102,30 +104,42 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        backgroundColor: AppTheme.surfaceColor(context),
-        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
-        title: Text(
-          'EGP / USDT Rate',
-          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 16),
-        ),
-        actions: [
-          IconButton(
-            icon: Icon(Icons.refresh, color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7)),
-            onPressed: _loadHistory,
-          ),
-        ],
-      ),
-      body: _loading
+    final auth = context.watch<AuthProvider>();
+    final isEmbedded = auth.isAdmin || auth.isFinance;
+
+    final bodyContent = _loading
           ? const Center(child: CircularProgressIndicator(color: _kBlue))
           : _error != null
               ? _buildError()
               : _points.isEmpty
                   ? _buildEmpty()
-                  : _buildContent(),
-    );
+                  : _buildContent();
+
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          backgroundColor: AppTheme.surfaceColor(context),
+          iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
+          title: Text(
+            'EGP / USDT Rate',
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 16),
+          ),
+          actions: [
+            IconButton(
+              icon: Icon(Icons.refresh, color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7)),
+              onPressed: _loadHistory,
+            ),
+          ],
+        ),
+        body: bodyContent,
+      );
+    }
   }
 
   Widget _buildError() => Center(
@@ -181,20 +195,32 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           // ── Data range chip ──────────────────────────────────────────
-          Align(
-            alignment: Alignment.centerRight,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-              decoration: BoxDecoration(
-                color: _kBlue.withOpacity(0.1),
-                borderRadius: BorderRadius.circular(20),
-                border: Border.all(color: _kBlue.withOpacity(0.25)),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              TextButton.icon(
+                icon: const Icon(Icons.refresh, size: 16, color: _kBlue),
+                label: const Text('Refresh', style: TextStyle(color: _kBlue, fontSize: 12)),
+                onPressed: _loadHistory,
+                style: TextButton.styleFrom(
+                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                  minimumSize: Size.zero,
+                  tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                ),
               ),
-              child: Text(
-                '$rangeLabel — ${_points.length} orders',
-                style: const TextStyle(color: _kBlue, fontSize: 11, fontWeight: FontWeight.bold),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: _kBlue.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _kBlue.withOpacity(0.25)),
+                ),
+                child: Text(
+                  '$rangeLabel — ${_points.length} orders',
+                  style: const TextStyle(color: _kBlue, fontSize: 11, fontWeight: FontWeight.bold),
+                ),
               ),
-            ),
+            ],
           ),
           const SizedBox(height: 12),
 

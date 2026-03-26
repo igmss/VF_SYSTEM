@@ -19,49 +19,13 @@ class CollectorsScreen extends StatelessWidget {
     final surface = AppTheme.surfaceColor(context);
     final isLight = !AppTheme.isDark(context);
 
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        backgroundColor: surface,
-        elevation: 0,
-        title: Text('collectors'.tr(), style: TextStyle(color: textPrimary, fontWeight: FontWeight.w800)),
-        iconTheme: IconThemeData(color: textPrimary),
-        actions: [
-          if (auth.isAdmin)
-            IconButton(
-              tooltip: 'add_collector'.tr(),
-              icon: Icon(Icons.person_add, color: isLight ? const Color(0xFF8C6239) : AppTheme.accent),
-              onPressed: () => _showPickUserDialog(context),
-            ),
-        ],
-      ),
-      body: dist.collectors.isEmpty
+    final isEmbedded = auth.isAdmin || auth.isFinance;
+
+    final bodyContent = dist.collectors.isEmpty
           ? _empty(context)
           : Column(
               children: [
-                _cashBanner(context, dist.totalCollectorCash),
-                Padding(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        colors: AppTheme.isDark(context)
-                            ? AppTheme.panelGradient(context)
-                            : const [Color(0xFFFFFBF4), Color(0xFFF4E8D7)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                      ),
-                      borderRadius: BorderRadius.circular(22),
-                      border: Border.all(color: AppTheme.lineColor(context)),
-                    ),
-                    child: Text(
-                      'See cash exposure, collector limits, and assignment operations in a more structured control panel.',
-                      style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600, height: 1.35),
-                    ),
-                  ),
-                ),
+                _cashBanner(context, dist.totalCollectorCash, auth.isAdmin),
                 Expanded(
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
@@ -79,55 +43,106 @@ class CollectorsScreen extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-    );
+            );
+
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          backgroundColor: surface,
+          elevation: 0,
+          title: Text('collectors'.tr(), style: TextStyle(color: textPrimary, fontWeight: FontWeight.w800)),
+          iconTheme: IconThemeData(color: textPrimary),
+        ),
+        body: bodyContent,
+      );
+    }
   }
 
-  Widget _cashBanner(BuildContext context, double total) => Container(
-        margin: const EdgeInsets.all(16),
+  Widget _cashBanner(BuildContext context, double total, bool isAdmin) => Container(
+        margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
         padding: const EdgeInsets.all(20),
         decoration: BoxDecoration(
           gradient: LinearGradient(
               colors: AppTheme.isDark(context)
                   ? const [Color(0xFF1F2937), Color(0xFF111827)]
-                  : const [Color(0xFFFFF6E2), Color(0xFFF0DFC2)],
+                  : const [Color(0xFF8C6239), Color(0xFF6B4524)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight),
           borderRadius: BorderRadius.circular(24),
-          border: Border.all(
-            color: AppTheme.isDark(context)
-                ? Colors.white.withValues(alpha: 0.08)
-                : const Color(0xFF8C6239).withValues(alpha: 0.18),
-          ),
           boxShadow: [
             BoxShadow(
                 color: AppTheme.isDark(context)
                     ? Colors.black.withValues(alpha: 0.24)
-                    : const Color(0xFF8C6239).withValues(alpha: 0.12),
-                blurRadius: 24,
-                offset: const Offset(0, 10))
+                    : const Color(0xFF8C6239).withValues(alpha: 0.25),
+                blurRadius: 16,
+                offset: const Offset(0, 8))
           ],
         ),
-        child: Row(
+        child: Column(
           children: [
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(12),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      child: const Icon(Icons.delivery_dining, color: Colors.white, size: 28),
+                    ),
+                    const SizedBox(width: 14),
+                    Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Text('total_cash_in_hand'.tr(),
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w500)),
+                      Text('${_fmt(total)} EGP',
+                          style: const TextStyle(
+                              color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900)),
+                    ]),
+                  ],
+                ),
+                if (isAdmin)
+                  IconButton(
+                    tooltip: 'add_collector'.tr(),
+                    padding: const EdgeInsets.all(10),
+                    style: IconButton.styleFrom(
+                      backgroundColor: Colors.white.withValues(alpha: 0.15),
+                      foregroundColor: Colors.white,
+                      highlightColor: Colors.white.withValues(alpha: 0.25),
+                    ),
+                    icon: const Icon(Icons.person_add, size: 24),
+                    onPressed: () => _showPickUserDialog(context),
+                  ),
+              ],
+            ),
+            const SizedBox(height: 16),
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: AppTheme.isDark(context)
-                    ? Colors.white.withValues(alpha: 0.08)
-                    : const Color(0xFF8C6239).withValues(alpha: 0.10),
-                borderRadius: BorderRadius.circular(16),
+                color: Colors.black.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(Icons.delivery_dining, color: AppTheme.isDark(context) ? Colors.white : const Color(0xFF8C6239), size: 28),
+              child: Row(
+                children: [
+                  Icon(Icons.info_outline, color: Colors.white.withValues(alpha: 0.7), size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      'Monitor cash exposure, limits, and assign retailers in real-time.',
+                      style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 12, height: 1.3),
+                    ),
+                  ),
+                ],
+              ),
             ),
-            const SizedBox(width: 14),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('total_cash_in_hand'.tr(),
-                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w600)),
-              Text('${_fmt(total)} EGP',
-                  style: TextStyle(
-                      color: AppTheme.textPrimaryColor(context), fontSize: 24, fontWeight: FontWeight.w900)),
-            ])
           ],
         ),
       );
@@ -591,131 +606,186 @@ class _CollectorCard extends StatelessWidget {
     final isCritical = collector.cashOnHand >= collector.cashLimit;
 
     return Container(
-      margin: const EdgeInsets.only(bottom: 12),
-      padding: const EdgeInsets.all(16),
+      margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: AppTheme.isDark(context)
-              ? [AppTheme.surfaceColor(context), AppTheme.surfaceRaisedColor(context)]
-              : const [Color(0xFFFFFEFB), Color(0xFFF6EFE2)],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(20),
+        color: AppTheme.isDark(context) ? AppTheme.surfaceColor(context) : Colors.white,
+        borderRadius: BorderRadius.circular(24),
         border: Border.all(
           color: isCritical
               ? Colors.red.withOpacity(0.4)
-              : (AppTheme.isDark(context)
-                  ? Colors.white.withOpacity(0.08)
-                  : const Color(0xFF8C6239).withOpacity(0.18)),
-          width: isCritical ? 2 : 1,
+              : AppTheme.lineColor(context),
+          width: isCritical ? 1.5 : 1,
         ),
         boxShadow: AppTheme.softShadow(context),
       ),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-        Row(children: [
-          Container(
-            padding: const EdgeInsets.all(8),
-            decoration: BoxDecoration(
-              color: (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)).withOpacity(0.12),
-              borderRadius: BorderRadius.circular(10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: (isCritical ? Colors.red : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239))).withOpacity(0.1),
+                  child: Icon(Icons.delivery_dining, 
+                      color: isCritical ? Colors.red : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)), 
+                      size: 24),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(collector.name,
+                          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 16)),
+                      const SizedBox(height: 2),
+                      Row(
+                        children: [
+                          Icon(Icons.phone, size: 12, color: AppTheme.textMutedColor(context)),
+                          const SizedBox(width: 4),
+                          Text(collector.phone,
+                              style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
+                        ],
+                      ),
+                    ]
+                  ),
+                ),
+                if (onEdit != null)
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: AppTheme.lineColor(context).withOpacity(0.5),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: IconButton(
+                      icon: Icon(Icons.edit, color: AppTheme.textPrimaryColor(context), size: 18),
+                      onPressed: onEdit,
+                      padding: EdgeInsets.zero,
+                    ),
+                  ),
+              ],
             ),
-            child: Icon(Icons.delivery_dining, color: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239), size: 20),
           ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text(collector.name,
-                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
-              Text(collector.phone,
-                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
-            ]),
-          ),
-          if (onEdit != null)
-            IconButton(
-              icon: Icon(Icons.edit, color: AppTheme.textMutedColor(context), size: 18),
-              onPressed: onEdit,
-              constraints: const BoxConstraints(),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
+          
+          Divider(height: 1, color: AppTheme.lineColor(context)),
+          
+          Padding(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Cash in Hand', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_f(collector.cashOnHand)} EGP',
+                      style: TextStyle(
+                          color: isCritical ? Colors.redAccent : AppTheme.textPrimaryColor(context),
+                          fontWeight: FontWeight.w900,
+                          fontSize: 18),
+                    ),
+                  ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text('Limit', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${_f(collector.cashLimit)} EGP',
+                      style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 14),
+                    ),
+                  ],
+                ),
+              ],
             ),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Text(
-                '${_f(collector.cashOnHand)} EGP',
-                style: TextStyle(
-                    color: isCritical ? Colors.redAccent : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)),
-                    fontWeight: FontWeight.bold,
-                    fontSize: 15),
-              ),
-              Text(
-                'limit: ${_f(collector.cashLimit)}',
-                style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 10),
-              ),
-            ],
           ),
-        ]),
-        const SizedBox(height: 16),
-        ClipRRect(
-          borderRadius: BorderRadius.circular(4),
-          child: LinearProgressIndicator(
-            value: percent,
-            minHeight: 6,
-            backgroundColor: AppTheme.lineColor(context),
-            valueColor: AlwaysStoppedAnimation<Color>(
-                isCritical ? Colors.redAccent : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239))),
+          
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: LinearProgressIndicator(
+                value: percent,
+                minHeight: 8,
+                backgroundColor: AppTheme.lineColor(context),
+                valueColor: AlwaysStoppedAnimation<Color>(
+                    isCritical ? Colors.redAccent : const Color(0xFF4ADE80)),
+              ),
+            ),
           ),
-        ),
-        const SizedBox(height: 16),
-        if (isAdmin)
-          Column(children: [
-            Row(children: [
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onCollect,
-                  icon: const Icon(Icons.arrow_downward, size: 14),
-                  label: Text('collected'.tr(), style: const TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF4ADE80),
-                    side: const BorderSide(color: Color(0xFF4ADE80)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
+          const SizedBox(height: 16),
+          
+          if (isAdmin)
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.lineColor(context).withOpacity(0.3),
+                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
               ),
-              const SizedBox(width: 8),
-              Expanded(
-                child: OutlinedButton.icon(
-                  onPressed: onDeposit,
-                  icon: const Icon(Icons.account_balance, size: 14),
-                  label: Text('deposit'.tr(), style: const TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: const Color(0xFF4CC9F0),
-                    side: const BorderSide(color: Color(0xFF4CC9F0)),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              child: Column(
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: onCollect,
+                          icon: const Icon(Icons.arrow_downward, size: 16),
+                          label: Text('collected'.tr(), style: const TextStyle(fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4ADE80).withOpacity(0.15),
+                            foregroundColor: const Color(0xFF16A34A),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          onPressed: onDeposit,
+                          icon: const Icon(Icons.account_balance_wallet, size: 16),
+                          label: Text('deposit'.tr(), style: const TextStyle(fontWeight: FontWeight.w600)),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF4CC9F0).withOpacity(0.15),
+                            foregroundColor: const Color(0xFF0284C7),
+                            elevation: 0,
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
-                ),
+                  if (onAssignRetailers != null) ...[                           
+                    const SizedBox(height: 12),
+                    SizedBox(
+                      width: double.infinity,
+                      child: TextButton.icon(
+                        onPressed: onAssignRetailers,
+                        icon: const Icon(Icons.store_outlined, size: 18),
+                        label: Text('assign_retailers'.tr(),
+                            style: const TextStyle(fontWeight: FontWeight.w600)),
+                        style: TextButton.styleFrom(
+                          foregroundColor: AppTheme.isDark(context) ? Colors.white70 : const Color(0xFF8C6239),
+                          backgroundColor: AppTheme.isDark(context) ? Colors.white.withOpacity(0.05) : const Color(0xFF8C6239).withOpacity(0.05),
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(12)),
+                        ),
+                      ),
+                    ),
+                  ],
+                ],
               ),
-            ]),
-            if (onAssignRetailers != null) ...[                           
-              const SizedBox(height: 8),
-              SizedBox(
-                width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onAssignRetailers,
-                  icon: const Icon(Icons.store_outlined, size: 14),
-                  label: Text('assign_retailers'.tr(),
-                      style: const TextStyle(fontSize: 12)),
-                  style: OutlinedButton.styleFrom(
-                    foregroundColor: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239),
-                    side: BorderSide(color: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)),
-                    shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8)),
-                  ),
-                ),
-              ),
-            ],
-          ]),
-      ]),
+            ),
+        ],
+      ),
     );
   }
 

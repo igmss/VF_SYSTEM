@@ -4,6 +4,7 @@ import 'package:easy_localization/easy_localization.dart';
 import 'package:intl/intl.dart';
 import '../providers/app_provider.dart';
 import '../providers/theme_provider.dart';
+import '../providers/auth_provider.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -114,17 +115,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final surface = AppTheme.surfaceColor(context);
     final raised = AppTheme.surfaceRaisedColor(context);
     final textPrimary = AppTheme.textPrimaryColor(context);
+    final auth = context.watch<AuthProvider>();
+    final isEmbedded = auth.isAdmin || auth.isFinance;
     final textMuted = AppTheme.textMutedColor(context);
 
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        title: Text('settings'.tr(), style: TextStyle(fontWeight: FontWeight.w800)),
-        backgroundColor: surface,
-        foregroundColor: textPrimary,
-        elevation: 0,
-      ),
-      body: SingleChildScrollView(
+    final bodyContent = SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -515,8 +510,24 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
           ],
         ),
-      ),
-    );
+      );
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          title: Text('settings'.tr(), style: const TextStyle(fontWeight: FontWeight.w800)),
+          backgroundColor: surface,
+          foregroundColor: textPrimary,
+          elevation: 0,
+        ),
+        body: bodyContent,
+      );
+    }
   }
 
   Widget _panel(BuildContext context, {required Widget child}) {

@@ -19,43 +19,13 @@ class RetailersScreen extends StatelessWidget {
     final textPrimary = AppTheme.textPrimaryColor(context);
     final surface = AppTheme.surfaceColor(context);
 
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        backgroundColor: surface,
-        elevation: 0,
-        title: Text('retailers'.tr(), style: TextStyle(color: textPrimary, fontWeight: FontWeight.w800)),
-        iconTheme: IconThemeData(color: textPrimary),
-        actions: [
-          if (auth.isAdmin)
-            IconButton(
-              icon: const Icon(Icons.build_outlined, color: Colors.orange),
-              tooltip: 'Fix Rounding',
-              onPressed: () async {
-                final fixed = await dist.roundAllRetailerAssignments();
-                if (!context.mounted) return;
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(fixed == 0
-                        ? 'All assignments already rounded.'
-                        : 'Fixed $fixed retailer(s).'),
-                    backgroundColor: fixed == 0 ? Colors.green : Colors.orange,
-                  ),
-                );
-              },
-            ),
-          if (auth.isAdmin)
-            IconButton(
-              icon: const Icon(Icons.add, color: AppTheme.accent),
-              onPressed: () => _showAddDialog(context),
-            ),
-        ],
-      ),
-      body: dist.retailers.isEmpty
+    final isEmbedded = auth.isAdmin || auth.isFinance;
+
+    final bodyContent = dist.retailers.isEmpty
           ? _empty(context)
           : Column(
               children: [
-                _debtBanner(context, dist.totalRetailerDebt),
+                _debtBanner(context, dist.totalRetailerDebt, auth.isAdmin),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                   child: Container(
@@ -92,11 +62,28 @@ class RetailersScreen extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-    );
+            );
+
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          backgroundColor: surface,
+          elevation: 0,
+          title: Text('retailers'.tr(), style: TextStyle(color: textPrimary, fontWeight: FontWeight.w800)),
+          iconTheme: IconThemeData(color: textPrimary),
+        ),
+        body: bodyContent,
+      );
+    }
   }
 
-  Widget _debtBanner(BuildContext context, double total) => Container(
+  Widget _debtBanner(BuildContext context, double total, bool isAdmin) => Container(
         margin: const EdgeInsets.fromLTRB(16, 16, 16, 12),
         padding: const EdgeInsets.all(22),
         decoration: BoxDecoration(
@@ -124,14 +111,51 @@ class RetailersScreen extends StatelessWidget {
               child: const Icon(Icons.store, color: Colors.white, size: 28),
             ),
             const SizedBox(width: 16),
-            Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-              Text('total_outstanding_debt'.tr(),
-                  style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 2),
-              Text('${_fmt(total)} EGP',
-                  style: const TextStyle(
-                      color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-            ])
+            Expanded(
+              child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                Text('total_outstanding_debt'.tr(),
+                    style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 13, fontWeight: FontWeight.w600)),
+                const SizedBox(height: 2),
+                Text('${_fmt(total)} EGP',
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 24, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+              ]),
+            ),
+            if (isAdmin) ...[
+              IconButton(
+                icon: const Icon(Icons.build_outlined, color: Colors.white),
+                tooltip: 'Fix Rounding',
+                padding: const EdgeInsets.all(10),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.15),
+                  highlightColor: Colors.white.withValues(alpha: 0.25),
+                ),
+                onPressed: () async {
+                  final dist = context.read<DistributionProvider>();
+                  final fixed = await dist.roundAllRetailerAssignments();
+                  if (!context.mounted) return;
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(fixed == 0
+                          ? 'All assignments already rounded.'
+                          : 'Fixed $fixed retailer(s).'),
+                      backgroundColor: fixed == 0 ? Colors.green : Colors.orange,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.add, color: Colors.white),
+                tooltip: 'Add Retailer',
+                padding: const EdgeInsets.all(10),
+                style: IconButton.styleFrom(
+                  backgroundColor: Colors.white.withValues(alpha: 0.15),
+                  highlightColor: Colors.white.withValues(alpha: 0.25),
+                ),
+                onPressed: () => _showAddDialog(context),
+              ),
+            ],
           ],
         ),
       );

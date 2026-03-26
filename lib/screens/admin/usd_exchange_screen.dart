@@ -29,15 +29,8 @@ class UsdExchangeScreen extends StatelessWidget {
         .take(30)
         .toList();
 
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        backgroundColor: AppTheme.surfaceColor(context),
-        elevation: 0,
-        title: Text('USD Exchange', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
-        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
-      ),
-      body: dist.isLoading
+    final isEmbedded = auth.isAdmin || auth.isFinance;
+    final bodyContent = dist.isLoading
           ? const Center(child: CircularProgressIndicator(color: _gold))
           : Column(
               children: [
@@ -92,8 +85,25 @@ class UsdExchangeScreen extends StatelessWidget {
                         ),
                 ),
               ],
-            ),
-    );
+            );
+
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          backgroundColor: AppTheme.surfaceColor(context),
+          elevation: 0,
+          title: Text('USD Exchange', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
+          iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
+        ),
+        body: bodyContent,
+      );
+    }
   }
 
   Widget _buildHeader(BuildContext context, double balance, double totalEgp) {

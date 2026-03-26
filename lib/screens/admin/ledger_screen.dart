@@ -14,16 +14,10 @@ class LedgerScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final dist = context.watch<DistributionProvider>();
 
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        backgroundColor: AppTheme.surfaceColor(context),
-        elevation: 0,
-        title: Text('financial_ledger'.tr(),
-            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
-        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
-      ),
-      body: dist.ledger.isEmpty
+    final auth = context.watch<AuthProvider>();
+    final isEmbedded = auth.isAdmin || auth.isFinance;
+
+    final bodyContent = dist.ledger.isEmpty
           ? Center(
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
@@ -73,8 +67,26 @@ class LedgerScreen extends StatelessWidget {
                   ),
                 ),
               ],
-            ),
-    );
+            );
+
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          backgroundColor: AppTheme.surfaceColor(context),
+          elevation: 0,
+          title: Text('financial_ledger'.tr(),
+              style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
+          iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
+        ),
+        body: bodyContent,
+      );
+    }
   }
 }
 

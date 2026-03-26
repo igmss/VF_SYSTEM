@@ -39,33 +39,10 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppTheme.scaffoldBg(context),
-      appBar: AppBar(
-        backgroundColor: AppTheme.surfaceColor(context),
-        elevation: 0,
-        title: Text(
-          'manage_users'.tr(),
-          style: TextStyle(
-            color: AppTheme.textPrimaryColor(context),
-            fontWeight: FontWeight.w800,
-          ),
-        ),
-        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
-        actions: [
-          IconButton(
-            tooltip: 'repair_account'.tr(),
-            icon: Icon(Icons.build_outlined, color: AppTheme.infoColor(context)),
-            onPressed: () => _showSyncDialog(context),
-          ),
-          IconButton(
-            tooltip: 'create_new_user'.tr(),
-            icon: const Icon(Icons.add, color: AppTheme.accent),
-            onPressed: () => _showCreateUserDialog(context),
-          ),
-        ],
-      ),
-      body: _loading
+    final auth = context.watch<AuthProvider>();
+    final isEmbedded = auth.isAdmin || auth.isFinance;
+
+    final bodyContent = _loading
           ? const Center(child: CircularProgressIndicator())
           : _users.isEmpty
               ? Center(
@@ -78,6 +55,13 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                         'no_users'.tr(),
                         style: TextStyle(color: AppTheme.textMutedColor(context).withValues(alpha: 0.6), fontSize: 16, fontWeight: FontWeight.w700),
                       ),
+                      const SizedBox(height: 24),
+                      if (auth.isAdmin)
+                        ElevatedButton.icon(
+                          onPressed: () => _showCreateUserDialog(context),
+                          icon: const Icon(Icons.add),
+                          label: Text('create_new_user'.tr()),
+                        ),
                     ],
                   ),
                 )
@@ -104,6 +88,25 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                           children: [
                             Expanded(child: _UserSummary(label: 'Users', value: _users.length.toString())),
                             Expanded(child: _UserSummary(label: 'Admins', value: _users.where((u) => u.role == UserRole.ADMIN).length.toString())),
+                            if (auth.isAdmin) ...[
+                              IconButton(
+                                tooltip: 'repair_account'.tr(),
+                                icon: Icon(Icons.build_outlined, color: AppTheme.infoColor(context)),
+                                onPressed: () => _showSyncDialog(context),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: AppTheme.surfaceColor(context).withValues(alpha: 0.5),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              IconButton(
+                                tooltip: 'create_new_user'.tr(),
+                                icon: const Icon(Icons.add, color: AppTheme.accent),
+                                onPressed: () => _showCreateUserDialog(context),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: AppTheme.surfaceColor(context).withValues(alpha: 0.5),
+                                ),
+                              ),
+                            ],
                           ],
                         ),
                       ),
@@ -116,8 +119,45 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                       ),
                     ),
                   ],
-                ),
-    );
+                );
+
+    if (isEmbedded) {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        body: bodyContent,
+      );
+    } else {
+      return Scaffold(
+        backgroundColor: AppTheme.scaffoldBg(context),
+        appBar: AppBar(
+          backgroundColor: AppTheme.surfaceColor(context),
+          elevation: 0,
+          title: Text(
+            'manage_users'.tr(),
+            style: TextStyle(
+              color: AppTheme.textPrimaryColor(context),
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+          iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
+          actions: [
+            if (auth.isAdmin)
+              IconButton(
+                tooltip: 'repair_account'.tr(),
+                icon: Icon(Icons.build_outlined, color: AppTheme.infoColor(context)),
+                onPressed: () => _showSyncDialog(context),
+              ),
+            if (auth.isAdmin)
+              IconButton(
+                tooltip: 'create_new_user'.tr(),
+                icon: const Icon(Icons.add, color: AppTheme.accent),
+                onPressed: () => _showCreateUserDialog(context),
+              ),
+          ],
+        ),
+        body: bodyContent,
+      );
+    }
   }
 
   void _showCreateUserDialog(BuildContext context) {

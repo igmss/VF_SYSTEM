@@ -7,6 +7,7 @@ import '../../providers/distribution_provider.dart';
 import '../../models/collector.dart';
 import '../../models/retailer.dart';
 import '../../theme/app_theme.dart';
+import 'collector_details_screen.dart';
 
 class CollectorsScreen extends StatelessWidget {
   const CollectorsScreen({Key? key}) : super(key: key);
@@ -605,8 +606,17 @@ class _CollectorCard extends StatelessWidget {
     final percent = (collector.cashOnHand / collector.cashLimit).clamp(0.0, 1.0);
     final isCritical = collector.cashOnHand >= collector.cashLimit;
 
-    return Container(
-      margin: const EdgeInsets.only(bottom: 16),
+    return GestureDetector(
+      onTap: () {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+            builder: (_) => CollectorDetailsScreen(collector: collector),
+          ),
+        );
+      },
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 16),
       decoration: BoxDecoration(
         color: AppTheme.isDark(context) ? AppTheme.surfaceColor(context) : Colors.white,
         borderRadius: BorderRadius.circular(24),
@@ -786,7 +796,7 @@ class _CollectorCard extends StatelessWidget {
             ),
         ],
       ),
-    );
+    ));
   }
 
   String _f(double v) {

@@ -189,20 +189,46 @@ class CashTransaction {
   }
 
   factory CashTransaction.fromMap(Map<String, dynamic> map) {
+    double asDouble(dynamic value) {
+      if (value == null) return 0;
+      if (value is num) return value.toDouble();
+      return double.tryParse(value.toString().replaceAll(',', '')) ?? 0;
+    }
+
+    int asInt(dynamic value, {int fallback = 0}) {
+      if (value == null) return fallback;
+      if (value is int) return value;
+      if (value is num) return value.toInt();
+      return int.tryParse(value.toString()) ?? fallback;
+    }
+
+    DateTime asDateTime(dynamic value) {
+      if (value == null) return DateTime.now();
+      if (value is DateTime) return value;
+      final text = value.toString();
+      final parsedDate = DateTime.tryParse(text);
+      if (parsedDate != null) return parsedDate;
+      final millis = int.tryParse(text);
+      if (millis != null && millis > 0) {
+        return DateTime.fromMillisecondsSinceEpoch(millis);
+      }
+      return DateTime.now();
+    }
+
     return CashTransaction(
-      id: map['id'] ?? '',
-      phoneNumber: map['phoneNumber'],
-      amount: (map['amount'] ?? 0).toDouble(),
-      currency: map['currency'] ?? 'EGP',
-      timestamp: DateTime.parse(map['timestamp'] ?? DateTime.now().toIso8601String()),
-      bybitOrderId: map['bybitOrderId'] ?? '',
-      status: map['status'] ?? 'pending',
-      paymentMethod: map['paymentMethod'] ?? 'Unknown',
-      side: map['side'] ?? 1,
-      chatHistory: map['chatHistory'] ?? '',
-      price: (map['price'] ?? 0).toDouble(),
-      quantity: (map['quantity'] ?? 0).toDouble(),
-      token: map['token'] ?? 'USDT',
+      id: map['id']?.toString() ?? '',
+      phoneNumber: map['phoneNumber']?.toString(),
+      amount: asDouble(map['amount']),
+      currency: map['currency']?.toString() ?? 'EGP',
+      timestamp: asDateTime(map['timestamp']),
+      bybitOrderId: map['bybitOrderId']?.toString() ?? '',
+      status: map['status']?.toString() ?? 'pending',
+      paymentMethod: map['paymentMethod']?.toString() ?? 'Unknown',
+      side: asInt(map['side'], fallback: 1),
+      chatHistory: map['chatHistory']?.toString() ?? '',
+      price: asDouble(map['price']),
+      quantity: asDouble(map['quantity']),
+      token: map['token']?.toString() ?? 'USDT',
     );
   }
 }

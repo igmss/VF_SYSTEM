@@ -257,12 +257,7 @@ class AppProvider extends ChangeNotifier {
   StreamSubscription? _syncConfigSub;
 
   Future<void> _loadLiveSyncState() async {
-    FirebaseDatabase.instance
-        .ref('system/sync_config/enabled')
-        .set(true)
-        .catchError((e) => debugPrint('Sync: Could not enforce enabled flag: $e'));
-
-    // Listen to Firebase for the central sync switch
+    // Listen to Firebase for the central sync switch without overriding it on startup.
     _syncConfigSub?.cancel();
     _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config').onValue.listen((event) {
       final snap = event.snapshot;
@@ -277,10 +272,8 @@ class AppProvider extends ChangeNotifier {
   }
 
   Future<void> toggleServerSync(bool enabled) async {
-    if (enabled) {
-      await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(true);
-      notifyListeners();
-    }
+    await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(enabled);
+    notifyListeners();
   }
 
   void _startLiveSyncTimer() {
@@ -402,7 +395,7 @@ class AppProvider extends ChangeNotifier {
       await _dbService.deleteAllTransactions();
       _transactions.clear();
       _lastSyncedOrderTs = 0;
-      await loadMobileNumbers(); // This also triggers recalculateUsage inside DB
+      await recalculateAllUsage();
       notifyListeners();
     } catch (e) {
       _error = e.toString();

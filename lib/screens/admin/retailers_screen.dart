@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
@@ -34,11 +33,12 @@ class RetailersScreen extends StatelessWidget {
               tooltip: 'Fix Rounding',
               onPressed: () async {
                 final fixed = await dist.roundAllRetailerAssignments();
+                if (!context.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                     content: Text(fixed == 0
-                        ? 'All assignments already rounded ✅'
-                        : 'Fixed $fixed retailer(s) ✅'),
+                        ? 'All assignments already rounded.'
+                        : 'Fixed $fixed retailer(s).'),
                     backgroundColor: fixed == 0 ? Colors.green : Colors.orange,
                   ),
                 );
@@ -46,7 +46,7 @@ class RetailersScreen extends StatelessWidget {
             ),
           if (auth.isAdmin)
             IconButton(
-              icon: Icon(Icons.add, color: AppTheme.accent),
+              icon: const Icon(Icons.add, color: AppTheme.accent),
               onPressed: () => _showAddDialog(context),
             ),
         ],
@@ -227,6 +227,7 @@ class RetailersScreen extends StatelessWidget {
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) {
+          final isSubmitting = ctx.watch<DistributionProvider>().isDistributing;
           final selectedNum = numbers.firstWhere((n) => n.id == selectedId);
           final availableBalance = selectedNum.currentBalance;
           return _Dialog(
@@ -325,6 +326,8 @@ class RetailersScreen extends StatelessWidget {
                   onChanged: (val) => setSt(() => applyCredit = val ?? false),
                 ),
             ],
+            confirmLabel: 'Assign',
+            isLoading: isSubmitting,
             onConfirm: () async {
               final num = numbers.firstWhere((n) => n.id == selectedId);
               final amount = double.tryParse(amtCtrl.text) ?? 0;
@@ -332,10 +335,6 @@ class RetailersScreen extends StatelessWidget {
 
               if (amount <= 0) {
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red));
-                return false;
-              }
-              if (((amount + fees) - num.currentBalance) > 0.01) {
-                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('insufficient_vf_balance'.tr(args: [num.phoneNumber, num.currentBalance.toStringAsFixed(0)])), backgroundColor: Colors.orange));
                 return false;
               }
 
@@ -350,9 +349,11 @@ class RetailersScreen extends StatelessWidget {
                   applyCredit: applyCredit,
                   createdByUid: auth.currentUser?.uid ?? 'system',
                 );
+                if (!context.mounted) return false;
                 ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Assignment completed successfully'), backgroundColor: Colors.green));
                 return true;
               } catch (e) {
+                if (!context.mounted) return false;
                 ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
                 return false;
               }
@@ -476,7 +477,7 @@ class _RetailerCard extends StatelessWidget {
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
                   Text(retailer.name,
                       style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w900, fontSize: 16)),
-                  Text('${retailer.phone}${retailer.area.isNotEmpty ? ' · ${retailer.area}' : ''}',
+                  Text('${retailer.phone}${retailer.area.isNotEmpty ? ' • ${retailer.area}' : ''}',
                       style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
                   if (retailer.discountPer1000 != 0)
                     Padding(
@@ -558,7 +559,7 @@ class _RetailerCard extends StatelessWidget {
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text('${(pct * 100).toStringAsFixed(0)}% ' + 'collected'.tr(),
+                Text('${(pct * 100).toStringAsFixed(0)}% ${'collected'.tr()}',
                     style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, fontWeight: FontWeight.w600)),
                 if (isAdmin)
                   Row(
@@ -566,7 +567,7 @@ class _RetailerCard extends StatelessWidget {
                       IconButton(icon: Icon(Icons.edit, size: 18, color: AppTheme.textMutedColor(context)), onPressed: onEdit),
                       IconButton(icon: Icon(Icons.add_circle_outline, size: 18, color: AppTheme.warningColor(context)), onPressed: onDistribute),
                       if (retailer.pendingDebt > 0)
-                        IconButton(icon: Icon(Icons.keyboard_return, size: 18, color: const Color(0xFFE63946)), onPressed: onReturn),
+                        IconButton(icon: const Icon(Icons.keyboard_return, size: 18, color: Color(0xFFE63946)), onPressed: onReturn),
                     ],
                   ),
               ],
@@ -588,13 +589,20 @@ class _RetailerCard extends StatelessWidget {
 
   String _f(double v) => NumberFormat('#,##0.00', 'en_US').format(v);
 }
-
 class _Dialog extends StatelessWidget {
   final String title;
   final List<Widget> fields;
   final Future<bool> Function() onConfirm;
+  final String? confirmLabel;
+  final bool isLoading;
 
-  const _Dialog({required this.title, required this.fields, required this.onConfirm});
+  const _Dialog({
+    required this.title,
+    required this.fields,
+    required this.onConfirm,
+    this.confirmLabel,
+    this.isLoading = false,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -610,11 +618,11 @@ class _Dialog extends StatelessWidget {
       ),
       actions: [
         TextButton(
-          onPressed: () => Navigator.pop(context),
+          onPressed: isLoading ? null : () => Navigator.pop(context),
           child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.bold)),
         ),
         ElevatedButton(
-          onPressed: () async {
+          onPressed: isLoading ? null : () async {
             final shouldClose = await onConfirm();
             if (shouldClose && context.mounted) {
               Navigator.pop(context);
@@ -627,10 +635,15 @@ class _Dialog extends StatelessWidget {
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
           ),
-          child: Text('save'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
+          child: isLoading
+              ? const SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                )
+              : Text(confirmLabel ?? 'save'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
         ),
       ],
     );
   }
 }
-

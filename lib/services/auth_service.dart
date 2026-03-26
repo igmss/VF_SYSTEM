@@ -90,16 +90,52 @@ class AuthService {
     required String name,
     required UserRole role,
   }) async {
+    double asDouble(dynamic value, {double fallback = 0}) {
+      if (value == null) return fallback;
+      if (value is num) return value.toDouble();
+      return double.tryParse(value.toString().replaceAll(',', '')) ?? fallback;
+    }
+
+    final now = DateTime.now();
+    final nowIso = now.toIso8601String();
     final appUser = AppUser(
       uid: uid,
       email: email,
       name: name,
       role: role,
-      createdAt: DateTime.now(),
+      createdAt: now,
     );
     final data = Map<String, dynamic>.from(appUser.toMap());
-    debugPrint('Syncing user record to DB: users/$uid with data: $data');
-    await _database.ref('users/$uid').set(data);
+    final collectorSnap = await _database.ref('collectors/$uid').get();
+    final updates = <String, dynamic>{
+      'users/$uid': data,
+    };
+
+    if (role == UserRole.COLLECTOR) {
+      final existingCollector = collectorSnap.exists && collectorSnap.value is Map
+          ? Map<String, dynamic>.from(collectorSnap.value as Map)
+          : <String, dynamic>{};
+      updates['collectors/$uid'] = {
+        'id': uid,
+        'name': name,
+        'phone': existingCollector['phone']?.toString() ?? '',
+        'email': email,
+        'uid': uid,
+        'cashOnHand': asDouble(existingCollector['cashOnHand']),
+        'cashLimit': asDouble(existingCollector['cashLimit'], fallback: 50000.0),
+        'totalCollected': asDouble(existingCollector['totalCollected']),
+        'totalDeposited': asDouble(existingCollector['totalDeposited']),
+        'isActive': true,
+        'createdAt': existingCollector['createdAt']?.toString() ?? data['createdAt'],
+        'lastUpdatedAt': nowIso,
+      };
+    } else if (collectorSnap.exists) {
+      updates['collectors/$uid/isActive'] = false;
+      updates['collectors/$uid/lastUpdatedAt'] = nowIso;
+    }
+
+    debugPrint('Syncing user record to DB for $uid with role ${role.name}');
+    await _database.ref().update(updates);
     debugPrint('Sync successful');
   }
 

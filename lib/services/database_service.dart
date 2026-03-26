@@ -14,6 +14,7 @@ class DatabaseService {
   static const String _numbersPath = 'mobile_numbers';
   static const String _transactionsPath = 'transactions';
   static const String _syncPath = 'sync_data';
+  static const String _ledgerPath = 'financial_ledger';
 
   /// Add or update a mobile number
   Future<void> addMobileNumber(MobileNumber number) async {
@@ -506,11 +507,40 @@ class DatabaseService {
     }
   }
 
-  /// Wipe all transactions and reset sync markers
+  /// Wipe all transactions, reset usage counters, and clear synced Bybit ledger rows.
   Future<void> deleteAllTransactions() async {
     try {
-      await _database.ref(_transactionsPath).remove().timeout(_timeout);
-      await resetSyncMarkers();
+      final numbers = await getMobileNumbers();
+      final ledgerSnapshot = await _database.ref(_ledgerPath).get().timeout(_timeout);
+      final nowIso = DateTime.now().toIso8601String();
+      final updates = <String, dynamic>{
+        _transactionsPath: null,
+        _syncPath: null,
+      };
+
+      for (final number in numbers) {
+        updates['$_numbersPath/${number.id}/inDailyUsed'] = 0.0;
+        updates['$_numbersPath/${number.id}/outDailyUsed'] = 0.0;
+        updates['$_numbersPath/${number.id}/inMonthlyUsed'] = 0.0;
+        updates['$_numbersPath/${number.id}/outMonthlyUsed'] = 0.0;
+        updates['$_numbersPath/${number.id}/inTotalUsed'] = 0.0;
+        updates['$_numbersPath/${number.id}/outTotalUsed'] = 0.0;
+        updates['$_numbersPath/${number.id}/lastUpdatedAt'] = nowIso;
+      }
+
+      if (ledgerSnapshot.exists && ledgerSnapshot.value is Map) {
+        final data = ledgerSnapshot.value as Map;
+        data.forEach((key, value) {
+          if (value is! Map) return;
+          final entry = Map<String, dynamic>.from(value);
+          final type = entry['type']?.toString();
+          if (type == 'BUY_USDT' || type == 'SELL_USDT') {
+            updates['$_ledgerPath/$key'] = null;
+          }
+        });
+      }
+
+      await _database.ref().update(updates).timeout(_timeout);
     } catch (e) {
       throw Exception('Error deleting all transactions: $e');
     }

@@ -130,8 +130,8 @@ class _LedgerTile extends StatelessWidget {
         borderRadius: BorderRadius.circular(18),
         border: Border.all(
           color: anyDeleted
-              ? Colors.red.withOpacity(0.25)
-              : color.withOpacity(0.15),
+              ? Colors.red.withValues(alpha: 0.25)
+              : color.withValues(alpha: 0.15),
         ),
         boxShadow: AppTheme.softShadow(context),
       ),
@@ -142,7 +142,7 @@ class _LedgerTile extends StatelessWidget {
           Container(
             padding: const EdgeInsets.all(9),
             decoration: BoxDecoration(
-              color: color.withOpacity(0.12),
+              color: color.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(10),
             ),
             child: Icon(icon, color: color, size: 18),
@@ -363,12 +363,14 @@ class _LedgerTile extends StatelessWidget {
                   adminUid: auth.currentUser?.uid ?? '',
                   reason: reasonCtrl.text.isEmpty ? null : reasonCtrl.text,
                 );
+                if (!ctx.mounted) return;
                 Navigator.pop(ctx);
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(
                       content: Text('Correction applied successfully')),
                 );
               } catch (e) {
+                if (!ctx.mounted) return;
                 ScaffoldMessenger.of(context).showSnackBar(
                   SnackBar(
                       content: Text('Error: $e'), backgroundColor: Colors.red),
@@ -396,9 +398,9 @@ class _LedgerTile extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
       decoration: BoxDecoration(
-        color: Colors.red.withOpacity(0.1),
+        color: Colors.red.withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(6),
-        border: Border.all(color: Colors.red.withOpacity(0.3)),
+        border: Border.all(color: Colors.red.withValues(alpha: 0.3)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,

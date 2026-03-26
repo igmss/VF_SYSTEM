@@ -37,7 +37,7 @@ Future<void> main() async {
 }
 
 class MyApp extends StatelessWidget {
-  const MyApp({Key? key}) : super(key: key);
+  const MyApp({super.key});
 
   @override
   Widget build(BuildContext context) {
@@ -130,7 +130,7 @@ class _AppRouter extends StatelessWidget {
     if (role == UserRole.COLLECTOR) {
       return const CollectorDashboard();
     }
-    if (role == UserRole.ADMIN || role == UserRole.FINANCE) {
+    if (role == UserRole.ADMIN || role == UserRole.FINANCE || role == UserRole.OPERATOR) {
       return const AdminDashboard();
     }
 

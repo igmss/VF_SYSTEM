@@ -13,6 +13,11 @@ class UserManagementScreen extends StatefulWidget {
 }
 
 class _UserManagementScreenState extends State<UserManagementScreen> {
+  static const List<UserRole> _supportedRoles = [
+    UserRole.ADMIN,
+    UserRole.FINANCE,
+    UserRole.COLLECTOR,
+  ];
   List<AppUser> _users = [];
   bool _loading = true;
 
@@ -55,7 +60,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
           ),
           IconButton(
             tooltip: 'create_new_user'.tr(),
-            icon: Icon(Icons.add, color: AppTheme.accent),
+            icon: const Icon(Icons.add, color: AppTheme.accent),
             onPressed: () => _showCreateUserDialog(context),
           ),
         ],
@@ -140,7 +145,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 filled: true,
                 fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
               ),
-              items: UserRole.values
+              items: _supportedRoles
                   .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
                   .toList(),
               onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
@@ -199,7 +204,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 filled: true,
                 fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
               ),
-              items: UserRole.values
+              items: _supportedRoles
                   .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
                   .toList(),
               onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),

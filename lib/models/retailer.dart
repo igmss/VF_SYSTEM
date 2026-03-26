@@ -17,9 +17,12 @@ class Retailer {
   /// Extra credit paid by the retailer (EGP)
   final double credit;
 
-  /// Pending debt = totalAssigned - totalCollected
-  double get pendingDebt => totalAssigned - totalCollected;
-
+  /// Pending debt = totalAssigned - totalCollected, clamped at zero.
+  /// Credit is tracked separately and only applied when explicitly requested.
+  double get pendingDebt {
+    final outstanding = totalAssigned - totalCollected;
+    return outstanding > 0 ? outstanding : 0.0;
+  }
   final bool isActive;
   final DateTime createdAt;
   final DateTime lastUpdatedAt;

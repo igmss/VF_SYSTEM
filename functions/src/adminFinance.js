@@ -18,6 +18,158 @@ function getMobileNumberBalance(number) {
   return asNumber(number.initialBalance) + asNumber(number.inTotalUsed) - asNumber(number.outTotalUsed);
 }
 
+function getRetailerOutstandingDebt(retailer) {
+  const outstanding = asNumber(retailer.totalAssigned) - asNumber(retailer.totalCollected);
+  return outstanding > 0 ? outstanding : 0;
+}
+
+function getTransactionTimestampMs(tx) {
+  if (!tx) return Date.now();
+  if (typeof tx.timestamp === 'number') return tx.timestamp;
+  const parsed = Date.parse(tx.timestamp || '');
+  return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function applyMobileNumberUsageDelta(updates, { numberId, amountDelta, direction, timestampMs, nowIso }) {
+  if (!numberId || amountDelta === 0) return;
+
+  const effectiveTs = Number.isFinite(timestampMs) ? timestampMs : Date.now();
+  const prefix = direction === 'incoming' ? 'in' : 'out';
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+  updates[`mobile_numbers/${numberId}/${prefix}TotalUsed`] = admin.database.ServerValue.increment(amountDelta);
+  if (effectiveTs >= todayStart) {
+    updates[`mobile_numbers/${numberId}/${prefix}DailyUsed`] = admin.database.ServerValue.increment(amountDelta);
+  }
+  if (effectiveTs >= monthStart) {
+    updates[`mobile_numbers/${numberId}/${prefix}MonthlyUsed`] = admin.database.ServerValue.increment(amountDelta);
+  }
+  updates[`mobile_numbers/${numberId}/lastUpdatedAt`] = nowIso || new Date().toISOString();
+}
+
+async function getGeneratedTransactions(prefix) {
+  const snap = await admin.database().ref('transactions').orderByChild('bybitOrderId').equalTo(prefix).once('value');
+  if (!snap.exists()) return [];
+  return Object.entries(snap.val()).map(([key, value]) => ({ key, value }));
+}
+
+function buildGeneratedTransactionRemovals(generatedTransactions) {
+  const removals = {};
+  generatedTransactions.forEach(({ key }) => {
+    removals[`transactions/${key}`] = null;
+  });
+  return removals;
+}
+
+async function getRelatedLedgerEntries(relatedLedgerId, allowedTypes = null) {
+  const snap = await admin.database().ref('financial_ledger').orderByChild('relatedLedgerId').equalTo(relatedLedgerId).once('value');
+  if (!snap.exists()) return [];
+
+  return Object.entries(snap.val())
+    .map(([key, value]) => ({ key, value }))
+    .filter(({ value }) => {
+      if (!allowedTypes || allowedTypes.length === 0) return true;
+      return allowedTypes.includes(value?.type?.toString() || '');
+    });
+}
+
+function buildLedgerRemovals(entries) {
+  const removals = {};
+  entries.forEach(({ key }) => {
+    removals[`financial_ledger/${key}`] = null;
+  });
+  return removals;
+}
+
+function sumEntryAmounts(entries) {
+  return entries.reduce((sum, { value }) => sum + asNumber(value?.amount), 0);
+}
+
+async function updateMobileNumberUsageTransaction({
+  numberId,
+  amountDelta,
+  direction,
+  timestampMs,
+  nowIso,
+  requireSufficientBalance = false,
+  clampAtZero = false,
+}) {
+  const prefix = direction === 'incoming' ? 'in' : 'out';
+  const effectiveTs = Number.isFinite(timestampMs) ? timestampMs : Date.now();
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const totalKey = `${prefix}TotalUsed`;
+  const dailyKey = `${prefix}DailyUsed`;
+  const monthlyKey = `${prefix}MonthlyUsed`;
+
+  return await admin.database().ref(`mobile_numbers/${numberId}`).transaction((current) => {
+    if (current === null) return current;
+
+    if (requireSufficientBalance && direction === 'outgoing' && amountDelta > 0) {
+      const currentBalance = getMobileNumberBalance(current);
+      if ((amountDelta - currentBalance) > 0.01) {
+        return; // Explicit abort: truly insufficient balance
+      }
+    }
+
+    const nextTotal = asNumber(current[totalKey]) + amountDelta;
+    if (!clampAtZero && amountDelta < 0 && nextTotal < -0.01) {
+      return; // Explicit abort: would go negative
+    }
+
+    const next = {
+      ...current,
+      [totalKey]: clampAtZero ? Math.max(0, nextTotal) : nextTotal,
+      lastUpdatedAt: nowIso || new Date().toISOString(),
+    };
+
+    if (effectiveTs >= todayStart) {
+      const nextDaily = asNumber(current[dailyKey]) + amountDelta;
+      if (!clampAtZero && amountDelta < 0 && nextDaily < -0.01) {
+        return; // Explicit abort
+      }
+      next[dailyKey] = clampAtZero ? Math.max(0, nextDaily) : nextDaily;
+    }
+
+    if (effectiveTs >= monthStart) {
+      const nextMonthly = asNumber(current[monthlyKey]) + amountDelta;
+      if (!clampAtZero && amountDelta < 0 && nextMonthly < -0.01) {
+        return; // Explicit abort
+      }
+      next[monthlyKey] = clampAtZero ? Math.max(0, nextMonthly) : nextMonthly;
+    }
+
+    return next;
+  });
+}
+
+/**
+ * Reads retailer data and computes distribution amounts.
+ * The actual balance update is applied later via an atomic multi-path write.
+ */
+async function computeDistributionAmounts({ db, retailerId, amount, fees, chargeFeesToRetailer, applyCredit }) {
+  const snap = await db.ref(`retailers/${retailerId}`).once('value');
+  if (!snap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
+  const retailer = snap.val();
+
+  const discountPer1000 = asNumber(retailer.discountPer1000);
+  const discountAmount = (amount / 1000.0) * discountPer1000;
+  const feeToCharge = chargeFeesToRetailer ? fees : 0.0;
+  let actualDebtIncrease = Math.ceil(amount + discountAmount + feeToCharge);
+  let creditUsed = 0.0;
+
+  const currentCredit = asNumber(retailer.credit);
+  if (applyCredit && currentCredit > 0) {
+    creditUsed = Math.min(currentCredit, actualDebtIncrease);
+    actualDebtIncrease -= creditUsed;
+  }
+
+  return { retailer, actualDebtIncrease, creditUsed };
+}
+
 async function getCallerRole(uid) {
   const snap = await admin.database().ref(`users/${uid}`).once('value');
   const user = snap.val();
@@ -228,34 +380,49 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('invalid-argument', 'Invalid distribution request.');
   }
 
-  const [retailerSnap, vfNumberSnap] = await Promise.all([
-    admin.database().ref(`retailers/${retailerId}`).once('value'),
-    admin.database().ref(`mobile_numbers/${fromVfNumberId}`).once('value'),
-  ]);
-  if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
-  if (!vfNumberSnap.exists()) throw new HttpsError('not-found', 'Vodafone number not found.');
-
-  const retailer = retailerSnap.val();
-  const vfNumber = vfNumberSnap.val();
+  const db = admin.database();
   const totalDeduction = amount + fees;
-  const currentVfBalance = getMobileNumberBalance(vfNumber);
-  if ((totalDeduction - currentVfBalance) > 0.01) {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowTs = now.getTime();
+
+  // ─── Phase 1: Compute retailer amounts (read-only, no lock) ──────────────
+  const { retailer, actualDebtIncrease, creditUsed } = await computeDistributionAmounts({
+    db, retailerId, amount, fees, chargeFeesToRetailer, applyCredit,
+  });
+
+  // ─── Phase 2: Atomically reserve VF number balance via transaction ────────
+  // applyLocally:false ensures Firebase always calls handler with real server
+  // data — no null optimistic phase, no spurious abort.
+  const vfReservation = await updateMobileNumberUsageTransaction({
+    numberId: fromVfNumberId,
+    amountDelta: totalDeduction,
+    direction: 'outgoing',
+    timestampMs: nowTs,
+    nowIso,
+    requireSufficientBalance: true,
+  });
+
+  if (!vfReservation.committed) {
+    // Transaction returned undefined (explicit abort) = truly insufficient balance.
+    const vfNumberSnap = await db.ref(`mobile_numbers/${fromVfNumberId}`).once('value');
+    if (!vfNumberSnap.exists()) throw new HttpsError('not-found', 'Vodafone number not found.');
+    const currentVfBalance = getMobileNumberBalance(vfNumberSnap.val());
     throw new HttpsError(
       'failed-precondition',
       `Insufficient Vodafone balance. Available: ${currentVfBalance.toFixed(2)} EGP, required: ${totalDeduction.toFixed(2)} EGP.`
     );
   }
 
-  const discountAmount = (amount / 1000.0) * asNumber(retailer.discountPer1000);
-  const feeToCharge = chargeFeesToRetailer ? fees : 0.0;
-  let actualDebtIncrease = Math.ceil(amount + discountAmount + feeToCharge);
-
-  let creditUsed = 0.0;
-  const currentCredit = asNumber(retailer.credit);
-  if (applyCredit && currentCredit > 0) {
-    creditUsed = Math.min(currentCredit, actualDebtIncrease);
-    actualDebtIncrease -= creditUsed;
-  }
+  // ─── Phase 3: Build and commit the full atomic multi-path write ───────────
+  // Retailer balance is updated here via ServerValue.increment — these are
+  // individually atomic on their own paths and don't need a transaction lock.
+  // If this write fails, we roll back the VF transaction only.
+  const txId = uuidv4();
+  const cashTxId = uuidv4();
+  const reservedVfNumber = vfReservation.snapshot.val() || {};
+  const vfPhoneLabel = reservedVfNumber.phoneNumber || fromVfPhone;
+  const retailerName = retailer.name || 'Retailer';
 
   const feeNotes = chargeFeesToRetailer && fees > 0 ? `, +${fees} Fee` : '';
   const creditNotes = creditUsed > 0 ? `, -${creditUsed} Credit Used` : '';
@@ -263,29 +430,23 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
     ? `${notes} (Rate: ${asNumber(retailer.discountPer1000)}/1K${feeNotes}${creditNotes}, Debt +${actualDebtIncrease} EGP)`
     : `Rate: ${asNumber(retailer.discountPer1000)}/1K${feeNotes}${creditNotes}, Debt +${actualDebtIncrease} EGP`;
 
-  const txId = uuidv4();
-  const cashTxId = uuidv4();
-  const now = new Date();
-  const nowIso = now.toISOString();
-  const nowTs = now.getTime();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const updates = {
     [`financial_ledger/${txId}`]: {
       id: txId,
       type: 'DISTRIBUTE_VFCASH',
       amount,
       fromId: fromVfNumberId,
-      fromLabel: fromVfPhone,
+      fromLabel: vfPhoneLabel,
       toId: retailerId,
-      toLabel: retailer.name || 'Retailer',
+      toLabel: retailerName,
       createdByUid,
       notes: appliedNotes,
+      generatedTransactionId: cashTxId,
       timestamp: nowTs,
     },
     [`transactions/${cashTxId}`]: {
       id: cashTxId,
-      phoneNumber: fromVfPhone,
+      phoneNumber: vfPhoneLabel,
       amount: totalDeduction,
       currency: 'EGP',
       timestamp: nowIso,
@@ -293,24 +454,19 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
       status: 'completed',
       paymentMethod: 'Vodafone Distribution',
       side: 0,
+      relatedLedgerId: txId,
       chatHistory: fees > 0
-        ? `Automated Distribution to ${retailer.name} (Includes ${fees} EGP transfer fees${chargeFeesToRetailer ? ' - charged to retailer' : ''})`
-        : `Automated Distribution to ${retailer.name}`,
+        ? `Automated Distribution to ${retailerName} (Includes ${fees} EGP transfer fees${chargeFeesToRetailer ? ' - charged to retailer' : ''})`
+        : `Automated Distribution to ${retailerName}`,
     },
+    // Retailer debt: use increment for atomic write, no transaction lock needed
     [`retailers/${retailerId}/totalAssigned`]: admin.database.ServerValue.increment(actualDebtIncrease),
     [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
-    [`mobile_numbers/${fromVfNumberId}/outTotalUsed`]: admin.database.ServerValue.increment(totalDeduction),
-    [`mobile_numbers/${fromVfNumberId}/lastUpdatedAt`]: nowIso,
-    ...(nowTs >= todayStart
-      ? { [`mobile_numbers/${fromVfNumberId}/outDailyUsed`]: admin.database.ServerValue.increment(totalDeduction) }
-      : {}),
-    ...(nowTs >= monthStart
-      ? { [`mobile_numbers/${fromVfNumberId}/outMonthlyUsed`]: admin.database.ServerValue.increment(totalDeduction) }
-      : {}),
   };
 
+  // Apply credit deduction if any was used
   if (creditUsed > 0) {
-    updates[`retailers/${retailerId}/credit`] = currentCredit - creditUsed;
+    updates[`retailers/${retailerId}/credit`] = admin.database.ServerValue.increment(-creditUsed);
   }
 
   if (fees > 0) {
@@ -320,16 +476,32 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
       type: 'EXPENSE_VFCASH_FEE',
       amount: fees,
       fromId: fromVfNumberId,
-      fromLabel: fromVfPhone,
+      fromLabel: vfPhoneLabel,
       createdByUid,
+      relatedLedgerId: txId,
       notes: chargeFeesToRetailer
-        ? `Vodafone Transfer Fee for assigning ${amount} EGP to ${retailer.name} (charged to retailer debt)`
-        : `Vodafone Transfer Fee for assigning ${amount} EGP to ${retailer.name}`,
+        ? `Vodafone Transfer Fee for assigning ${amount} EGP to ${retailerName} (charged to retailer debt)`
+        : `Vodafone Transfer Fee for assigning ${amount} EGP to ${retailerName}`,
       timestamp: nowTs,
     };
   }
 
-  await admin.database().ref().update(updates);
+  try {
+    await db.ref().update(updates);
+  } catch (error) {
+    // Roll back only the VF balance reservation on write failure.
+    // Retailer update was part of this write, so it was never applied.
+    await updateMobileNumberUsageTransaction({
+      numberId: fromVfNumberId,
+      amountDelta: -totalDeduction,
+      direction: 'outgoing',
+      timestampMs: nowTs,
+      nowIso,
+      clampAtZero: true,
+    }).catch(() => {});
+    throw new HttpsError('internal', error.message || 'Unable to complete distribution.');
+  }
+
   return { txId, creditUsed, actualDebtIncrease };
 });
 
@@ -349,11 +521,23 @@ exports.creditReturn = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('invalid-argument', 'Invalid credit return request.');
   }
 
-  const retailerSnap = await admin.database().ref(`retailers/${retailerId}`).once('value');
+  const [retailerSnap, vfNumberSnap] = await Promise.all([
+    admin.database().ref(`retailers/${retailerId}`).once('value'),
+    admin.database().ref(`mobile_numbers/${vfNumberId}`).once('value'),
+  ]);
   if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
+  if (!vfNumberSnap.exists()) throw new HttpsError('not-found', 'Vodafone number not found.');
   const retailer = retailerSnap.val();
-  const nowIso = new Date().toISOString();
-  const nowTs = Date.now();
+  const remainingDebt = getRetailerOutstandingDebt(retailer);
+  if ((amount - remainingDebt) > 0.01) {
+    throw new HttpsError(
+      'failed-precondition',
+      `Credit return exceeds remaining retailer debt. Remaining debt: ${remainingDebt.toFixed(2)} EGP.`
+    );
+  }
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowTs = now.getTime();
   const txId = uuidv4();
   const feeTxId = uuidv4();
   const cashTxId = uuidv4();
@@ -369,6 +553,7 @@ exports.creditReturn = onCall({ region: REGION }, async (request) => {
       toLabel: vfPhone,
       createdByUid,
       notes: notes || 'Debt Settlement via VF Cash',
+      generatedTransactionId: cashTxId,
       timestamp: nowTs,
     },
     [`transactions/${cashTxId}`]: {
@@ -381,11 +566,19 @@ exports.creditReturn = onCall({ region: REGION }, async (request) => {
       status: 'completed',
       paymentMethod: 'VF Credit Return',
       side: 1,
+      relatedLedgerId: txId,
       chatHistory: `Credit Return from ${retailer.name} (Amount: ${amount}, Fee: ${fees})`,
     },
     [`retailers/${retailerId}/totalCollected`]: admin.database.ServerValue.increment(amount),
     [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
   };
+  applyMobileNumberUsageDelta(updates, {
+    numberId: vfNumberId,
+    amountDelta: totalReceived,
+    direction: 'incoming',
+    timestampMs: nowTs,
+    nowIso,
+  });
 
   if (fees > 0) {
     updates[`financial_ledger/${feeTxId}`] = {
@@ -397,6 +590,7 @@ exports.creditReturn = onCall({ region: REGION }, async (request) => {
       toId: vfNumberId,
       toLabel: vfPhone,
       createdByUid,
+      relatedLedgerId: txId,
       notes: 'Credit Return Fee',
       timestamp: nowTs,
     };
@@ -439,15 +633,7 @@ function parseDistributionCreditUsed(notes) {
   return match ? asNumber(match[1]) : 0;
 }
 
-async function removeGeneratedTransaction(prefix) {
-  const snap = await admin.database().ref('transactions').orderByChild('bybitOrderId').equalTo(prefix).once('value');
-  if (!snap.exists()) return {};
-  const removals = {};
-  Object.keys(snap.val()).forEach((key) => {
-    removals[`transactions/${key}`] = null;
-  });
-  return removals;
-}
+
 exports.correctFinancialTransaction = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
@@ -586,18 +772,54 @@ exports.correctFinancialTransaction = onCall({ region: REGION }, async (request)
     updates[`collectors/${collectorId}/lastUpdatedAt`] = nowIso;
   } else if (type === 'CREDIT_RETURN') {
     const retailerId = originalTx.fromId ? originalTx.fromId.toString() : '';
+    const vfNumberId = originalTx.toId ? originalTx.toId.toString() : '';
     if (!retailerId) {
       throw new HttpsError('failed-precondition', 'Credit return is missing retailer information.');
     }
-    const retailerSnap = await db.ref(`retailers/${retailerId}`).once('value');
+
+    const [retailerSnap, vfNumberSnap] = await Promise.all([
+      db.ref(`retailers/${retailerId}`).once('value'),
+      vfNumberId ? db.ref(`mobile_numbers/${vfNumberId}`).once('value') : Promise.resolve(null),
+    ]);
     if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
     const retailer = retailerSnap.val();
+    const remainingDebtBeforeReturn = getRetailerOutstandingDebt(retailer) + originalAmount;
+    if ((correctAmount - remainingDebtBeforeReturn) > 0.01) {
+      throw new HttpsError(
+        'failed-precondition',
+        `Corrected amount exceeds the retailer debt that existed before this return. Max allowed: ${remainingDebtBeforeReturn.toFixed(2)} EGP.`
+      );
+    }
     if (asNumber(retailer.totalCollected) + diff < 0) {
       throw new HttpsError('failed-precondition', 'Retailer collected total would become invalid.');
     }
 
+    const generatedTransactions = await getGeneratedTransactions(`CRTN-${transactionId.substring(0, 8)}`);
+    if (generatedTransactions.length !== 1) {
+      throw new HttpsError('failed-precondition', 'Credit return is missing its generated VF transaction.');
+    }
+
+    const generatedTransaction = generatedTransactions[0];
+    const generatedAmount = asNumber(generatedTransaction.value.amount);
+    const retainedFee = Math.max(0, generatedAmount - originalAmount);
+    const correctedGeneratedAmount = correctAmount + retainedFee;
+    if (correctedGeneratedAmount <= 0) {
+      throw new HttpsError('failed-precondition', 'Corrected cash receipt would become invalid.');
+    }
+
     updates[`retailers/${retailerId}/totalCollected`] = admin.database.ServerValue.increment(diff);
     updates[`retailers/${retailerId}/lastUpdatedAt`] = nowIso;
+    updates[`transactions/${generatedTransaction.key}/amount`] = correctedGeneratedAmount;
+    updates[`transactions/${generatedTransaction.key}/chatHistory`] = `Credit Return from ${retailer.name} (Amount: ${correctAmount}, Fee: ${retainedFee})`;
+    if (vfNumberSnap && vfNumberSnap.exists()) {
+      applyMobileNumberUsageDelta(updates, {
+        numberId: vfNumberId,
+        amountDelta: diff,
+        direction: 'incoming',
+        timestampMs: getTransactionTimestampMs(generatedTransaction.value),
+        nowIso,
+      });
+    }
   }
 
   await db.ref().update(updates);
@@ -682,10 +904,17 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
     updates[`collectors/${collectorId}/lastUpdatedAt`] = nowIso;
   } else if (type === 'DISTRIBUTE_VFCASH') {
     const retailerId = tx.toId ? tx.toId.toString() : '';
+    const vfNumberId = tx.fromId ? tx.fromId.toString() : '';
     if (!retailerId) {
       throw new HttpsError('failed-precondition', 'Distribution transaction is missing retailer.');
     }
-    const retailerSnap = await db.ref(`retailers/${retailerId}`).once('value');
+
+    const [retailerSnap, vfNumberSnap, generatedTransactions, relatedFeeEntries] = await Promise.all([
+      db.ref(`retailers/${retailerId}`).once('value'),
+      vfNumberId ? db.ref(`mobile_numbers/${vfNumberId}`).once('value') : Promise.resolve(null),
+      getGeneratedTransactions(`DIST-${transactionId.substring(0, 8)}`),
+      getRelatedLedgerEntries(transactionId, ['EXPENSE_VFCASH_FEE']),
+    ]);
     if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
     const retailer = retailerSnap.val();
     const debtIncrease = parseDistributionDebtIncrease(tx.notes, amount);
@@ -698,7 +927,30 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
     if (creditUsed > 0) {
       updates[`retailers/${retailerId}/credit`] = admin.database.ServerValue.increment(creditUsed);
     }
-    Object.assign(updates, await removeGeneratedTransaction(`DIST-${transactionId.substring(0, 8)}`));
+    Object.assign(updates, buildGeneratedTransactionRemovals(generatedTransactions));
+    Object.assign(updates, buildLedgerRemovals(relatedFeeEntries));
+    if (vfNumberSnap && vfNumberSnap.exists()) {
+      if (generatedTransactions.length > 0) {
+        generatedTransactions.forEach((generatedTransaction) => {
+          applyMobileNumberUsageDelta(updates, {
+            numberId: vfNumberId,
+            amountDelta: -asNumber(generatedTransaction.value.amount),
+            direction: 'outgoing',
+            timestampMs: getTransactionTimestampMs(generatedTransaction.value),
+            nowIso,
+          });
+        });
+      } else {
+        const fallbackOutgoingAmount = amount + sumEntryAmounts(relatedFeeEntries);
+        applyMobileNumberUsageDelta(updates, {
+          numberId: vfNumberId,
+          amountDelta: -fallbackOutgoingAmount,
+          direction: 'outgoing',
+          timestampMs: getTransactionTimestampMs(tx),
+          nowIso,
+        });
+      }
+    }
   } else if (type === 'FUND_BANK') {
     const bankId = tx.toId ? tx.toId.toString() : '';
     if (!bankId) throw new HttpsError('failed-precondition', 'Fund bank transaction is missing bank account.');
@@ -717,15 +969,45 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
     }
   } else if (type === 'CREDIT_RETURN') {
     const retailerId = tx.fromId ? tx.fromId.toString() : '';
+    const vfNumberId = tx.toId ? tx.toId.toString() : '';
     if (!retailerId) throw new HttpsError('failed-precondition', 'Credit return transaction is missing retailer.');
-    const retailerSnap = await db.ref(`retailers/${retailerId}`).once('value');
+
+    const [retailerSnap, vfNumberSnap, generatedTransactions, relatedFeeEntries] = await Promise.all([
+      db.ref(`retailers/${retailerId}`).once('value'),
+      vfNumberId ? db.ref(`mobile_numbers/${vfNumberId}`).once('value') : Promise.resolve(null),
+      getGeneratedTransactions(`CRTN-${transactionId.substring(0, 8)}`),
+      getRelatedLedgerEntries(transactionId, ['CREDIT_RETURN_FEE']),
+    ]);
     if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
     if (asNumber(retailerSnap.val().totalCollected) < amount) {
       throw new HttpsError('failed-precondition', 'Retailer collected total is too low to reverse this credit return.');
     }
     updates[`retailers/${retailerId}/totalCollected`] = admin.database.ServerValue.increment(-amount);
     updates[`retailers/${retailerId}/lastUpdatedAt`] = nowIso;
-    Object.assign(updates, await removeGeneratedTransaction(`CRTN-${transactionId.substring(0, 8)}`));
+    Object.assign(updates, buildGeneratedTransactionRemovals(generatedTransactions));
+    Object.assign(updates, buildLedgerRemovals(relatedFeeEntries));
+    if (vfNumberSnap && vfNumberSnap.exists()) {
+      if (generatedTransactions.length > 0) {
+        generatedTransactions.forEach((generatedTransaction) => {
+          applyMobileNumberUsageDelta(updates, {
+            numberId: vfNumberId,
+            amountDelta: -asNumber(generatedTransaction.value.amount),
+            direction: 'incoming',
+            timestampMs: getTransactionTimestampMs(generatedTransaction.value),
+            nowIso,
+          });
+        });
+      } else {
+        const fallbackIncomingAmount = amount + sumEntryAmounts(relatedFeeEntries);
+        applyMobileNumberUsageDelta(updates, {
+          numberId: vfNumberId,
+          amountDelta: -fallbackIncomingAmount,
+          direction: 'incoming',
+          timestampMs: getTransactionTimestampMs(tx),
+          nowIso,
+        });
+      }
+    }
   } else if (type === 'CREDIT_RETURN_FEE') {
   } else if (type === 'BANK_DEDUCTION') {
     const bankId = tx.fromId ? tx.fromId.toString() : '';

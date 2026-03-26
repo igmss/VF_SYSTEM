@@ -1,14 +1,13 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
-import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../models/retailer.dart';
 import '../../models/financial_transaction.dart';
-import '../../models/models.dart';
 import '../../providers/distribution_provider.dart';
 import '../../providers/auth_provider.dart';
-import '../../providers/app_provider.dart';
+import 'credit_return_dialog.dart';
+
 
 class RetailerDetailsScreen extends StatefulWidget {
   final Retailer retailer;
@@ -135,7 +134,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         elevation: 0,
                       ),
-                      onPressed: () => _showCreditReturnDialog(context, retailer, dist),
+                      onPressed: () => _showCreditReturnDialog(context, retailer),
                     ),
                   ),
                 ],
@@ -267,7 +266,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                     ],
                   ),
                   Text(
-                    DateFormat('MMM d, yyyy • HH:mm').format(tx.timestamp),
+                    DateFormat('MMM d, yyyy \u2022 HH:mm').format(tx.timestamp),
                     style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                   ),
                 ],
@@ -319,137 +318,10 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
     );
   }
 
-  void _showCreditReturnDialog(BuildContext context, Retailer retailer, DistributionProvider dist) {
-    final appProvider = context.read<AppProvider>();
-    if (appProvider.mobileNumbers.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No VF Numbers available to receive cash.')),
-      );
-      return;
-    }
-
-    final amountCtrl = TextEditingController(text: retailer.pendingDebt.toStringAsFixed(0));
-    final feesCtrl = TextEditingController(text: '0');
-    MobileNumber selectedNumber = appProvider.mobileNumbers.firstWhere((n) => n.isDefault, orElse: () => appProvider.mobileNumbers.first);
-
+  void _showCreditReturnDialog(BuildContext context, Retailer retailer) {
     showDialog(
       context: context,
-      builder: (ctx) => StatefulBuilder(
-        builder: (ctx, setDialogState) => AlertDialog(
-          backgroundColor: AppTheme.surfaceColor(context),
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-          title: Text('Credit Return (VF Cash)', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
-          content: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Retailer: ${retailer.name}', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14, fontWeight: FontWeight.bold)),
-                Text('Debt: ${_fmt(retailer.pendingDebt)} EGP', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 20),
-                
-                Text('Select Receiving Number', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 12, fontWeight: FontWeight.bold)),
-                const SizedBox(height: 10),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 14),
-                  decoration: BoxDecoration(
-                    color: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: AppTheme.lineColor(context)),
-                  ),
-                  child: DropdownButtonHideUnderline(
-                    child: DropdownButton<MobileNumber>(
-                      value: selectedNumber,
-                      dropdownColor: AppTheme.surfaceColor(context),
-                      isExpanded: true,
-                      style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
-                      items: appProvider.mobileNumbers.map((n) {
-                        return DropdownMenuItem(
-                          value: n,
-                          child: Text('${n.phoneNumber}${n.isDefault ? " (Default)" : ""}', style: const TextStyle(fontSize: 14)),
-                        );
-                      }).toList(),
-                      onChanged: (val) {
-                        if (val != null) setDialogState(() => selectedNumber = val);
-                      },
-                    ),
-                  ),
-                ),
-
-                const SizedBox(height: 20),
-                TextField(
-                  controller: amountCtrl,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
-                  decoration: InputDecoration(
-                    labelText: 'Settlement Amount',
-                    suffixText: 'EGP',
-                    filled: true,
-                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: feesCtrl,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
-                  decoration: InputDecoration(
-                    labelText: 'Additional Fees',
-                    suffixText: 'EGP',
-                    filled: true,
-                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                Text(
-                  'Note: Debt decreases by "Settlement Amount". VF balance increases by (Amount + Fees).',
-                  style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, fontStyle: FontStyle.italic),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx),
-              child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
-            ),
-            ElevatedButton(
-              onPressed: () async {
-                final amount = double.tryParse(amountCtrl.text) ?? 0;
-                final fees = double.tryParse(feesCtrl.text) ?? 0;
-                if (amount <= 0) return;
-
-                final auth = context.read<AuthProvider>();
-                try {
-                  await dist.creditReturn(
-                    retailerId: retailer.id,
-                    vfNumberId: selectedNumber.id,
-                    vfPhone: selectedNumber.phoneNumber,
-                    amount: amount,
-                    fees: fees,
-                    createdByUid: auth.currentUser?.uid ?? 'admin',
-                  );
-                  Navigator.pop(ctx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Credit return recorded successfully')),
-                  );
-                } catch (e) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
-                  );
-                }
-              },
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.positiveColor(context),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-              ),
-              child: Text('confirm'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
-            ),
-          ],
-        ),
-      ),
+      builder: (_) => CreditReturnDialog(retailer: retailer),
     );
   }
 }

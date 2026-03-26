@@ -12,6 +12,8 @@ if (admin.apps.length === 0) {
 const BYBIT_BASE_URL = 'https://api.bybit.com';
 const PAGE_SIZE = 30;
 const REGION = 'asia-east1';
+const SYNC_LOCK_PATH = 'system/locks/bybit_sync';
+const SYNC_LOCK_TTL_MS = 9 * 60 * 1000;
 
 let timeOffsetMs = 0;
 
@@ -191,121 +193,148 @@ function extractPaymentMethodName(json) {
 
 // ── Core Sync Logic ─────────────────────────────────────────────────────
 
+function buildSyncLock(ownerId) {
+  const now = Date.now();
+  return {
+    ownerId,
+    acquiredAt: now,
+    expiresAt: now + SYNC_LOCK_TTL_MS,
+  };
+}
+
+async function acquireSyncLock(db, ownerId) {
+  const lockRef = db.ref(SYNC_LOCK_PATH);
+  const now = Date.now();
+  const result = await lockRef.transaction((current) => {
+    const expiresAt = Number(current && current.expiresAt ? current.expiresAt : 0);
+    if (!current || expiresAt <= now || current.ownerId === ownerId) {
+      return buildSyncLock(ownerId);
+    }
+    return;
+  });
+
+  return result.committed ? result.snapshot.val() : null;
+}
+
+async function releaseSyncLock(db, ownerId) {
+  const lockRef = db.ref(SYNC_LOCK_PATH);
+  await lockRef.transaction((current) => {
+    if (current && current.ownerId === ownerId) {
+      return null;
+    }
+    return;
+  });
+}
+
 async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) {
   console.log(`[Sync] Starting sync cycle (Manual: ${ignoreEnabledFlag})`);
   const db = admin.database();
 
-  const [credsSnap, numbersSnap, syncSnap, banksSnap, configSnap] = await Promise.all([
-    db.ref('system/api_credentials/bybit').once('value'),
-    db.ref('mobile_numbers').once('value'),
-    db.ref('sync_data').once('value'),
-    db.ref('bank_accounts').once('value'),
-    db.ref('system/sync_config/enabled').once('value'),
-  ]);
-
+  const configSnap = await db.ref('system/sync_config/enabled').once('value');
   if (!ignoreEnabledFlag && configSnap.val() !== true) {
     console.log('[Sync] Skipped: Globally disabled in system/sync_config/enabled.');
     return { skippedByConfig: true };
   }
 
-  if (!credsSnap.exists()) {
-    console.error('[Sync] Error: Missing Bybit API credentials in database.');
-    return { error: 'Missing credentials' };
+  const lockOwnerId = `${ignoreEnabledFlag ? 'manual' : 'scheduled'}_${uuidv4()}`;
+  const lock = await acquireSyncLock(db, lockOwnerId);
+  if (!lock) {
+    console.log('[Sync] Skipped: another sync invocation already holds the lock.');
+    return { added: 0, skipped: 0, skippedByLock: true };
   }
 
-  await syncServerTime();
+  try {
+    const [credsSnap, numbersSnap, syncSnap, banksSnap] = await Promise.all([
+      db.ref('system/api_credentials/bybit').once('value'),
+      db.ref('mobile_numbers').once('value'),
+      db.ref('sync_data').once('value'),
+      db.ref('bank_accounts').once('value'),
+    ]);
 
-  const { apiKey, apiSecret } = credsSnap.val();
-  const knownNumbers = [];
-  const phoneToId = {};
-  if (numbersSnap.exists()) {
-    Object.entries(numbersSnap.val()).forEach(([id, n]) => {
-      knownNumbers.push(n.phoneNumber);
-      phoneToId[n.phoneNumber] = id;
-    });
-  }
-
-  const lastSyncedOrderTs = syncSnap.child('lastSyncedOrderTs').val() || 0;
-  let beginTime;
-  if (beginTimeOverride != null) {
-    beginTime = beginTimeOverride;
-    console.log(`[Sync] Using override beginTime: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
-  } else {
-    // Overlap by 5 s so orders sharing the last timestamp are never skipped.
-    // The pre-loaded ID Sets below prevent inserting actual duplicates.
-    beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs - 5000 : Date.now() - (24 * 60 * 60 * 1000);
-  }
-
-  console.log(`[Sync] Fetching orders created after: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
-
-  const orders = await fetchAllOrdersSince(apiKey, apiSecret, beginTime);
-  console.log(`[Sync] Bybit returned ${orders.length} potential new orders.`);
-
-  // Pre-load ALL existing bybitOrderIds in ONE read each to avoid N×2 per-order queries.
-  // Falls back gracefully: if the read fails, the Set is empty and per-order checks will still work.
-  const [existingTxSnap, existingLedgerSnap] = await Promise.all([
-    db.ref('transactions').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
-    db.ref('financial_ledger').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
-  ]);
-
-  const existingTxIds = new Set();
-  if (existingTxSnap && existingTxSnap.exists()) {
-    existingTxSnap.forEach(child => {
-      const id = child.val().bybitOrderId;
-      if (id) existingTxIds.add(id);
-    });
-  }
-
-  const existingLedgerIds = new Set();
-  if (existingLedgerSnap && existingLedgerSnap.exists()) {
-    existingLedgerSnap.forEach(child => {
-      const id = child.val().bybitOrderId;
-      if (id) existingLedgerIds.add(id);
-    });
-  }
-  console.log(`[Sync] Pre-loaded ${existingTxIds.size} tx IDs and ${existingLedgerIds.size} ledger IDs for dedup.`);
-
-  let added = 0;
-  let skipped = 0;
-  // Accumulate the new high-water mark locally; commit ONLY after all writes succeed.
-  let newLastSyncedTs = lastSyncedOrderTs;
-  const numbersToRecalculate = new Set();
-
-  for (const order of orders) {
-    const orderTs = parseInt(order.createTime || order.createDate || 0);
-    const orderId = order.id || order.orderId;
-
-    // Check ledger first (source of truth) using O(1) Set lookup.
-    // If ledger entry exists → fully processed, skip entirely.
-    if (existingLedgerIds.has(orderId)) {
-      skipped++;
-      continue;
+    if (!credsSnap.exists()) {
+      console.error('[Sync] Error: Missing Bybit API credentials in database.');
+      return { error: 'Missing credentials' };
     }
 
-    const details = await fetchOrderDetails(apiKey, apiSecret, orderId) || order;
-    const chatMsgs = await fetchChatMessages(apiKey, apiSecret, orderId);
-    const chatSummary = chatMsgs.map(m => `${m.nickName}: ${m.message || m.content}`).join('\n');
+    await syncServerTime();
 
-    const paymentMethodString = extractPaymentMethodName(details);
-
-    let matchedPhone = findMatchedPhone(chatSummary, knownNumbers);
-    if (!matchedPhone) {
-      matchedPhone = findMatchedPhone(paymentMethodString, knownNumbers);
-    }
-    
-    // Fallback: If still not matched, maybe it's in the initial order object
-    if (!matchedPhone) {
-      const orderPmString = extractPaymentMethodName(order);
-      matchedPhone = findMatchedPhone(orderPmString, knownNumbers);
+    const { apiKey, apiSecret } = credsSnap.val();
+    const knownNumbers = [];
+    const phoneToId = {};
+    if (numbersSnap.exists()) {
+      Object.entries(numbersSnap.val()).forEach(([id, n]) => {
+        knownNumbers.push(n.phoneNumber);
+        phoneToId[n.phoneNumber] = id;
+      });
     }
 
-    let matchedPhoneId = matchedPhone ? phoneToId[matchedPhone] : null;
+    const lastSyncedOrderTs = syncSnap.child('lastSyncedOrderTs').val() || 0;
+    let beginTime;
+    if (beginTimeOverride != null) {
+      beginTime = beginTimeOverride;
+      console.log(`[Sync] Using override beginTime: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
+    } else {
+      beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs - 5000 : Date.now() - (24 * 60 * 60 * 1000);
+    }
 
-    // Additional Fallback for SELL orders:
-    // If we're selling, Bybit doesn't always show the VF number in the seller's payment method string 
-    // depending on the endpoint. If we STILL can't match it, let's assume the default VF number.
-    if (!matchedPhoneId && parseInt(details.side) === 1) {
-      if (numbersSnap.exists()) {
+    console.log(`[Sync] Fetching orders created after: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
+
+    const orders = await fetchAllOrdersSince(apiKey, apiSecret, beginTime);
+    console.log(`[Sync] Bybit returned ${orders.length} potential new orders.`);
+
+    const [existingTxSnap, existingLedgerSnap] = await Promise.all([
+      db.ref('transactions').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
+      db.ref('financial_ledger').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
+    ]);
+
+    const existingTxIds = new Set();
+    if (existingTxSnap && existingTxSnap.exists()) {
+      existingTxSnap.forEach((child) => {
+        const id = child.val().bybitOrderId;
+        if (id) existingTxIds.add(id);
+      });
+    }
+
+    const existingLedgerIds = new Set();
+    if (existingLedgerSnap && existingLedgerSnap.exists()) {
+      existingLedgerSnap.forEach((child) => {
+        const id = child.val().bybitOrderId;
+        if (id) existingLedgerIds.add(id);
+      });
+    }
+    console.log(`[Sync] Pre-loaded ${existingTxIds.size} tx IDs and ${existingLedgerIds.size} ledger IDs for dedup.`);
+
+    let added = 0;
+    let skipped = 0;
+    let newLastSyncedTs = lastSyncedOrderTs;
+    const numbersToRecalculate = new Set();
+
+    for (const order of orders) {
+      const orderTs = parseInt(order.createTime || order.createDate || 0);
+      const orderId = order.id || order.orderId;
+
+      if (existingLedgerIds.has(orderId)) {
+        skipped++;
+        continue;
+      }
+
+      const details = await fetchOrderDetails(apiKey, apiSecret, orderId) || order;
+      const chatMsgs = await fetchChatMessages(apiKey, apiSecret, orderId);
+      const chatSummary = chatMsgs.map((m) => `${m.nickName}: ${m.message || m.content}`).join('\n');
+
+      const paymentMethodString = extractPaymentMethodName(details);
+
+      let matchedPhone = findMatchedPhone(chatSummary, knownNumbers);
+      if (!matchedPhone) {
+        matchedPhone = findMatchedPhone(paymentMethodString, knownNumbers);
+      }
+      if (!matchedPhone) {
+        const orderPmString = extractPaymentMethodName(order);
+        matchedPhone = findMatchedPhone(orderPmString, knownNumbers);
+      }
+
+      let matchedPhoneId = matchedPhone ? phoneToId[matchedPhone] : null;
+      if (!matchedPhoneId && parseInt(details.side) === 1 && numbersSnap.exists()) {
         const numbers = Object.entries(numbersSnap.val());
         const defaultNum = numbers.find(([id, n]) => n.isDefault);
         if (defaultNum) {
@@ -313,45 +342,41 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
           matchedPhone = defaultNum[1].phoneNumber;
         }
       }
-    }
 
-    const side = parseInt(details.side);
-    const amount = parseFloat(details.amount);
-    const price = parseFloat(details.price);
-    const quantity = parseFloat(details.quantity);
-    const currency = details.currencyId || 'EGP';
-    const timestamp = new Date(orderTs).toISOString();
+      const side = parseInt(details.side);
+      const amount = parseFloat(details.amount);
+      const price = parseFloat(details.price);
+      const quantity = parseFloat(details.quantity);
+      const currency = details.currencyId || 'EGP';
+      const timestamp = new Date(orderTs).toISOString();
 
-    const updates = {};
-    const txId = uuidv4();
-    const ledgerId = uuidv4();
+      const updates = {};
+      const txId = uuidv4();
+      const ledgerId = uuidv4();
 
-    // Pre-compute bank info for BUY orders so we can embed it in the ledger object
-    // (Firebase multi-path update forbids setting both a path and its children separately)
-    let fromId = null;
-    let fromLabel = side === 0 ? 'Bank' : 'USD Exchange';
-    if (side === 0) {
-      const isVodafoneCash = paymentMethodString.toLowerCase().includes('vodafone');
+      let fromId = null;
+      let fromLabel = side === 0 ? 'Bank' : 'USD Exchange';
+      if (side === 0) {
+        const isVodafoneCash = paymentMethodString.toLowerCase().includes('vodafone');
 
-      if (isVodafoneCash) {
-            let targetId = matchedPhoneId;
-            let targetPhone = matchedPhone;
+        if (isVodafoneCash) {
+          let targetId = matchedPhoneId;
+          let targetPhone = matchedPhone;
 
-            // Fallback to default number ONLY if we couldn't match from chat
-            if (!targetId && numbersSnap.exists()) {
-              const numbers = Object.entries(numbersSnap.val());
-              const defaultNum = numbers.find(([id, n]) => n.isDefault);
-              if (defaultNum) {
-                targetId = defaultNum[0];
-                targetPhone = defaultNum[1].phoneNumber;
-              }
+          if (!targetId && numbersSnap.exists()) {
+            const numbers = Object.entries(numbersSnap.val());
+            const defaultNum = numbers.find(([id, n]) => n.isDefault);
+            if (defaultNum) {
+              targetId = defaultNum[0];
+              targetPhone = defaultNum[1].phoneNumber;
             }
+          }
 
-            if (targetId && targetPhone) {
-              fromId = targetId;
-              fromLabel = targetPhone;
-              matchedPhoneId = targetId;
-              matchedPhone = targetPhone;
+          if (targetId && targetPhone) {
+            fromId = targetId;
+            fromLabel = targetPhone;
+            matchedPhoneId = targetId;
+            matchedPhone = targetPhone;
 
             const now = Date.now();
             const d = new Date(now);
@@ -366,110 +391,118 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
               updates[`mobile_numbers/${matchedPhoneId}/outMonthlyUsed`] = admin.database.ServerValue.increment(amount);
             }
             updates[`mobile_numbers/${matchedPhoneId}/lastUpdatedAt`] = new Date().toISOString();
-            } else {
-              fromId = null;
-              fromLabel = 'Vodafone Cash (Unassigned)';
+          } else {
+            fromId = null;
+            fromLabel = 'Vodafone Cash (Unassigned)';
+          }
+        } else {
+          const banks = banksSnap.val();
+          if (banks) {
+            const defaultBank = Object.values(banks).find((b) => b.isDefaultForBuy);
+            if (defaultBank) {
+              fromId = defaultBank.id;
+              fromLabel = defaultBank.bankName;
+              updates[`bank_accounts/${defaultBank.id}/balance`] = admin.database.ServerValue.increment(-amount);
             }
-      } else {
-        const banks = banksSnap.val();
-        if (banks) {
-          const defaultBank = Object.values(banks).find(b => b.isDefaultForBuy);
-          if (defaultBank) {
-            fromId = defaultBank.id;
-            fromLabel = defaultBank.bankName;
-            updates[`bank_accounts/${defaultBank.id}/balance`] = admin.database.ServerValue.increment(-amount);
           }
         }
       }
-    }
 
-    // Only write the transaction if not already present in either source.
-    if (!existingTxIds.has(orderId)) {
-      updates[`transactions/${txId}`] = {
-        id: txId,
-        phoneNumber: matchedPhone || null,
-        amount, currency, timestamp,
+      if (!existingTxIds.has(orderId)) {
+        updates[`transactions/${txId}`] = {
+          id: txId,
+          phoneNumber: matchedPhone || null,
+          amount,
+          currency,
+          timestamp,
+          bybitOrderId: orderId,
+          status: 'completed',
+          paymentMethod: paymentMethodString === 'Unknown' ? 'Bybit P2P' : paymentMethodString,
+          side,
+          chatHistory: chatSummary,
+          price,
+          quantity,
+          token: details.tokenId || 'USDT',
+        };
+      }
+
+      updates[`financial_ledger/${ledgerId}`] = {
+        id: ledgerId,
+        type: side === 0 ? 'BUY_USDT' : 'SELL_USDT',
+        amount,
+        usdtPrice: price,
+        usdtQuantity: quantity,
+        fromId,
+        fromLabel,
+        toLabel: side === 0 ? 'USD Exchange' : (matchedPhone || 'Vodafone Cash'),
+        toId: side === 1 ? matchedPhoneId : null,
         bybitOrderId: orderId,
-        status: 'completed',
-        paymentMethod: paymentMethodString === 'Unknown' ? 'Bybit P2P' : paymentMethodString,
-        side, chatHistory: chatSummary,
-        price, quantity, token: details.tokenId || 'USDT'
+        createdByUid: 'server_sync',
+        timestamp: orderTs,
       };
+
+      if (side === 0) {
+        updates['usd_exchange/usdtBalance'] = admin.database.ServerValue.increment(quantity);
+      } else {
+        updates['usd_exchange/usdtBalance'] = admin.database.ServerValue.increment(-quantity);
+        if (matchedPhoneId) {
+          const now = Date.now();
+          const d = new Date(now);
+          const todayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+          const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
+          updates[`mobile_numbers/${matchedPhoneId}/inTotalUsed`] = admin.database.ServerValue.increment(amount);
+          if (orderTs >= todayStart) {
+            updates[`mobile_numbers/${matchedPhoneId}/inDailyUsed`] = admin.database.ServerValue.increment(amount);
+          }
+          if (orderTs >= monthStart) {
+            updates[`mobile_numbers/${matchedPhoneId}/inMonthlyUsed`] = admin.database.ServerValue.increment(amount);
+          }
+          updates[`mobile_numbers/${matchedPhoneId}/lastUpdatedAt`] = new Date().toISOString();
+        }
+      }
+      updates['usd_exchange/lastPrice'] = price;
+      updates['usd_exchange/lastUpdatedAt'] = new Date().toISOString();
+
+      await db.ref().update(updates);
+
+      existingLedgerIds.add(orderId);
+      existingTxIds.add(orderId);
+      if (orderTs > newLastSyncedTs) newLastSyncedTs = orderTs;
+
+      if (matchedPhone) numbersToRecalculate.add(matchedPhone);
+      added++;
     }
 
-    updates[`financial_ledger/${ledgerId}`] = {
-      id: ledgerId,
-      type: side === 0 ? 'BUY_USDT' : 'SELL_USDT',
-      amount, usdtPrice: price, usdtQuantity: quantity,
-      fromId: fromId,
-      fromLabel: fromLabel,
-      toLabel: side === 0 ? 'USD Exchange' : (matchedPhone || 'Vodafone Cash'),
-      toId: side === 1 ? matchedPhoneId : null,
-      bybitOrderId: orderId,
-      createdByUid: 'server_sync',
-      timestamp: orderTs
-    };
+    const safeNewMarker = Math.max(newLastSyncedTs, beginTime);
+    if (safeNewMarker < lastSyncedOrderTs) {
+      console.error(`[Sync] CRITICAL: Marker would move backward! Safe: ${safeNewMarker}, Old: ${lastSyncedOrderTs}. Keeping old.`);
+    }
 
-    if (side === 0) {
-      updates['usd_exchange/usdtBalance'] = admin.database.ServerValue.increment(quantity);
-    } else {
-      updates['usd_exchange/usdtBalance'] = admin.database.ServerValue.increment(-quantity);
-      // SELL: We received EGP into the matched VF number — increment its usage/balance
-      if (matchedPhoneId) {
-        const now = Date.now();
-        const d = new Date(now);
-        const todayStart = new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
-        const monthStart = new Date(d.getFullYear(), d.getMonth(), 1).getTime();
-        updates[`mobile_numbers/${matchedPhoneId}/inTotalUsed`] = admin.database.ServerValue.increment(amount);
-        if (orderTs >= todayStart) {
-          updates[`mobile_numbers/${matchedPhoneId}/inDailyUsed`] = admin.database.ServerValue.increment(amount);
-        }
-        if (orderTs >= monthStart) {
-          updates[`mobile_numbers/${matchedPhoneId}/inMonthlyUsed`] = admin.database.ServerValue.increment(amount);
-        }
-        updates[`mobile_numbers/${matchedPhoneId}/lastUpdatedAt`] = new Date().toISOString();
+    await db.ref('sync_data').update({
+      lastSyncedOrderTs: Math.max(safeNewMarker, lastSyncedOrderTs),
+      lastSyncTime: Date.now(),
+      lastServerSyncStatus: `Success: Added ${added}, Skipped ${skipped} at ${new Date().toISOString()}`,
+    });
+
+    console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${Math.max(safeNewMarker, lastSyncedOrderTs)}`);
+
+    for (const phone of numbersToRecalculate) {
+      try {
+        await recalculateUsage(phone);
+      } catch (e) {
+        console.error(`Failed to recalculate usage for ${phone}:`, e);
       }
     }
-    updates['usd_exchange/lastPrice'] = price;
-    updates['usd_exchange/lastUpdatedAt'] = new Date().toISOString();
 
-    await db.ref().update(updates);
-
-    // Mark these IDs as known so later orders in the same batch don't try to re-insert them.
-    existingLedgerIds.add(orderId);
-    existingTxIds.add(orderId);
-
-    // Advance the local high-water mark AFTER the write succeeds.
-    if (orderTs > newLastSyncedTs) newLastSyncedTs = orderTs;
-
-    if (matchedPhone) numbersToRecalculate.add(matchedPhone);
-    added++;
-  }
-
-  const safeNewMarker = Math.max(newLastSyncedTs, beginTime);
-  if (safeNewMarker < lastSyncedOrderTs) {
-    console.error(`[Sync] CRITICAL: Marker would move backward! Safe: ${safeNewMarker}, Old: ${lastSyncedOrderTs}. Keeping old.`);
-  }
-
-  await db.ref('sync_data').update({
-    lastSyncedOrderTs: Math.max(safeNewMarker, lastSyncedOrderTs),
-    lastSyncTime: Date.now(),
-    lastServerSyncStatus: `Success: Added ${added}, Skipped ${skipped} at ${new Date().toISOString()}`
-  });
-
-  console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${Math.max(safeNewMarker, lastSyncedOrderTs)}`);
-
-  for (const phone of numbersToRecalculate) {
+    return { added, skipped };
+  } finally {
     try {
-        await recalculateUsage(phone);
+      await releaseSyncLock(db, lockOwnerId);
     } catch (e) {
-        console.error(`Failed to recalculate usage for ${phone}:`, e);
+      console.error('[Sync] Failed to release sync lock:', e);
     }
   }
-
-  return { added, skipped };
 }
-
 async function recalculateUsage(phoneNumber) {
     const db = admin.database();
     const [numSnap, txSnap] = await Promise.all([
@@ -539,10 +572,7 @@ exports.syncBybitOrders = onSchedule({
   region: REGION,
   timeoutSeconds: 300,
 }, async (event) => {
-  await processSync(false);
-  // achievng 30s frequency
-  await new Promise(resolve => setTimeout(resolve, 30000));
-  await processSync(false);
+  return await processSync(false);
 });
 
 exports.manualSyncBybit = onCall({ region: REGION }, async (request) => {

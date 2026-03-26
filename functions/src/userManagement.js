@@ -22,7 +22,7 @@ exports.createUserAccount = onCall({ region: REGION }, async (request) => {
   const password = request.data?.password?.toString() || '';
   const name = request.data?.name?.toString().trim();
   const role = request.data?.role?.toString().trim().toUpperCase();
-  const allowedRoles = new Set(['ADMIN', 'FINANCE', 'COLLECTOR', 'OPERATOR']);
+  const allowedRoles = new Set(['ADMIN', 'FINANCE', 'COLLECTOR']);
 
   if (!email || !name || !allowedRoles.has(role)) {
     throw new HttpsError('invalid-argument', 'Invalid user data.');

@@ -1,16 +1,16 @@
 import 'package:flutter/material.dart';
-import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
+import '../../theme/app_theme.dart';
 import '../../providers/distribution_provider.dart';
 import '../../providers/app_provider.dart';
+import '../../providers/auth_provider.dart';
 import '../../models/retailer.dart';
-import '../../models/models.dart';
 
 class CreditReturnDialog extends StatefulWidget {
   final Retailer retailer;
 
-  const CreditReturnDialog({Key? key, required this.retailer}) : super(key: key);
+  const CreditReturnDialog({super.key, required this.retailer});
 
   @override
   State<CreditReturnDialog> createState() => _CreditReturnDialogState();
@@ -21,15 +21,16 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
   final _feesController = TextEditingController();
   final _notesController = TextEditingController();
   final _feeRateController = TextEditingController(text: '7.0');
-  
+
   String? _selectedVfNumberId;
-  double _feeRate = 7.0; // Default: 7 EGP per 1000 EGP
+  double _feeRate = 7.0;
 
   @override
   void initState() {
     super.initState();
-    // Pre-calculate fees if amount changes
+    _amountController.text = widget.retailer.pendingDebt.toStringAsFixed(0);
     _amountController.addListener(_updateFees);
+    _updateFees();
   }
 
   void _updateFees() {
@@ -50,14 +51,19 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
 
   @override
   Widget build(BuildContext context) {
-    final dist = context.read<DistributionProvider>();
+    final dist = context.watch<DistributionProvider>();
     final app = context.watch<AppProvider>();
     final vfNumbers = app.mobileNumbers;
+    final isSubmitting = dist.isCreditReturning;
+    final retailer = dist.retailers.firstWhere(
+      (item) => item.id == widget.retailer.id,
+      orElse: () => widget.retailer,
+    );
+    final remainingDebt = retailer.pendingDebt;
 
     if (_selectedVfNumberId == null && vfNumbers.isNotEmpty) {
-      // Try to find default number first
-      final defaultNum = vfNumbers.any((n) => n.isDefault) 
-          ? vfNumbers.firstWhere((n) => n.isDefault) 
+      final defaultNum = vfNumbers.any((n) => n.isDefault)
+          ? vfNumbers.firstWhere((n) => n.isDefault)
           : vfNumbers.first;
       _selectedVfNumberId = defaultNum.id;
     }
@@ -77,7 +83,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                   Container(
                     padding: const EdgeInsets.all(8),
                     decoration: BoxDecoration(
-                      color: const Color(0xFFE63946).withOpacity(0.12),
+                      color: const Color(0xFFE63946).withValues(alpha: 0.12),
                       borderRadius: BorderRadius.circular(10),
                     ),
                     child: const Icon(Icons.keyboard_return, color: Color(0xFFE63946), size: 24),
@@ -92,7 +98,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                           style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 18),
                         ),
                         Text(
-                          'Settling debt for ${widget.retailer.name}',
+                          'Settling debt for ${retailer.name}',
                           style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                         ),
                       ],
@@ -101,8 +107,27 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                 ],
               ),
               const SizedBox(height: 24),
-              
-              // VF Number Selection
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: AppTheme.warningColor(context).withValues(alpha: 0.08),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: AppTheme.warningColor(context).withValues(alpha: 0.2)),
+                ),
+                child: Row(
+                  children: [
+                    Icon(Icons.warning_amber_rounded, color: AppTheme.warningColor(context), size: 18),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Remaining debt: ${remainingDebt.toStringAsFixed(2)} EGP',
+                        style: TextStyle(color: AppTheme.warningColor(context), fontWeight: FontWeight.bold, fontSize: 13),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
               Text('Target VF Number', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 13)),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
@@ -119,20 +144,17 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                   value: n.id,
                   child: Text(n.phoneNumber),
                 )).toList(),
-                onChanged: (v) => setState(() => _selectedVfNumberId = v),
+                onChanged: isSubmitting ? null : (v) => setState(() => _selectedVfNumberId = v),
               ),
               const SizedBox(height: 16),
-
-              // Amount
               _field(
                 controller: _amountController,
-                label: 'Debt Amount to Deduct',
+                label: 'Return Amount',
                 icon: Icons.money_off,
                 keyboard: TextInputType.number,
                 hint: 'e.g. 5000',
+                enabled: !isSubmitting,
               ),
-              
-              // Fee Rate & Fee Amount
               Row(
                 children: [
                   Expanded(
@@ -143,6 +165,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                         const SizedBox(height: 6),
                         TextField(
                           controller: _feeRateController,
+                          enabled: !isSubmitting,
                           style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14),
                           keyboardType: const TextInputType.numberWithOptions(decimal: true),
                           decoration: InputDecoration(
@@ -168,19 +191,18 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                       label: 'Calculated Fee',
                       icon: Icons.add_chart,
                       keyboard: TextInputType.number,
+                      enabled: !isSubmitting,
                     ),
                   ),
                 ],
               ),
               const SizedBox(height: 16),
-
-              // Summary Box
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF4ADE80).withOpacity(0.08),
+                  color: const Color(0xFF4ADE80).withValues(alpha: 0.08),
                   borderRadius: BorderRadius.circular(12),
-                  border: Border.all(color: const Color(0xFF4ADE80).withOpacity(0.2)),
+                  border: Border.all(color: const Color(0xFF4ADE80).withValues(alpha: 0.2)),
                 ),
                 child: Column(
                   children: [
@@ -191,25 +213,24 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-
               _field(
                 controller: _notesController,
                 label: 'Notes (Optional)',
                 icon: Icons.notes,
                 hint: 'Transaction details...',
+                enabled: !isSubmitting,
               ),
-
               const SizedBox(height: 24),
               Row(
                 mainAxisAlignment: MainAxisAlignment.end,
                 children: [
                   TextButton(
-                    onPressed: () => Navigator.pop(context),
-                    child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context))),
+                    onPressed: isSubmitting ? null : () => Navigator.pop(context),
+                    child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
                   ),
                   const SizedBox(width: 12),
                   ElevatedButton(
-                    onPressed: _submit,
+                    onPressed: isSubmitting ? null : () => _submit(retailer),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFE63946),
                       foregroundColor: AppTheme.textPrimaryColor(context),
@@ -217,7 +238,13 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
                     ),
-                    child: const Text('Confirm Return', style: TextStyle(fontWeight: FontWeight.bold)),
+                    child: isSubmitting
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                          )
+                        : const Text('Confirm Return', style: TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -255,6 +282,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
     required IconData icon,
     TextInputType keyboard = TextInputType.text,
     String? hint,
+    bool enabled = true,
   }) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 16),
@@ -266,6 +294,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
           TextField(
             controller: controller,
             keyboardType: keyboard,
+            enabled: enabled,
             style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 14),
             decoration: InputDecoration(
               hintText: hint,
@@ -282,13 +311,24 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
     );
   }
 
-  void _submit() {
+  Future<void> _submit(Retailer retailer) async {
     final amount = double.tryParse(_amountController.text) ?? 0.0;
     final fees = double.tryParse(_feesController.text) ?? 0.0;
-    
+    final remainingDebt = retailer.pendingDebt;
+
     if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Please enter a valid amount'), backgroundColor: Colors.red),
+      );
+      return;
+    }
+
+    if ((amount - remainingDebt) > 0.01) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Return amount cannot exceed remaining debt (${remainingDebt.toStringAsFixed(2)} EGP).'),
+          backgroundColor: Colors.red,
+        ),
       );
       return;
     }
@@ -301,18 +341,29 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
     }
 
     final app = context.read<AppProvider>();
+    final auth = context.read<AuthProvider>();
     final vfNum = app.mobileNumbers.firstWhere((n) => n.id == _selectedVfNumberId);
 
-    context.read<DistributionProvider>().creditReturn(
-      retailerId: widget.retailer.id,
-      vfNumberId: vfNum.id,
-      vfPhone: vfNum.phoneNumber,
-      amount: amount,
-      fees: fees,
-      createdByUid: 'admin', 
-      notes: _notesController.text.trim(),
-    );
-
-    Navigator.pop(context);
+    try {
+      await context.read<DistributionProvider>().creditReturn(
+        retailerId: retailer.id,
+        vfNumberId: vfNum.id,
+        vfPhone: vfNum.phoneNumber,
+        amount: amount,
+        fees: fees,
+        createdByUid: auth.currentUser?.uid ?? 'admin',
+        notes: _notesController.text.trim(),
+      );
+      if (!mounted) return;
+      Navigator.pop(context);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Credit return recorded successfully'), backgroundColor: Colors.green),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+      );
+    }
   }
 }

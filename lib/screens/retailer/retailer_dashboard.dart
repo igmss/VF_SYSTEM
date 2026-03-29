@@ -3,12 +3,14 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:intl/intl.dart';
 
 import '../../models/retailer_assignment_request.dart';
 import '../../providers/auth_provider.dart';
 import '../../services/retailer_portal_service.dart';
 import '../../theme/app_theme.dart';
 import '../../widgets/proof_image_viewer.dart';
+import 'retailer_components.dart';
 
 class RetailerDashboard extends StatefulWidget {
   const RetailerDashboard({super.key});
@@ -27,6 +29,12 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
 
   StreamSubscription<List<RetailerAssignmentRequest>>? _reqSub;
   List<RetailerAssignmentRequest> _requests = [];
+  
+  // Date Filtering
+  DateTimeRange _dateRange = DateTimeRange(
+    start: DateTime(DateTime.now().year, DateTime.now().month, DateTime.now().day),
+    end: DateTime.now(),
+  );
 
   @override
   void initState() {
@@ -39,10 +47,12 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
     final uid = auth.currentUser?.uid;
     final rid = auth.currentUser?.retailerId;
     if (uid == null || rid == null || rid.isEmpty) {
-      setState(() {
-        _loading = false;
-        _loadError = 'retailer_profile_missing'.tr();
-      });
+      if (mounted) {
+        setState(() {
+          _loading = false;
+          _loadError = 'retailer_profile_missing'.tr();
+        });
+      }
       return;
     }
 
@@ -55,13 +65,17 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
   }
 
   Future<void> _refreshPortal() async {
-    final range = _todayLocalRange();
-    setState(() {
-      _loading = true;
-      _loadError = null;
-    });
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
     try {
-      final data = await _portal.getPortalData(startMs: range.$1, endMs: range.$2);
+      final data = await _portal.getPortalData(
+        startMs: _dateRange.start.millisecondsSinceEpoch,
+        endMs: _dateRange.end.millisecondsSinceEpoch,
+      );
       if (!mounted) return;
       setState(() {
         _portalData = data;
@@ -76,12 +90,30 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
     }
   }
 
-  /// Local calendar day [start, end] in ms.
-  (int, int) _todayLocalRange() {
-    final n = DateTime.now();
-    final start = DateTime(n.year, n.month, n.day);
-    final end = start.add(const Duration(days: 1)).subtract(const Duration(milliseconds: 1));
-    return (start.millisecondsSinceEpoch, end.millisecondsSinceEpoch);
+  Future<void> _selectDateRange() async {
+    final picked = await showDateRangePicker(
+      context: context,
+      initialDateRange: _dateRange,
+      firstDate: DateTime(2024),
+      lastDate: DateTime.now().add(const Duration(days: 1)),
+      builder: (context, child) {
+        return Theme(
+          data: Theme.of(context).copyWith(
+            colorScheme: ColorScheme.dark(
+              primary: AppTheme.accent,
+              onPrimary: Colors.white,
+              surface: AppTheme.surfaceColor(context),
+              onSurface: AppTheme.textPrimaryColor(context),
+            ),
+          ),
+          child: child!,
+        );
+      },
+    );
+    if (picked != null && picked != _dateRange) {
+      setState(() => _dateRange = picked);
+      _refreshPortal();
+    }
   }
 
   @override
@@ -103,6 +135,7 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
       context: context,
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surfaceColor(context),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         title: Text('new_assignment_request'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
         content: SingleChildScrollView(
           child: Column(
@@ -114,8 +147,7 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
                 style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
                 decoration: InputDecoration(
                   labelText: 'requested_amount_egp'.tr(),
-                  filled: true,
-                  fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                  prefixIcon: const Icon(Icons.monetization_on_outlined),
                 ),
               ),
               const SizedBox(height: 12),
@@ -126,8 +158,7 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
                 decoration: InputDecoration(
                   labelText: 'vf_number_for_assignment'.tr(),
                   hintText: '01xxxxxxxxx',
-                  filled: true,
-                  fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                  prefixIcon: const Icon(Icons.phone_android_outlined),
                 ),
               ),
               const SizedBox(height: 12),
@@ -137,8 +168,7 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
                 style: TextStyle(color: AppTheme.textPrimaryColor(context)),
                 decoration: InputDecoration(
                   labelText: 'notes'.tr(),
-                  filled: true,
-                  fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                  prefixIcon: const Icon(Icons.note_alt_outlined),
                 ),
               ),
             ],
@@ -148,7 +178,6 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('cancel'.tr())),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent, foregroundColor: Colors.white),
             child: Text('submit_request'.tr()),
           ),
         ],
@@ -187,6 +216,7 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
     final name = auth.currentUser?.name ?? 'Retailer';
+    final rid = auth.currentUser?.retailerId ?? '';
 
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg(context),
@@ -202,6 +232,7 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
+              // Premium Header
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 12, 8),
                 child: Row(
@@ -210,32 +241,72 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          Text('welcome_user'.tr(args: [name]), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 20, fontWeight: FontWeight.w800)),
-                          const SizedBox(height: 4),
-                          Text('retailer_portal_subtitle'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
+                          Text(
+                            'welcome_user'.tr(args: [name]), 
+                            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 22, fontWeight: FontWeight.w900, letterSpacing: -0.5)
+                          ),
+                          const SizedBox(height: 2),
+                          Text('Retailer Code: $rid', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
                     IconButton(
-                      icon: Icon(Icons.refresh, color: AppTheme.textMutedColor(context)),
-                      onPressed: _refreshPortal,
-                    ),
-                    IconButton(
-                      icon: Icon(Icons.logout, color: AppTheme.textMutedColor(context)),
+                      icon: Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(Icons.logout, color: AppTheme.textMutedColor(context), size: 20),
+                      ),
                       onPressed: () => context.read<AuthProvider>().signOut(),
                     ),
                   ],
                 ),
               ),
+
+              // Date Range Picker Bar
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: InkWell(
+                  onTap: _selectDateRange,
+                  borderRadius: BorderRadius.circular(14),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: AppTheme.surfaceColor(context).withValues(alpha: 0.5),
+                      borderRadius: BorderRadius.circular(14),
+                      border: Border.all(color: AppTheme.lineColor(context).withValues(alpha: 0.5)),
+                    ),
+                    child: Row(
+                      children: [
+                        Icon(Icons.calendar_today_outlined, size: 16, color: AppTheme.accent),
+                        const SizedBox(width: 12),
+                        Text(
+                          '${DateFormat.yMMMd().format(_dateRange.start)} - ${DateFormat.yMMMd().format(_dateRange.end)}',
+                          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w700, fontSize: 13),
+                        ),
+                        const Spacer(),
+                        Icon(Icons.arrow_drop_down, color: AppTheme.textMutedColor(context)),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+
               _buildTabs(context),
+              
               Expanded(
                 child: _loadError != null
                     ? Center(child: Padding(padding: const EdgeInsets.all(24), child: Text(_loadError!, textAlign: TextAlign.center)))
-                    : _tab == 0
-                        ? _OverviewTab(portalData: _portalData, loading: _loading, onRefresh: _refreshPortal)
-                        : _tab == 1
-                            ? _ActivityTab(portalData: _portalData, loading: _loading)
-                            : _RequestsTab(requests: _requests, onNewRequest: _openNewRequestDialog),
+                    : AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 300),
+                        child: _tab == 0
+                            ? _OverviewTab(portalData: _portalData, loading: _loading, onRefresh: _refreshPortal)
+                            : _tab == 1
+                                ? _ActivityTab(portalData: _portalData, loading: _loading)
+                                : _RequestsTab(requests: _requests, onNewRequest: _openNewRequestDialog),
+                      ),
               ),
             ],
           ),
@@ -246,46 +317,51 @@ class _RetailerDashboardState extends State<RetailerDashboard> {
 
   Widget _buildTabs(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: Row(
-        children: [
-          _TabChip(label: 'tab_overview'.tr(), selected: _tab == 0, onTap: () => setState(() => _tab = 0)),
-          const SizedBox(width: 8),
-          _TabChip(label: 'tab_activity'.tr(), selected: _tab == 1, onTap: () => setState(() => _tab = 1)),
-          const SizedBox(width: 8),
-          _TabChip(label: 'tab_requests'.tr(), selected: _tab == 2, onTap: () => setState(() => _tab = 2)),
-        ],
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+      child: Container(
+        padding: const EdgeInsets.all(4),
+        decoration: BoxDecoration(
+          color: AppTheme.surfaceColor(context).withValues(alpha: 0.5),
+          borderRadius: BorderRadius.circular(18),
+        ),
+        child: Row(
+          children: [
+            _TabItem(label: 'Dashboard', selected: _tab == 0, onTap: () => setState(() => _tab = 0)),
+            _TabItem(label: 'Finance', selected: _tab == 1, onTap: () => setState(() => _tab = 1)),
+            _TabItem(label: 'Requests', selected: _tab == 2, onTap: () => setState(() => _tab = 2)),
+          ],
+        ),
       ),
     );
   }
 }
 
-class _TabChip extends StatelessWidget {
+class _TabItem extends StatelessWidget {
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
-  const _TabChip({required this.label, required this.selected, required this.onTap});
+  const _TabItem({required this.label, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
     return Expanded(
-      child: Material(
-        color: selected ? AppTheme.accent.withValues(alpha: 0.2) : AppTheme.surfaceColor(context).withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 12),
-            child: Text(
-              label,
-              textAlign: TextAlign.center,
-              style: TextStyle(
-                color: selected ? AppTheme.accent : AppTheme.textMutedColor(context),
-                fontWeight: FontWeight.w700,
-                fontSize: 13,
-              ),
+      child: GestureDetector(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 250),
+          padding: const EdgeInsets.symmetric(vertical: 10),
+          decoration: BoxDecoration(
+            color: selected ? AppTheme.accent : Colors.transparent,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Text(
+            label,
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: selected ? Colors.white : AppTheme.textMutedColor(context),
+              fontWeight: FontWeight.w800,
+              fontSize: 12,
             ),
           ),
         ),
@@ -307,40 +383,50 @@ class _OverviewTab extends StatelessWidget {
       return const Center(child: CircularProgressIndicator());
     }
     final r = portalData?['retailer'];
-    if (r is! Map) {
-      return Center(child: Text('no_data'.tr()));
-    }
+    if (r is! Map) return Center(child: Text('no_data'.tr()));
+    
     final m = Map<String, dynamic>.from(r);
     double d(dynamic v) => v is num ? v.toDouble() : double.tryParse(v.toString()) ?? 0;
 
     final assigned = d(m['totalAssigned']);
     final collected = d(m['totalCollected']);
     final credit = d(m['credit']);
-    final pending = (assigned - collected);
-    final debt = pending > 0 ? pending : 0.0;
+    final debt = (assigned - collected).clamp(0, double.infinity);
 
     return RefreshIndicator(
       onRefresh: onRefresh,
       child: ListView(
-        padding: const EdgeInsets.all(20),
+        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
         children: [
-          _Card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('business_snapshot'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 16)),
-                const SizedBox(height: 16),
-                _RowMetric(label: 'assigned'.tr(), value: assigned),
-                _RowMetric(label: 'collected'.tr(), value: collected),
-                _RowMetric(label: 'debt'.tr(), value: debt),
-                _RowMetric(label: 'credit'.tr(), value: credit),
-              ],
-            ),
-          ),
-          const SizedBox(height: 12),
+          ReconciliationSummary(assigned: assigned, collected: collected, debt: debt.toDouble()),
+          const SizedBox(height: 24),
+          
           Text(
-            'retailer_daily_hint'.tr(),
-            style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
+            'operational_stats'.tr(), 
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 16)
+          ),
+          const SizedBox(height: 16),
+          
+          GridView.count(
+            crossAxisCount: 2,
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            mainAxisSpacing: 16,
+            crossAxisSpacing: 16,
+            childAspectRatio: 1.3,
+            children: [
+              StatTile(label: 'Assigned', value: assigned, icon: Icons.assignment_outlined, color: Colors.blueAccent),
+              StatTile(label: 'Collected', value: collected, icon: Icons.payments_outlined, color: AppTheme.positiveColor(context)),
+              StatTile(label: 'Available Owed', value: debt.toDouble(), icon: Icons.account_balance_wallet_outlined, color: Colors.orangeAccent),
+              StatTile(label: 'Your Credit', value: credit, icon: Icons.stars_rounded, color: Colors.purpleAccent),
+            ],
+          ),
+          
+          const SizedBox(height: 24),
+          _InfoCard(
+            icon: Icons.lightbulb_outline,
+            title: 'daily_reconciliation_tip'.tr(),
+            subtitle: 'retailer_daily_hint'.tr(),
           ),
         ],
       ),
@@ -361,11 +447,18 @@ class _ActivityTab extends StatelessWidget {
     }
     final raw = portalData?['activity'];
     if (raw is! List || raw.isEmpty) {
-      return Center(child: Text('no_activity_period'.tr()));
+      return Center(child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Icon(Icons.history_toggle_off, size: 64, color: AppTheme.textMutedColor(context).withValues(alpha: 0.2)),
+          const SizedBox(height: 16),
+          Text('no_activity_period'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
+        ],
+      ));
     }
-    final fmt = DateFormat.yMMMd().add_Hm();
+    
     return ListView.builder(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(20),
       itemCount: raw.length,
       itemBuilder: (context, i) {
         final item = raw[i];
@@ -374,97 +467,79 @@ class _ActivityTab extends StatelessWidget {
         final ts = map['timestamp'];
         final t = ts is int ? DateTime.fromMillisecondsSinceEpoch(ts) : DateTime.tryParse(ts?.toString() ?? '') ?? DateTime.now();
         final type = map['type']?.toString() ?? '';
-        final amount = map['amount'];
-        return Padding(
-          padding: const EdgeInsets.only(bottom: 10),
-          child: _Card(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(type, style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w800, fontSize: 13)),
-                const SizedBox(height: 4),
-                Text('${'amount'.tr()}: $amount EGP', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600)),
-                const SizedBox(height: 4),
-                Text(fmt.format(t), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
-              ],
-            ),
-          ),
+        final amount = (map['amount'] is num) ? (map['amount'] as num).toDouble() : 0.0;
+        
+        return TransactionRow(
+          type: type,
+          amount: amount,
+          timestamp: t,
         );
       },
     );
   }
 }
 
-class _RequestsTab extends StatelessWidget {
+class _RequestsTab extends StatefulWidget {
   final List<RetailerAssignmentRequest> requests;
   final VoidCallback onNewRequest;
 
   const _RequestsTab({required this.requests, required this.onNewRequest});
 
   @override
+  State<_RequestsTab> createState() => _RequestsTabState();
+}
+
+class _RequestsTabState extends State<_RequestsTab> {
+  String _filter = 'ALL';
+
+  @override
   Widget build(BuildContext context) {
-    final fmt = DateFormat.yMMMd().add_Hm();
+    final filtered = widget.requests.where((r) => _filter == 'ALL' || r.status == _filter).toList();
+    
     return Column(
       children: [
+        // Filter Chips
         Padding(
-          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
-          child: SizedBox(
-            width: double.infinity,
-            child: ElevatedButton.icon(
-              onPressed: onNewRequest,
-              icon: const Icon(Icons.add),
-              label: Text('new_assignment_request'.tr()),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.accent,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              ),
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+          child: SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: [
+                _StatusChip(label: 'All', selected: _filter == 'ALL', onTap: () => setState(() => _filter = 'ALL')),
+                const SizedBox(width: 8),
+                _StatusChip(label: 'Pending', selected: _filter == 'PENDING', onTap: () => setState(() => _filter = 'PENDING')),
+                const SizedBox(width: 8),
+                _StatusChip(label: 'Live', selected: _filter == 'PROCESSING', onTap: () => setState(() => _filter = 'PROCESSING')),
+                const SizedBox(width: 8),
+                _StatusChip(label: 'Done', selected: _filter == 'COMPLETED', onTap: () => setState(() => _filter = 'COMPLETED')),
+              ],
             ),
           ),
         ),
+
+        // Add Button
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 12),
+          child: ElevatedButton.icon(
+            onPressed: widget.onNewRequest,
+            icon: const Icon(Icons.add_circle_outline, size: 20),
+            label: Text('new_assignment_request'.tr(), style: const TextStyle(fontWeight: FontWeight.w800)),
+            style: ElevatedButton.styleFrom(
+              minimumSize: const Size(double.infinity, 56),
+              backgroundColor: AppTheme.accent,
+            ),
+          ),
+        ),
+
         Expanded(
-          child: requests.isEmpty
-              ? Center(child: Text('no_requests_yet'.tr()))
+          child: filtered.isEmpty
+              ? Center(child: Text('no_requests_found'.tr()))
               : ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
-                  itemCount: requests.length,
+                  padding: const EdgeInsets.fromLTRB(20, 0, 20, 24),
+                  itemCount: filtered.length,
                   itemBuilder: (context, i) {
-                    final r = requests[i];
-                    return Padding(
-                      padding: const EdgeInsets.only(bottom: 10),
-                      child: _Card(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Row(
-                              children: [
-                                _StatusPill(status: r.status),
-                                const Spacer(),
-                                Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(r.createdAt)), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11)),
-                              ],
-                            ),
-                            const SizedBox(height: 8),
-                            Text('${'requested_amount_egp'.tr()}: ${r.requestedAmount}', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w700)),
-                            Text('${'vf_number_for_assignment'.tr()}: ${r.vfPhoneNumber}', style: TextStyle(color: AppTheme.textPrimaryColor(context))),
-                            if (r.notes != null && r.notes!.isNotEmpty) Text(r.notes!, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
-                            if (r.assignedAmount != null)
-                              Text('${'assigned_amount'.tr()}: ${r.assignedAmount}', style: TextStyle(color: AppTheme.positiveColor(context), fontWeight: FontWeight.w600)),
-                            if (r.adminNotes != null && r.adminNotes!.isNotEmpty)
-                              Text('${'admin_notes'.tr()}: ${r.adminNotes}', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
-                            if (r.proofImageUrl != null && r.proofImageUrl!.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              ProofImageThumbnail(
-                                imageUrl: r.proofImageUrl!,
-                                height: 160,
-                              ),
-                            ],
-                            if (r.rejectedReason != null && r.rejectedReason!.isNotEmpty)
-                              Text('${'rejected_reason'.tr()}: ${r.rejectedReason}', style: TextStyle(color: Colors.redAccent, fontSize: 12)),
-                          ],
-                        ),
-                      ),
-                    );
+                    final r = filtered[i];
+                    return _PremiumRequestCard(request: r);
                   },
                 ),
         ),
@@ -473,64 +548,128 @@ class _RequestsTab extends StatelessWidget {
   }
 }
 
-class _StatusPill extends StatelessWidget {
-  final String status;
+class _StatusChip extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
 
-  const _StatusPill({required this.status});
+  const _StatusChip({required this.label, required this.selected, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    Color c = AppTheme.textMutedColor(context);
-    if (status == 'PENDING') c = Colors.orange;
-    if (status == 'COMPLETED') c = AppTheme.positiveColor(context);
-    if (status == 'REJECTED') c = Colors.redAccent;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-      decoration: BoxDecoration(
-        color: c.withValues(alpha: 0.15),
-        borderRadius: BorderRadius.circular(20),
-        border: Border.all(color: c.withValues(alpha: 0.4)),
+    return FilterChip(
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
+      backgroundColor: AppTheme.surfaceColor(context).withValues(alpha: 0.5),
+      selectedColor: AppTheme.accent.withValues(alpha: 0.2),
+      labelStyle: TextStyle(
+        color: selected ? AppTheme.accent : AppTheme.textMutedColor(context),
+        fontSize: 12,
+        fontWeight: FontWeight.w700,
       ),
-      child: Text(status, style: TextStyle(color: c, fontSize: 11, fontWeight: FontWeight.w800)),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12), side: BorderSide.none),
+      showCheckmark: false,
     );
   }
 }
 
-class _Card extends StatelessWidget {
-  final Widget child;
-  const _Card({required this.child});
+class _PremiumRequestCard extends StatelessWidget {
+  final RetailerAssignmentRequest request;
+  const _PremiumRequestCard({required this.request});
+
+  @override
+  Widget build(BuildContext context) {
+    final fmt = DateFormat.yMMMd().add_Hm();
+    return Container(
+      margin: const EdgeInsets.only(bottom: 12),
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: AppTheme.surfaceColor(context).withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(22),
+        border: Border.all(color: AppTheme.lineColor(context).withValues(alpha: 0.3)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              StatusPill(status: request.status),
+              const Spacer(),
+              Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(request.createdAt)), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11)),
+            ],
+          ),
+          const SizedBox(height: 14),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text('assigned_amount'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10, fontWeight: FontWeight.bold)),
+                  Text(request.requestedAmount.toStringAsFixed(0), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 20, fontWeight: FontWeight.w900)),
+                ],
+              ),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                children: [
+                  Text('Target Phone', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10, fontWeight: FontWeight.bold)),
+                  Text(request.vfPhoneNumber, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w700)),
+                ],
+              ),
+            ],
+          ),
+          if (request.notes != null || request.adminNotes != null) ...[
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Divider(height: 1, thickness: 0.5),
+            ),
+            if (request.notes != null)
+              Text('Note: ${request.notes}', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
+            if (request.adminNotes != null)
+              Text('Admin: ${request.adminNotes}', style: TextStyle(color: AppTheme.accentSoft, fontSize: 12, fontWeight: FontWeight.bold)),
+          ],
+          if (request.proofImageUrl != null)
+            Padding(
+              padding: const EdgeInsets.only(top: 12),
+              child: ProofImageThumbnail(imageUrl: request.proofImageUrl!, height: 120),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _InfoCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+
+  const _InfoCard({required this.icon, required this.title, required this.subtitle});
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: double.infinity,
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: AppTheme.surfaceColor(context).withValues(alpha: 0.95),
+        color: AppTheme.accent.withValues(alpha: 0.05),
         borderRadius: BorderRadius.circular(18),
-        border: Border.all(color: AppTheme.lineColor(context)),
-        boxShadow: AppTheme.softShadow(context),
+        border: Border.all(color: AppTheme.accent.withValues(alpha: 0.2)),
       ),
-      child: child,
-    );
-  }
-}
-
-class _RowMetric extends StatelessWidget {
-  final String label;
-  final double value;
-
-  const _RowMetric({required this.label, required this.value});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: 8),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: AppTheme.textMutedColor(context))),
-          Text('${value.toStringAsFixed(0)} EGP', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800)),
+          Icon(icon, color: AppTheme.accent, size: 24),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(title, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 13)),
+                const SizedBox(height: 2),
+                Text(subtitle, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11)),
+              ],
+            ),
+          ),
         ],
       ),
     );

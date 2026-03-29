@@ -3,7 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum UssdStatus { idle, dialing, waitingPin, feePreview, balanceDetected, pinEntered, success, error }
+enum UssdStatus { idle, dialing, waitingPin, feePreview, balanceDetected, pinEntered, success, error, dialogClosed }
 
 class UssdResponse {
   final UssdStatus status;
@@ -62,6 +62,12 @@ class UssdService {
         _statusController.add(UssdResponse(
           status: UssdStatus.waitingPin,
           message: msg.replaceFirst('STATUS:', '').trim(),
+          sessionId: sid,
+        ));
+      } else if (msg.startsWith('STATUS:DIALOG_CLOSED')) {
+        _statusController.add(UssdResponse(
+          status: UssdStatus.dialogClosed,
+          message: 'USSD dialog closed.',
           sessionId: sid,
         ));
       } else if (msg.startsWith('FEE_DETECTED:')) {

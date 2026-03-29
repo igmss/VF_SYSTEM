@@ -114,9 +114,14 @@ class UssdAccessibilityService : AccessibilityService() {
         if (allText.isEmpty()) return
 
         // Check for balance extraction (*9*13#)
+        // Note: Terminal balance detection is now handled in handleCaptureResult for dismissal.
+        // This preview detection is kept for early display but will not trigger if already processed.
         val balance = extractBalance(allText)
         if (balance != null) {
-            sendUpdate("BALANCE_DETECTED:$balance")
+            if (allText != lastResultText) {
+                sendUpdate("BALANCE_DETECTED:$balance")
+                // We don't dismiss here, handleCaptureResult will handle terminal dismissal
+            }
             return
         }
 
@@ -131,7 +136,10 @@ class UssdAccessibilityService : AccessibilityService() {
             "رصيد حسابك في فودافون كاش الحالي\\s*([0-9.]+)".toRegex(),
             "رصيدك الحالي هو\\s*([0-9.]+)\\s*جنيه".toRegex(),
             "Your current balance is\\s*([0-9.]+)\\s*EGP".toRegex(RegexOption.IGNORE_CASE),
-            "رصيد محفظتك هو\\s*([0-9.]+)\\s*جنيه".toRegex()
+            "رصيد محفظتك هو\\s*([0-9.]+)\\s*جنيه".toRegex(),
+            "Your balance is\\s*([0-9.]+)".toRegex(RegexOption.IGNORE_CASE),
+            "تم استلام طلبك وسيتم إبلاغك".toRegex(), // Common after-pin balance message
+            "Your request is being processed".toRegex(RegexOption.IGNORE_CASE)
         )
         for (pattern in patterns) {
             val match = pattern.find(text)
@@ -185,9 +193,24 @@ class UssdAccessibilityService : AccessibilityService() {
 
         val isSuccess = allText.contains("تم تحويل") || allText.contains("Success") || allText.contains("Transaction successful")
         val isError = allText.contains("Error") || allText.contains("خطأ") || allText.contains("تعذر") || allText.contains("Invalid")
+        
+        val balance = extractBalance(allText)
+        val isBalance = balance != null
 
-        if (isSuccess || isError) {
+        if (isSuccess || isError || isBalance) {
             lastResultText = allText
+
+            if (isBalance) {
+                sendUpdate("BALANCE_DETECTED:$balance")
+                Handler(Looper.getMainLooper()).postDelayed({
+                    dismissUssdDialogFromAnyWindow()
+                }, 1500)
+                activePin = null
+                pinDelayScheduled = false
+                pinDelayRunnable?.let { mainHandler.removeCallbacks(it) }
+                pinDelayRunnable = null
+                return
+            }
 
             if (isSuccess) {
                 val sidForThisShot = activeSessionId
@@ -245,10 +268,12 @@ class UssdAccessibilityService : AccessibilityService() {
     }
 
     private fun dismissUssdDialogFromAnyWindow() {
-        val labels = arrayOf("Cancel", "Dismiss", "OK", "إلغاء", "الغاء", "موافق", "إغلاق", "Close", "Done", "تم")
+        // Prioritize "Cancel" and "OK" based on user feedback
+        val labels = arrayOf("Cancel", "إلغاء", "الغاء", "Dismiss", "OK", "موافق", "إغلاق", "Close", "Done", "تم")
         for (root in collectAllRoots()) {
             val b = findButton(root, *labels)
             if (b != null && b.performAction(AccessibilityNodeInfo.ACTION_CLICK)) {
+                sendUpdate("STATUS:DIALOG_CLOSED")
                 return
             }
         }

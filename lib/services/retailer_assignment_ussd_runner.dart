@@ -77,9 +77,6 @@ class RetailerAssignmentUssdRunner {
       return const RetailerUssdRunResult(success: false, message: 'VF number not found', didUnlock: false);
     }
 
-    int retryCount = 0;
-    double? baselineBalance;
-
     try {
       await portal.lockRequestAdmin(
         portalUserUid: row.portalUserUid,
@@ -88,50 +85,6 @@ class RetailerAssignmentUssdRunner {
       );
     } catch (e) {
       return RetailerUssdRunResult(success: false, message: 'Could not lock request: $e', didUnlock: false);
-    }
-
-    Future<double?> getBalance() async {
-      final sessionId = const Uuid().v4();
-      final completer = Completer<double?>();
-      StreamSubscription? sub;
-      Timer? timer;
-
-      sub = UssdService.onUpdate.listen((resp) {
-        if (resp.sessionId == sessionId && resp.status == UssdStatus.balanceDetected) {
-          timer?.cancel();
-          sub?.cancel();
-          completer.complete(resp.extractedBalance);
-        } else if (resp.sessionId == sessionId && resp.status == UssdStatus.error) {
-          timer?.cancel();
-          sub?.cancel();
-          completer.complete(null);
-        }
-      });
-
-      timer = Timer(const Duration(seconds: 45), () {
-        sub?.cancel();
-        if (!completer.isCompleted) completer.complete(null);
-      });
-
-      try {
-        await UssdService.runVodafoneCashBalanceCheck(sessionId: sessionId);
-      } catch (_) {
-        timer.cancel();
-        sub.cancel();
-        completer.complete(null);
-      }
-
-      return completer.future;
-    }
-
-    baselineBalance = await getBalance();
-    if (baselineBalance == null) {
-      await portal.unlockRequestAdmin(portalUserUid: row.portalUserUid, requestId: row.request.id);
-      return const RetailerUssdRunResult(
-        success: false,
-        message: 'Could not fetch baseline balance. Aborting for safety.',
-        didUnlock: true,
-      );
     }
 
     return _runTransferLoop(
@@ -147,9 +100,7 @@ class RetailerAssignmentUssdRunner {
       app: app,
       portal: portal,
       onSuccessUi: onSuccessUi,
-      baselineBalance: baselineBalance,
-      retryCount: retryCount,
-      getBalance: getBalance,
+      retryCount: 0,
     );
   }
 
@@ -165,9 +116,7 @@ class RetailerAssignmentUssdRunner {
     required DistributionProvider distribution,
     required AppProvider app,
     required RetailerPortalService portal,
-    required double baselineBalance,
     required int retryCount,
-    required Future<double?> Function() getBalance,
     void Function()? onSuccessUi,
   }) async {
     final srcNum = app.mobileNumbers.firstWhere((n) => n.id == selectedNumId);
@@ -190,70 +139,19 @@ class RetailerAssignmentUssdRunner {
     Future<void> handleFailure(String errorMsg) async {
       if (finished) return;
 
-      // If we fail/timeout, we must check the balance before retrying or giving up.
-      final currentBalance = await getBalance();
-      if (currentBalance != null) {
-        if ((currentBalance - baselineBalance).abs() < 1.0) {
-          // Balance is same, SAFE TO RETRY if we haven't exceeded max retries
-          if (retryCount < _maxRetries) {
-            finished = true;
-            timeoutTimer?.cancel();
-            await sub?.cancel();
-
-            final r = await _runTransferLoop(
-              row: row,
-              adminUid: adminUid,
-              selectedNumId: selectedNumId,
-              amount: amount,
-              formFees: formFees,
-              isExternalWallet: isExternalWallet,
-              applyCredit: applyCredit,
-              adminNotes: adminNotes,
-              distribution: distribution,
-              app: app,
-              portal: portal,
-              baselineBalance: baselineBalance,
-              retryCount: retryCount + 1,
-              getBalance: getBalance,
-              onSuccessUi: onSuccessUi,
-            );
-            if (!completer.isCompleted) completer.complete(r);
-            return;
-          } else {
-            // Max retries reached, unlock and fail.
-            try {
-              await portal.unlockRequestAdmin(portalUserUid: row.portalUserUid, requestId: row.request.id);
-            } catch (_) {}
-            await safeComplete(RetailerUssdRunResult(success: false, message: 'Max retries reached: $errorMsg', didUnlock: true));
-          }
-        } else {
-          // Balance changed! Money moved but we didn't get success. MOVE TO MANUAL_REVIEW.
-          try {
-            await portal.updateRequestAdmin(
-              portalUserUid: row.portalUserUid,
-              requestId: row.request.id,
-              updates: {
-                'status': 'MANUAL_REVIEW',
-                'adminNotes': 'Balance dropped from $baselineBalance to $currentBalance but USSD failed/timed out. DO NOT RETRY.',
-              },
-            );
-          } catch (_) {}
-          await safeComplete(const RetailerUssdRunResult(success: false, message: 'Balance dropped! Moved to MANUAL_REVIEW.', didUnlock: false));
-        }
-      } else {
-        // Balance check failed after transfer failure. Very dangerous. MANUAL_REVIEW.
-        try {
-          await portal.updateRequestAdmin(
-            portalUserUid: row.portalUserUid,
-            requestId: row.request.id,
-            updates: {
-              'status': 'MANUAL_REVIEW',
-              'adminNotes': 'USSD failed/timed out and balance check also failed. Manual verification required.',
-            },
-          );
-        } catch (_) {}
-        await safeComplete(const RetailerUssdRunResult(success: false, message: 'Verification failed. Moved to MANUAL_REVIEW.', didUnlock: false));
-      }
+      // Without balance check, any failure or timeout is risky.
+      // Move to MANUAL_REVIEW to prevent double-transfer.
+      try {
+        await portal.updateRequestAdmin(
+          portalUserUid: row.portalUserUid,
+          requestId: row.request.id,
+          updates: {
+            'status': 'MANUAL_REVIEW',
+            'adminNotes': 'USSD failed/timed out ($errorMsg). Moved to MANUAL_REVIEW for safety (balance check disabled).',
+          },
+        );
+      } catch (_) {}
+      await safeComplete(RetailerUssdRunResult(success: false, message: errorMsg, didUnlock: false));
     }
 
     timeoutTimer = Timer(const Duration(minutes: 5), () => handleFailure('USSD timed out'));

@@ -26,6 +26,14 @@ class RetailerAssignmentRequestsScreen extends StatefulWidget {
 class _RetailerAssignmentRequestsScreenState extends State<RetailerAssignmentRequestsScreen> {
   final RetailerPortalService _portal = RetailerPortalService();
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DistributionProvider>().loadUserNames(context.read<AuthProvider>());
+    });
+  }
+
   Future<void> _processWithUssd({
     required RetailerPortalRequestRow row,
     required String selectedNumId,
@@ -309,7 +317,10 @@ class _RetailerAssignmentRequestsScreenState extends State<RetailerAssignmentReq
                 children: [
                   Text('process_request'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 18, fontWeight: FontWeight.w800)),
                   const SizedBox(height: 8),
-                  Text('${'retailer_id'.tr()}: ${row.request.retailerId}', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
+                  Text(
+                    '${'retailer'.tr()}: ${retailer?.name ?? row.request.retailerId} (${row.request.retailerId})',
+                    style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.bold),
+                  ),
                   const SizedBox(height: 16),
                   
                   DropdownButtonFormField<String>(
@@ -636,6 +647,10 @@ class _RequestTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final r = row.request;
+    final dist = context.watch<DistributionProvider>();
+    final matched = dist.retailers.where((ret) => ret.id == r.retailerId);
+    final retailer = matched.isNotEmpty ? matched.first : null;
+
     final fmt = DateFormat.yMMMd().add_Hm();
     final isProcessing = r.status == 'PROCESSING';
     
@@ -685,16 +700,68 @@ class _RequestTile extends StatelessWidget {
                       Text(fmt.format(DateTime.fromMillisecondsSinceEpoch(r.createdAt)), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11)),
                     ],
                   ),
-                  const SizedBox(height: 8),
-                  Text('${'requested_amount_egp'.tr()}: ${r.requestedAmount}', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w700)),
-                  Text('VF: ${r.vfPhoneNumber}', style: TextStyle(color: AppTheme.textPrimaryColor(context))),
-                  if (r.notes != null && r.notes!.isNotEmpty) Text(r.notes!, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
-                  if (r.assignedAmount != null)
-                    Text('${'assigned_amount'.tr()}: ${r.assignedAmount}', style: TextStyle(color: AppTheme.positiveColor(context))),
-                  if (r.processingBy != null)
+                  const SizedBox(height: 12),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'retailer'.tr(),
+                              style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10, fontWeight: FontWeight.bold),
+                            ),
+                            Text(
+                              retailer?.name ?? r.retailerId,
+                              style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 15),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.end,
+                        children: [
+                          Text(
+                            'amount'.tr(),
+                            style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '${r.requestedAmount} EGP',
+                            style: TextStyle(color: AppTheme.accent, fontWeight: FontWeight.w900, fontSize: 16),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 10),
+                  Text('VF: ${r.vfPhoneNumber}', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600)),
+                  if (r.notes != null && r.notes!.isNotEmpty) 
                     Padding(
                       padding: const EdgeInsets.only(top: 4),
-                      child: Text('Being handled by: ${r.processingBy}', style: const TextStyle(fontSize: 10, color: Colors.blue, fontStyle: FontStyle.italic)),
+                      child: Text(r.notes!, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
+                    ),
+                  if (r.assignedAmount != null)
+                    Text('${'assigned_amount'.tr()}: ${r.assignedAmount}', style: TextStyle(color: AppTheme.positiveColor(context), fontWeight: FontWeight.bold)),
+                  if (r.processingBy != null)
+                    Container(
+                      margin: const EdgeInsets.only(top: 10),
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                      decoration: BoxDecoration(
+                        color: Colors.blue.withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.blue.withValues(alpha: 0.2)),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.person, size: 12, color: Colors.blue),
+                          const SizedBox(width: 6),
+                          Text(
+                            'Being handled by: ${dist.userNames[r.processingBy] ?? r.processingBy}',
+                            style: const TextStyle(fontSize: 11, color: Colors.blue, fontWeight: FontWeight.bold),
+                          ),
+                        ],
+                      ),
                     ),
                   if (r.proofImageUrl != null && r.proofImageUrl!.isNotEmpty)
                     Padding(

@@ -43,6 +43,8 @@ class AppProvider extends ChangeNotifier {
   bool _isLiveSyncEnabled = false;
   Timer? _liveSyncTimer;
   double _collectorVfDepositFeePer1000 = 7.0;
+  String? _publicDefaultNumberId;
+  String? _publicDefaultNumberPhone;
 
   // ── Getters ───────────────────────────────────────────────────────────────
   // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
@@ -63,6 +65,8 @@ class AppProvider extends ChangeNotifier {
   bool get isLiveSyncEnabled => _isLiveSyncEnabled;
   bool get useServerSync => true;
   double get collectorVfDepositFeePer1000 => _collectorVfDepositFeePer1000;
+  String? get publicDefaultNumberId => _publicDefaultNumberId;
+  String? get publicDefaultNumberPhone => _publicDefaultNumberPhone;
 
   // Callback to trigger Bank logic in DistributionProvider
   Future<void> Function({
@@ -146,6 +150,21 @@ class AppProvider extends ChangeNotifier {
           ? null
           : _mobileNumbers.firstWhere((n) => n.isDefault,
               orElse: () => _mobileNumbers.first);
+
+      // Admin/Finance Auto-Sync: If we can see numbers, ensure the public settings node
+      // is in sync with our default number so Collectors (who can't see this node)
+      // still know where to deposit.
+      if (_defaultNumber != null) {
+        final id = _defaultNumber!.id;
+        final phone = _defaultNumber!.phoneNumber;
+        if (id != _publicDefaultNumberId || phone != _publicDefaultNumberPhone) {
+          FirebaseDatabase.instance.ref('system/operation_settings').update({
+            'defaultVfNumberId': id,
+            'defaultVfNumberPhone': phone,
+          }).catchError((e) => debugPrint('Public sync failed (likely no permission): $e'));
+        }
+      }
+
       notifyListeners();
     });
 
@@ -195,8 +214,12 @@ class AppProvider extends ChangeNotifier {
         final data = Map<String, dynamic>.from(snap.value as Map);
         _collectorVfDepositFeePer1000 =
             _asDouble(data['collectorVfDepositFeePer1000']);
+        _publicDefaultNumberId = data['defaultVfNumberId']?.toString();
+        _publicDefaultNumberPhone = data['defaultVfNumberPhone']?.toString();
       } else {
         _collectorVfDepositFeePer1000 = 7.0;
+        _publicDefaultNumberId = null;
+        _publicDefaultNumberPhone = null;
       }
       notifyListeners();
     });

@@ -672,6 +672,9 @@ class _DepositTabState extends State<_DepositTab> {
     final isDepositing = dist.isDepositing;
     final isLight = !AppTheme.isDark(context);
     final defaultVfNumber = app.defaultNumber;
+    final publicVfPhone = app.publicDefaultNumberPhone;
+    final publicVfId = app.publicDefaultNumberId;
+    final hasDefaultVf = defaultVfNumber != null || publicVfPhone != null;
     final feeRate = app.collectorVfDepositFeePer1000;
     final amount = double.tryParse(_amountCtrl.text) ?? 0.0;
     final vfFee = _calculateVfFee(amount, feeRate);
@@ -741,7 +744,7 @@ class _DepositTabState extends State<_DepositTab> {
               Expanded(
                 child: _DestinationOption(
                   label: 'Default VF Number',
-                  subtitle: defaultVfNumber?.phoneNumber ?? 'No default VF number set',
+                  subtitle: defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'No default VF number set',
                   icon: Icons.phone_android,
                   selected: !isBankDestination,
                   color: AppTheme.positiveColor(context),
@@ -771,7 +774,7 @@ class _DepositTabState extends State<_DepositTab> {
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: AppTheme.lineColor(context)),
               ),
-              child: defaultVfNumber == null
+              child: !hasDefaultVf
                   ? Text(
                       'No default VF number is set yet. Ask admin to mark one as default first.',
                       style: TextStyle(color: AppTheme.textMutedColor(context)),
@@ -780,7 +783,7 @@ class _DepositTabState extends State<_DepositTab> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          defaultVfNumber.phoneNumber,
+                          defaultVfNumber?.phoneNumber ?? publicVfPhone ?? '',
                           style: TextStyle(
                             color: AppTheme.textPrimaryColor(context),
                             fontSize: 18,
@@ -880,6 +883,8 @@ class _DepositTabState extends State<_DepositTab> {
     final app = Provider.of<AppProvider>(context, listen: false);
     final bank = _selectedBank;
     final defaultVfNumber = app.defaultNumber;
+    final publicVfPhone = app.publicDefaultNumberPhone;
+    final hasDefaultVf = defaultVfNumber != null || publicVfPhone != null;
     final amount = double.tryParse(_amountCtrl.text) ?? 0;
     final feeRate = app.collectorVfDepositFeePer1000;
     final vfFee = _calculateVfFee(amount, feeRate);
@@ -897,7 +902,7 @@ class _DepositTabState extends State<_DepositTab> {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('select_bank_first'.tr())));
       return;
     }
-    if (_destination == _DepositDestination.vf && defaultVfNumber == null) {
+    if (_destination == _DepositDestination.vf && !hasDefaultVf) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text('No default VF number is set yet.'),
@@ -916,7 +921,7 @@ class _DepositTabState extends State<_DepositTab> {
         content: Text(
           _destination == _DepositDestination.bank
               ? 'Are you sure you want to deposit ${amount.toStringAsFixed(0)} EGP to ${bank!.bankName}?'
-              : 'Deposit ${amount.toStringAsFixed(2)} EGP to ${defaultVfNumber!.phoneNumber}?\n\nCollector cash decreases by ${amount.toStringAsFixed(2)} EGP.\nVF receives ${vfTransferTotal.toStringAsFixed(2)} EGP.\nProfit recorded: ${vfFee.toStringAsFixed(2)} EGP.',
+              : 'Deposit ${amount.toStringAsFixed(2)} EGP to ${defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'Default VF'}?\n\nCollector cash decreases by ${amount.toStringAsFixed(2)} EGP.\nVF receives ${vfTransferTotal.toStringAsFixed(2)} EGP.\nProfit recorded: ${vfFee.toStringAsFixed(2)} EGP.',
           style: TextStyle(color: AppTheme.textMutedColor(context)),
         ),
         actions: [

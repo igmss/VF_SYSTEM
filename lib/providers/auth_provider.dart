@@ -19,6 +19,7 @@ class AuthProvider extends ChangeNotifier {
   bool get isAdmin => _currentUser?.isAdmin ?? false;
   bool get isFinance => _currentUser?.isFinance ?? false;
   bool get isCollector => _currentUser?.isCollector ?? false;
+  bool get isRetailer => _currentUser?.isRetailer ?? false;
 
   AuthProvider() {
     _authService.authStateChanges.listen(_onAuthStateChanged);
@@ -103,12 +104,14 @@ class AuthProvider extends ChangeNotifier {
     required String password,
     required String name,
     required UserRole role,
+    String? retailerId,
   }) async {
     await _authService.createUser(
       email: email,
       password: password,
       name: name,
       role: role,
+      retailerId: retailerId,
     );
   }
 
@@ -117,12 +120,14 @@ class AuthProvider extends ChangeNotifier {
     required String email,
     required String name,
     required UserRole role,
+    String? retailerId,
   }) async {
     await _authService.syncUserRecord(
       uid: uid,
       email: email,
       name: name,
       role: role,
+      retailerId: retailerId,
     );
   }
 

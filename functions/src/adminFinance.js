@@ -231,6 +231,25 @@ exports.clearBybitCredentials = onCall({ region: REGION }, async (request) => {
   return { configured: false, updatedAt: nowIso };
 });
 
+exports.setCollectorVfDepositFeePer1000 = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const feePer1000 = asNumber(request.data?.feePer1000);
+  if (feePer1000 < 0) {
+    throw new HttpsError('invalid-argument', 'Fee per 1000 must be zero or greater.');
+  }
+
+  const nowIso = new Date().toISOString();
+  await admin.database().ref().update({
+    'system/operation_settings/collectorVfDepositFeePer1000': feePer1000,
+    'system/operation_settings/updatedAt': nowIso,
+  });
+
+  return { feePer1000, updatedAt: nowIso };
+});
+
 exports.fundBankAccount = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
@@ -902,6 +921,57 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
     updates[`collectors/${collectorId}/cashOnHand`] = admin.database.ServerValue.increment(amount);
     updates[`collectors/${collectorId}/totalDeposited`] = admin.database.ServerValue.increment(-amount);
     updates[`collectors/${collectorId}/lastUpdatedAt`] = nowIso;
+  } else if (type === 'DEPOSIT_TO_VFCASH') {
+    const collectorId = tx.fromId ? tx.fromId.toString() : '';
+    const vfNumberId = tx.toId ? tx.toId.toString() : '';
+    if (!collectorId || !vfNumberId) {
+      throw new HttpsError('failed-precondition', 'Vodafone deposit is missing collector or VF number.');
+    }
+
+    const [collectorSnap, vfNumberSnap, generatedTransactions, relatedProfitEntries] = await Promise.all([
+      db.ref(`collectors/${collectorId}`).once('value'),
+      db.ref(`mobile_numbers/${vfNumberId}`).once('value'),
+      getGeneratedTransactions(`CLDV-${transactionId.substring(0, 8)}`),
+      getRelatedLedgerEntries(transactionId, ['VFCASH_RETAIL_PROFIT']),
+    ]);
+    if (!collectorSnap.exists()) {
+      throw new HttpsError('not-found', 'Collector not found.');
+    }
+
+    const collector = collectorSnap.val();
+    if (asNumber(collector.totalDeposited) < amount) {
+      throw new HttpsError('failed-precondition', 'Collector deposited total is too low to reverse this Vodafone deposit.');
+    }
+
+    updates[`collectors/${collectorId}/cashOnHand`] = admin.database.ServerValue.increment(amount);
+    updates[`collectors/${collectorId}/totalDeposited`] = admin.database.ServerValue.increment(-amount);
+    updates[`collectors/${collectorId}/lastUpdatedAt`] = nowIso;
+    Object.assign(updates, buildGeneratedTransactionRemovals(generatedTransactions));
+    Object.assign(updates, buildLedgerRemovals(relatedProfitEntries));
+    if (vfNumberSnap && vfNumberSnap.exists()) {
+      if (generatedTransactions.length > 0) {
+        generatedTransactions.forEach((generatedTransaction) => {
+          applyMobileNumberUsageDelta(updates, {
+            numberId: vfNumberId,
+            amountDelta: -asNumber(generatedTransaction.value.amount),
+            direction: 'incoming',
+            timestampMs: getTransactionTimestampMs(generatedTransaction.value),
+            nowIso,
+          });
+        });
+      } else {
+        const fallbackIncomingAmount =
+          asNumber(tx.transferredAmount) ||
+          (amount + sumEntryAmounts(relatedProfitEntries));
+        applyMobileNumberUsageDelta(updates, {
+          numberId: vfNumberId,
+          amountDelta: -fallbackIncomingAmount,
+          direction: 'incoming',
+          timestampMs: getTransactionTimestampMs(tx),
+          nowIso,
+        });
+      }
+    }
   } else if (type === 'DISTRIBUTE_VFCASH') {
     const retailerId = tx.toId ? tx.toId.toString() : '';
     const vfNumberId = tx.fromId ? tx.fromId.toString() : '';
@@ -1022,7 +1092,169 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
   return { deleted: true };
 });
 
+exports.processRetailerRequest = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
 
+  const { portalUserUid, requestId, status, proofImageUrl, adminNotes } = request.data;
+  if (!portalUserUid || !requestId || !status) {
+    throw new HttpsError('invalid-argument', 'Missing core request fields.');
+  }
 
+  const db = admin.database();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowTs = now.getTime();
 
+  // 0. Status Check (Duplicate Prevention)
+  const reqSnap = await db.ref(`retailer_portal/${portalUserUid}/requests/${requestId}`).once('value');
+  if (!reqSnap.exists()) {
+    throw new HttpsError('not-found', 'Retailer request not found.');
+  }
+  const rData = reqSnap.val();
+  if (rData.status === 'COMPLETED' || rData.status === 'REJECTED') {
+    throw new HttpsError('failed-precondition', 'This request has already been finalized.');
+  }
 
+  // Handle REJECTED
+  if (status === 'REJECTED') {
+    const updates = {
+      [`retailer_portal/${portalUserUid}/requests/${requestId}/status`]: 'REJECTED',
+      [`retailer_portal/${portalUserUid}/requests/${requestId}/rejectedReason`]: adminNotes || null,
+      [`retailer_portal/${portalUserUid}/requests/${requestId}/completedAt`]: nowTs,
+      [`retailer_portal/${portalUserUid}/requests/${requestId}/completedByUid`]: uid,
+    };
+    await db.ref().update(updates);
+    return { success: true };
+  }
+
+  // Handle COMPLETED
+  // Needs all the distributeVfCash fields:
+  const retailerId = request.data?.retailerId?.toString();
+  const fromVfNumberId = request.data?.fromVfNumberId?.toString();
+  const fromVfPhone = request.data?.fromVfPhone?.toString();
+  const amount = asNumber(request.data?.amount);
+  const fees = asNumber(request.data?.fees);
+  const chargeFeesToRetailer = request.data?.chargeFeesToRetailer === true;
+  const applyCredit = request.data?.applyCredit === true;
+
+  if (!retailerId || !fromVfNumberId || !fromVfPhone || amount <= 0 || fees < 0) {
+    throw new HttpsError('invalid-argument', 'Invalid distribution request.');
+  }
+
+  const totalDeduction = amount + fees;
+
+  const { retailer, actualDebtIncrease, creditUsed } = await computeDistributionAmounts({
+    db, retailerId, amount, fees, chargeFeesToRetailer, applyCredit,
+  });
+
+  const vfReservation = await updateMobileNumberUsageTransaction({
+    numberId: fromVfNumberId,
+    amountDelta: totalDeduction,
+    direction: 'outgoing',
+    timestampMs: nowTs,
+    nowIso,
+    requireSufficientBalance: true,
+  });
+
+  if (!vfReservation.committed) {
+    const vfNumberSnap = await db.ref(`mobile_numbers/${fromVfNumberId}`).once('value');
+    if (!vfNumberSnap.exists()) throw new HttpsError('not-found', 'Vodafone number not found.');
+    const currentVfBalance = getMobileNumberBalance(vfNumberSnap.val());
+    throw new HttpsError(
+      'failed-precondition',
+      `Insufficient Vodafone balance. Available: ${currentVfBalance.toFixed(2)} EGP, required: ${totalDeduction.toFixed(2)} EGP.`
+    );
+  }
+
+  const txId = uuidv4();
+  const cashTxId = uuidv4();
+  const reservedVfNumber = vfReservation.snapshot.val() || {};
+  const vfPhoneLabel = reservedVfNumber.phoneNumber || fromVfPhone;
+  const retailerName = retailer.name || 'Retailer';
+
+  const feeNotes = chargeFeesToRetailer && fees > 0 ? `, +${fees} Fee` : '';
+  const creditNotes = creditUsed > 0 ? `, -${creditUsed} Credit Used` : '';
+  const appliedNotes = adminNotes && adminNotes.length > 0
+    ? `${adminNotes} (Rate: ${asNumber(retailer.discountPer1000)}/1K${feeNotes}${creditNotes}, Debt +${actualDebtIncrease} EGP)`
+    : `Rate: ${asNumber(retailer.discountPer1000)}/1K${feeNotes}${creditNotes}, Debt +${actualDebtIncrease} EGP`;
+
+  const updates = {
+    // 1. Transaction & Ledger updates (Identical to distributeVfCash)
+    [`financial_ledger/${txId}`]: {
+      id: txId,
+      type: 'DISTRIBUTE_VFCASH',
+      amount,
+      fromId: fromVfNumberId,
+      fromLabel: vfPhoneLabel,
+      toId: retailerId,
+      toLabel: retailerName,
+      createdByUid: uid,
+      notes: appliedNotes,
+      generatedTransactionId: cashTxId,
+      timestamp: nowTs,
+    },
+    [`transactions/${cashTxId}`]: {
+      id: cashTxId,
+      phoneNumber: vfPhoneLabel,
+      amount: totalDeduction,
+      currency: 'EGP',
+      timestamp: nowIso,
+      bybitOrderId: `DIST-${txId.substring(0, 8)}`,
+      status: 'completed',
+      paymentMethod: 'Vodafone Distribution',
+      side: 0,
+      relatedLedgerId: txId,
+      chatHistory: fees > 0
+        ? `Automated Distribution to ${retailerName} (Includes ${fees} EGP transfer fees${chargeFeesToRetailer ? ' - charged to retailer' : ''})`
+        : `Automated Distribution to ${retailerName}`,
+    },
+    [`retailers/${retailerId}/totalAssigned`]: admin.database.ServerValue.increment(actualDebtIncrease),
+    [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
+
+    // 2. Request Completion updates
+    [`retailer_portal/${portalUserUid}/requests/${requestId}/status`]: 'COMPLETED',
+    [`retailer_portal/${portalUserUid}/requests/${requestId}/assignedAmount`]: amount,
+    [`retailer_portal/${portalUserUid}/requests/${requestId}/adminNotes`]: adminNotes || null,
+    [`retailer_portal/${portalUserUid}/requests/${requestId}/proofImageUrl`]: proofImageUrl || null,
+    [`retailer_portal/${portalUserUid}/requests/${requestId}/completedAt`]: nowTs,
+    [`retailer_portal/${portalUserUid}/requests/${requestId}/completedByUid`]: uid,
+  };
+
+  if (creditUsed > 0) {
+    updates[`retailers/${retailerId}/credit`] = admin.database.ServerValue.increment(-creditUsed);
+  }
+
+  if (fees > 0) {
+    const feeTxId = uuidv4();
+    updates[`financial_ledger/${feeTxId}`] = {
+      id: feeTxId,
+      type: 'EXPENSE_VFCASH_FEE',
+      amount: fees,
+      fromId: fromVfNumberId,
+      fromLabel: vfPhoneLabel,
+      createdByUid: uid,
+      relatedLedgerId: txId,
+      notes: chargeFeesToRetailer
+        ? `Vodafone Transfer Fee for assigning ${amount} EGP to ${retailerName} (charged to retailer debt)`
+        : `Vodafone Transfer Fee for assigning ${amount} EGP to ${retailerName}`,
+      timestamp: nowTs,
+    };
+  }
+
+  try {
+    await db.ref().update(updates);
+    return { success: true };
+  } catch (error) {
+    await updateMobileNumberUsageTransaction({
+      numberId: fromVfNumberId,
+      amountDelta: -totalDeduction,
+      direction: 'incoming',
+      timestampMs: nowTs,
+      nowIso,
+      requireSufficientBalance: false,
+    });
+    throw new HttpsError('internal', 'Distribution transaction failed globally. Rolled back VF lock.');
+  }
+});

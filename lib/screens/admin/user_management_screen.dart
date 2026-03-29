@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:firebase_database/firebase_database.dart';
 import '../../theme/app_theme.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -17,6 +18,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     UserRole.ADMIN,
     UserRole.FINANCE,
     UserRole.COLLECTOR,
+    UserRole.RETAILER,
   ];
   List<AppUser> _users = [];
   bool _loading = true;
@@ -160,11 +162,28 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     }
   }
 
-  void _showCreateUserDialog(BuildContext context) {
+  Future<void> _showCreateUserDialog(BuildContext context) async {
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     final passCtrl = TextEditingController();
     UserRole selectedRole = UserRole.COLLECTOR;
+    String? selectedRetailerId;
+
+    final retailerMap = <String, String>{};
+    try {
+      final snap = await FirebaseDatabase.instance.ref('retailers').get();
+      if (snap.exists && snap.value is Map) {
+        (snap.value as Map).forEach((k, v) {
+          if (v is Map) {
+            final m = Map<String, dynamic>.from(v);
+            final name = m['name']?.toString() ?? k.toString();
+            retailerMap[k.toString()] = name;
+          }
+        });
+      }
+    } catch (_) {}
+
+    if (!context.mounted) return;
 
     showDialog(
       context: context,
@@ -188,10 +207,38 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               items: _supportedRoles
                   .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
                   .toList(),
-              onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
+              onChanged: (v) => setSt(() {
+                selectedRole = v ?? selectedRole;
+                if (selectedRole != UserRole.RETAILER) selectedRetailerId = null;
+              }),
             ),
+            if (selectedRole == UserRole.RETAILER) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedRetailerId,
+                isExpanded: true,
+                dropdownColor: AppTheme.surfaceColor(context),
+                style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
+                decoration: InputDecoration(
+                  labelText: 'link_retailer_profile'.tr(),
+                  filled: true,
+                  fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                ),
+                items: retailerMap.entries
+                    .map((e) => DropdownMenuItem(value: e.key, child: Text('${e.value} (${e.key})')))
+                    .toList(),
+                onChanged: (v) => setSt(() => selectedRetailerId = v),
+              ),
+            ],
           ],
           onConfirm: () async {
+            if (selectedRole == UserRole.RETAILER &&
+                (selectedRetailerId == null || selectedRetailerId!.isEmpty)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('select_retailer_profile'.tr()), backgroundColor: Colors.red),
+              );
+              return false;
+            }
             final auth = context.read<AuthProvider>();
             try {
               await auth.createUser(
@@ -199,6 +246,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 password: passCtrl.text.trim(),
                 name: nameCtrl.text.trim(),
                 role: selectedRole,
+                retailerId: selectedRole == UserRole.RETAILER ? selectedRetailerId : null,
               );
               if (!ctx.mounted) return false;
               Navigator.pop(ctx);
@@ -219,11 +267,28 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
     );
   }
 
-  void _showSyncDialog(BuildContext context) {
+  Future<void> _showSyncDialog(BuildContext context) async {
     final uidCtrl = TextEditingController();
     final nameCtrl = TextEditingController();
     final emailCtrl = TextEditingController();
     UserRole selectedRole = UserRole.COLLECTOR;
+    String? selectedRetailerId;
+
+    final retailerMap = <String, String>{};
+    try {
+      final snap = await FirebaseDatabase.instance.ref('retailers').get();
+      if (snap.exists && snap.value is Map) {
+        (snap.value as Map).forEach((k, v) {
+          if (v is Map) {
+            final m = Map<String, dynamic>.from(v);
+            final name = m['name']?.toString() ?? k.toString();
+            retailerMap[k.toString()] = name;
+          }
+        });
+      }
+    } catch (_) {}
+
+    if (!context.mounted) return;
 
     showDialog(
       context: context,
@@ -247,10 +312,38 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
               items: _supportedRoles
                   .map((r) => DropdownMenuItem(value: r, child: Text(r.name)))
                   .toList(),
-              onChanged: (v) => setSt(() => selectedRole = v ?? selectedRole),
+              onChanged: (v) => setSt(() {
+                selectedRole = v ?? selectedRole;
+                if (selectedRole != UserRole.RETAILER) selectedRetailerId = null;
+              }),
             ),
+            if (selectedRole == UserRole.RETAILER) ...[
+              const SizedBox(height: 12),
+              DropdownButtonFormField<String>(
+                value: selectedRetailerId,
+                isExpanded: true,
+                dropdownColor: AppTheme.surfaceColor(context),
+                style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w600),
+                decoration: InputDecoration(
+                  labelText: 'link_retailer_profile'.tr(),
+                  filled: true,
+                  fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+                ),
+                items: retailerMap.entries
+                    .map((e) => DropdownMenuItem(value: e.key, child: Text('${e.value} (${e.key})')))
+                    .toList(),
+                onChanged: (v) => setSt(() => selectedRetailerId = v),
+              ),
+            ],
           ],
           onConfirm: () async {
+            if (selectedRole == UserRole.RETAILER &&
+                (selectedRetailerId == null || selectedRetailerId!.isEmpty)) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(content: Text('select_retailer_profile'.tr()), backgroundColor: Colors.red),
+              );
+              return false;
+            }
             final auth = context.read<AuthProvider>();
             try {
               await auth.syncUserRecord(
@@ -258,6 +351,7 @@ class _UserManagementScreenState extends State<UserManagementScreen> {
                 email: emailCtrl.text.trim(),
                 name: nameCtrl.text.trim(),
                 role: selectedRole,
+                retailerId: selectedRole == UserRole.RETAILER ? selectedRetailerId : null,
               );
               if (!ctx.mounted) return false;
               Navigator.pop(ctx);
@@ -343,6 +437,14 @@ class _UserCard extends StatelessWidget {
                   Text(user.name, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 16)),
                   const SizedBox(height: 2),
                   Text(user.email, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
+                  if (user.role == UserRole.RETAILER && user.retailerId != null && user.retailerId!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 4),
+                      child: Text(
+                        '${'retailer_id'.tr()}: ${user.retailerId}',
+                        style: TextStyle(color: AppTheme.infoColor(context), fontSize: 11, fontWeight: FontWeight.w600),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -374,6 +476,8 @@ class _UserCard extends StatelessWidget {
         return const Color(0xFF8C6239);
       case UserRole.OPERATOR:
         return AppTheme.positiveColor(context);
+      case UserRole.RETAILER:
+        return const Color(0xFF6B4FA3);
     }
   }
 }

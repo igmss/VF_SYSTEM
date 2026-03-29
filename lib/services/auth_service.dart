@@ -48,6 +48,7 @@ class AuthService {
     required String password,
     required String name,
     required UserRole role,
+    String? retailerId,
   }) async {
     try {
       final callable = _functions.httpsCallable('createUserAccount');
@@ -56,6 +57,7 @@ class AuthService {
         'password': password,
         'name': name,
         'role': role.toString().split('.').last,
+        if (retailerId != null && retailerId.isNotEmpty) 'retailerId': retailerId,
       });
     } on FirebaseFunctionsException catch (e) {
       throw e.message ?? 'Unable to create user.';
@@ -89,6 +91,7 @@ class AuthService {
     required String email,
     required String name,
     required UserRole role,
+    String? retailerId,
   }) async {
     double asDouble(dynamic value, {double fallback = 0}) {
       if (value == null) return fallback;
@@ -104,12 +107,16 @@ class AuthService {
       name: name,
       role: role,
       createdAt: now,
+      retailerId: role == UserRole.RETAILER ? retailerId : null,
     );
     final data = Map<String, dynamic>.from(appUser.toMap());
     final collectorSnap = await _database.ref('collectors/$uid').get();
     final updates = <String, dynamic>{
       'users/$uid': data,
     };
+    if (role != UserRole.RETAILER) {
+      updates['users/$uid/retailerId'] = null;
+    }
 
     if (role == UserRole.COLLECTOR) {
       final existingCollector = collectorSnap.exists && collectorSnap.value is Map

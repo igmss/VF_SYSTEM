@@ -49,6 +49,17 @@
                 }
             }
         },
+        "retailer_portal": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            "$userUid": {
+                ".read": "auth != null && (auth.uid == $userUid || root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+                "requests": {
+                    "$requestId": {
+                        ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || (auth.uid == $userUid && root.child('users').child(auth.uid).child('role').val() == 'RETAILER' && !data.exists() && newData.child('status').val() == 'PENDING' && newData.child('retailerId').val() == root.child('users').child(auth.uid).child('retailerId').val() && newData.child('requestedAmount').isNumber() && newData.child('requestedAmount').val() > 0 && newData.child('vfPhoneNumber').isString() && newData.child('vfPhoneNumber').val().length >= 10 && newData.child('createdByUid').val() == auth.uid))"
+                    }
+                }
+            }
+        },
         "financial_ledger": {
             ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE' || root.child('users').child(auth.uid).child('role').val() == 'COLLECTOR')",
             ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",

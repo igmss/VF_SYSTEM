@@ -1,9 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:intl/intl.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../providers/app_provider.dart';
+import '../../services/retailer_ussd_auto_queue_service.dart';
 import '../../models/app_user.dart';
 import '../../theme/app_theme.dart';
 import '../home_screen.dart';
@@ -15,6 +17,7 @@ import 'ledger_screen.dart';
 import 'user_management_screen.dart';
 import 'usd_exchange_screen.dart';
 import 'exchange_rate_screen.dart';
+import 'retailer_assignment_requests_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -33,6 +36,11 @@ class _AdminDashboardState extends State<AdminDashboard> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<DistributionProvider>().loadAll();
       context.read<AppProvider>().loadMobileNumbers();
+      context.read<RetailerUssdAutoQueueService>().attach(
+            auth: context.read<AuthProvider>(),
+            app: context.read<AppProvider>(),
+            dist: context.read<DistributionProvider>(),
+          );
     });
   }
 
@@ -53,6 +61,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           totalAssets: _calcTotalAssets(dist, app, includeUsdExchange: canViewUsdExchange),
           bankBalance: dist.totalBankBalance,
           vfCash: _calcTotalVfCash(app),
+          vfDepositProfit: dist.totalVfDepositProfit,
+          creditReturnProfit: dist.totalCreditReturnProfit,
           retailerDebt: dist.totalRetailerDebt,
           collectorCash: dist.totalCollectorCash,
           usdtBalance: dist.usdtBalance,
@@ -96,6 +106,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
         selectedIcon: Icons.store,
         widget: const RetailersScreen(),
         roles: [UserRole.ADMIN, UserRole.FINANCE, UserRole.COLLECTOR],
+      ),
+      _TabItem(
+        label: 'retailer_requests'.tr(),
+        icon: Icons.assignment_outlined,
+        selectedIcon: Icons.assignment,
+        widget: const RetailerAssignmentRequestsScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
       ),
       _TabItem(
         label: 'collectors'.tr(),
@@ -264,6 +281,8 @@ class _Overview extends StatelessWidget {
   final double totalAssets;
   final double bankBalance;
   final double vfCash;
+  final double vfDepositProfit;
+  final double creditReturnProfit;
   final double retailerDebt;
   final double collectorCash;
   final double usdtBalance;
@@ -275,6 +294,8 @@ class _Overview extends StatelessWidget {
     required this.totalAssets,
     required this.bankBalance,
     required this.vfCash,
+    required this.vfDepositProfit,
+    required this.creditReturnProfit,
     required this.retailerDebt,
     required this.collectorCash,
     required this.usdtBalance,
@@ -364,14 +385,40 @@ class _Overview extends StatelessWidget {
                 const SizedBox(height: 32),
                 Text('asset_breakdown'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 18, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
                 const SizedBox(height: 16),
+
+                // ── Section 1: Capital Assets ─────────────────────────────────────
+                const _SectionHeader(label: 'Capital Assets', icon: Icons.pie_chart_outline),
+                const SizedBox(height: 12),
                 _AssetCard(icon: Icons.account_balance, label: 'bank_accounts'.tr(), amount: bankBalance, color: AppTheme.infoColor(context)),
                 _AssetCard(icon: Icons.phone_android, label: 'vf_cash'.tr(), amount: vfCash, color: AppTheme.positiveColor(context)),
                 if (canViewUsdExchange)
                   _AssetCard(icon: Icons.currency_exchange, label: 'USD Exchange', amount: usdtBalance, color: AppTheme.warningColor(context), unit: 'USDT'),
                 _AssetCard(icon: Icons.store, label: 'owed_by_retailers'.tr(), amount: retailerDebt, color: const Color(0xFFD9CB41)),
                 _AssetCard(icon: Icons.delivery_dining, label: 'held_by_collectors'.tr(), amount: collectorCash, color: const Color(0xFF8E9BBA)),
-                if (transferFees > 0)
-                  _AssetCard(icon: Icons.money_off, label: 'Vodafone Fees Paid', amount: transferFees, color: AppTheme.accent),
+
+                // ── Section 2: Non-Capital Profits ────────────────────────────────
+                const SizedBox(height: 8),
+                const _SectionHeader(label: 'Additional Profits (not in capital)', icon: Icons.trending_up, muted: true),
+                const SizedBox(height: 4),
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    'These profits are already embedded in VF balances and excluded from the capital total to avoid double-counting.',
+                    style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11, height: 1.5),
+                  ),
+                ),
+                if (vfDepositProfit > 0)
+                  _AssetCard(icon: Icons.phone_android, label: 'VF Deposit Profit', amount: vfDepositProfit, color: const Color(0xFF2A9D8F), muted: true),
+                if (creditReturnProfit > 0)
+                  _AssetCard(icon: Icons.keyboard_return, label: 'Retailer Return Profit', amount: creditReturnProfit, color: const Color(0xFF27AE60), muted: true),
+                
+                // ── Section 3: Expenses ───────────────────────────────────────────
+                if (transferFees > 0) ...[
+                  const SizedBox(height: 12),
+                  const _SectionHeader(label: 'Expenses', icon: Icons.money_off_outlined, muted: true),
+                  const SizedBox(height: 8),
+                  _AssetCard(icon: Icons.money_off, label: 'VF Fees Paid', amount: transferFees, color: AppTheme.accent, muted: true),
+                ],
               ]),
             ),
           ),
@@ -389,40 +436,74 @@ class _AssetCard extends StatelessWidget {
   final double amount;
   final Color color;
   final String unit;
+  final bool muted;
 
-  const _AssetCard({required this.icon, required this.label, required this.amount, required this.color, this.unit = 'EGP'});
+  const _AssetCard({required this.icon, required this.label, required this.amount, required this.color, this.unit = 'EGP', this.muted = false});
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      margin: const EdgeInsets.only(bottom: 14),
-      padding: const EdgeInsets.all(18),
-      decoration: BoxDecoration(
-        gradient: LinearGradient(
-          colors: AppTheme.panelGradient(context),
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-        ),
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: color.withValues(alpha: 0.15)),
-        boxShadow: AppTheme.softShadow(context),
-      ),
-      child: Row(
-        children: [
-          Container(
-            padding: const EdgeInsets.all(10),
-            decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
-            child: Icon(icon, color: color, size: 20),
+    return Opacity(
+      opacity: muted ? 0.70 : 1.0,
+      child: Container(
+        margin: const EdgeInsets.only(bottom: 14),
+        padding: const EdgeInsets.all(18),
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: AppTheme.panelGradient(context),
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
           ),
-          const SizedBox(width: 14),
-          Expanded(child: Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w700))),
-          Text('${_f(amount)} $unit', style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 15)),
-        ],
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: color.withValues(alpha: muted ? 0.10 : 0.15)),
+          boxShadow: muted ? [] : AppTheme.softShadow(context),
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(12)),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(width: 14),
+            Expanded(child: Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w700))),
+            Text('${_f(amount)} $unit', style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 15)),
+          ],
+        ),
       ),
     );
   }
 
   String _f(double v) => NumberFormat('#,##0.00', 'en_US').format(v);
+}
+
+class _SectionHeader extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool muted;
+
+  const _SectionHeader({required this.label, required this.icon, this.muted = false});
+
+  @override
+  Widget build(BuildContext context) {
+    final color = muted ? AppTheme.textMutedColor(context) : AppTheme.textPrimaryColor(context);
+    return Row(
+      children: [
+        Icon(icon, size: 15, color: color),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            color: color,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+            letterSpacing: 0.3,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(child: Divider(color: AppTheme.lineColor(context), thickness: 1)),
+      ],
+    );
+  }
 }
 
 class _MoreMenu extends StatelessWidget {

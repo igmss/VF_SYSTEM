@@ -22,13 +22,24 @@ exports.createUserAccount = onCall({ region: REGION }, async (request) => {
   const password = request.data?.password?.toString() || '';
   const name = request.data?.name?.toString().trim();
   const role = request.data?.role?.toString().trim().toUpperCase();
-  const allowedRoles = new Set(['ADMIN', 'FINANCE', 'COLLECTOR']);
+  const retailerId = request.data?.retailerId?.toString().trim() || '';
+  const allowedRoles = new Set(['ADMIN', 'FINANCE', 'COLLECTOR', 'RETAILER']);
 
   if (!email || !name || !allowedRoles.has(role)) {
     throw new HttpsError('invalid-argument', 'Invalid user data.');
   }
   if (password.length < 6) {
     throw new HttpsError('invalid-argument', 'Password must be at least 6 characters.');
+  }
+  if (role === 'RETAILER' && !retailerId) {
+    throw new HttpsError('invalid-argument', 'Retailer profile is required for retailer accounts.');
+  }
+
+  if (role === 'RETAILER') {
+    const retailerSnap = await admin.database().ref(`retailers/${retailerId}`).once('value');
+    if (!retailerSnap.exists()) {
+      throw new HttpsError('not-found', 'That retailer record does not exist.');
+    }
   }
 
   let userRecord;
@@ -46,15 +57,20 @@ exports.createUserAccount = onCall({ region: REGION }, async (request) => {
   }
 
   const nowIso = new Date().toISOString();
+  const userPayload = {
+    uid: userRecord.uid,
+    email,
+    name,
+    role,
+    isActive: true,
+    createdAt: nowIso,
+  };
+  if (role === 'RETAILER') {
+    userPayload.retailerId = retailerId;
+  }
+
   const updates = {
-    [`users/${userRecord.uid}`]: {
-      uid: userRecord.uid,
-      email,
-      name,
-      role,
-      isActive: true,
-      createdAt: nowIso,
-    },
+    [`users/${userRecord.uid}`]: userPayload,
   };
 
   if (role === 'COLLECTOR') {
@@ -82,4 +98,3 @@ exports.createUserAccount = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('internal', error.message || 'Unable to persist user profile.');
   }
 });
-

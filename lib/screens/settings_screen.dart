@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
-import 'package:intl/intl.dart';
 import '../providers/app_provider.dart';
 import '../providers/theme_provider.dart';
 import '../providers/auth_provider.dart';
+import '../services/retailer_ussd_auto_queue_service.dart';
 import '../theme/app_theme.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -18,16 +18,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _formKey = GlobalKey<FormState>();
   final _apiKeyCtrl = TextEditingController();
   final _apiSecretCtrl = TextEditingController();
+  final _collectorVfFeeCtrl = TextEditingController();
 
   bool _showSecret = false;
   bool _isSaving = false;
   bool _isSyncing = false;
+  bool _isSavingCollectorVfFee = false;
   DateTime? _selectedDate;
+  double? _lastLoadedCollectorVfFee;
 
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
     _apiSecretCtrl.dispose();
+    _collectorVfFeeCtrl.dispose();
     super.dispose();
   }
 
@@ -51,6 +55,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _apiKeyCtrl.clear();
     _apiSecretCtrl.clear();
     _showSnack('creds_cleared'.tr(), isError: false);
+  }
+
+  Future<void> _saveCollectorVfFee() async {
+    final feePer1000 = double.tryParse(_collectorVfFeeCtrl.text.trim());
+    if (feePer1000 == null || feePer1000 < 0) {
+      _showSnack('Please enter a valid non-negative fee.');
+      return;
+    }
+
+    setState(() => _isSavingCollectorVfFee = true);
+    try {
+      await context
+          .read<AppProvider>()
+          .saveCollectorVfDepositFeePer1000(feePer1000);
+      _lastLoadedCollectorVfFee = feePer1000;
+      _showSnack('Collector VF deposit fee updated.', isError: false);
+    } catch (e) {
+      _showSnack('${'error'.tr()}: $e');
+    } finally {
+      if (mounted) setState(() => _isSavingCollectorVfFee = false);
+    }
   }
 
   Future<void> _pickDate() async {
@@ -109,6 +134,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final provider = context.watch<AppProvider>();
     final themeProvider = context.watch<ThemeProvider>();
     final hasCredentials = provider.hasApiCredentials;
+    final collectorVfFee = provider.collectorVfDepositFeePer1000;
     final lastSync = provider.lastSyncTime;
     final syncStatus = provider.syncStatus;
     final isDark = AppTheme.isDark(context);
@@ -118,6 +144,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
     final auth = context.watch<AuthProvider>();
     final isEmbedded = auth.isAdmin || auth.isFinance;
     final textMuted = AppTheme.textMutedColor(context);
+    final canManageCollectorVfFee = auth.isAdmin || auth.isFinance;
+
+    if (_lastLoadedCollectorVfFee != collectorVfFee &&
+        !_isSavingCollectorVfFee) {
+      _collectorVfFeeCtrl.text = collectorVfFee.toStringAsFixed(2);
+      _lastLoadedCollectorVfFee = collectorVfFee;
+    }
 
     final bodyContent = SingleChildScrollView(
         padding: const EdgeInsets.all(16),
@@ -227,6 +260,183 @@ class _SettingsScreenState extends State<SettingsScreen> {
               ),
             ),
             const SizedBox(height: 24),
+            if (canManageCollectorVfFee) ...[
+              _sectionHeader('Collector VF Deposit'),
+              _panel(
+                context,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Fee per 1000 EGP',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w700,
+                          fontSize: 15,
+                          color: textPrimary,
+                        ),
+                      ),
+                      const SizedBox(height: 6),
+                      Text(
+                        'Collectors depositing to Vodafone Cash will send the cash amount plus this fee. The fee is tracked as VF retail profit.',
+                        style: TextStyle(fontSize: 12, color: textMuted),
+                      ),
+                      const SizedBox(height: 14),
+                      TextFormField(
+                        controller: _collectorVfFeeCtrl,
+                        enabled: !_isSavingCollectorVfFee,
+                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                        style: TextStyle(color: textPrimary),
+                        decoration: InputDecoration(
+                          labelText: 'Fee / 1000 EGP',
+                          helperText: provider.defaultNumber != null
+                              ? 'Default VF number: ${provider.defaultNumber!.phoneNumber}'
+                              : 'No default VF number selected yet. Set one from the VF Numbers tab.',
+                          suffixText: 'EGP',
+                          prefixIcon: const Icon(Icons.percent_outlined),
+                          border: const OutlineInputBorder(),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: ElevatedButton.icon(
+                          onPressed: _isSavingCollectorVfFee
+                              ? null
+                              : _saveCollectorVfFee,
+                          icon: _isSavingCollectorVfFee
+                              ? const SizedBox(
+                                  width: 18,
+                                  height: 18,
+                                  child: CircularProgressIndicator(
+                                      strokeWidth: 2),
+                                )
+                              : const Icon(Icons.save_outlined),
+                          label: const Text('Save Collector VF Fee'),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.infoColor(context),
+                            foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
+            if (auth.isAdmin || auth.isFinance) ...[
+              _sectionHeader('retailer_auto_ussd_section'.tr()),
+              _panel(
+                context,
+                child: Padding(
+                  padding: const EdgeInsets.all(16),
+                  child: Consumer<RetailerUssdAutoQueueService>(
+                    builder: (context, queue, _) {
+                      final nums = provider.mobileNumbers;
+                      final vfOk = queue.defaultVfNumberId != null &&
+                          nums.any((n) => n.id == queue.defaultVfNumberId);
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'retailer_auto_ussd_subtitle'.tr(),
+                            style: TextStyle(fontSize: 12, color: textMuted, height: 1.35),
+                          ),
+                          const SizedBox(height: 12),
+                          SwitchListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('retailer_auto_ussd_enabled'.tr(),
+                                style: TextStyle(fontWeight: FontWeight.w700, color: textPrimary)),
+                            subtitle: Text(
+                              'retailer_auto_ussd_enabled_hint'.tr(),
+                              style: TextStyle(fontSize: 11, color: textMuted),
+                            ),
+                            value: queue.isAutoQueueEnabled,
+                            onChanged: (v) async {
+                              if (v && !vfOk) {
+                                _showSnack('retailer_auto_ussd_pick_vf'.tr());
+                                return;
+                              }
+                              await queue.setAutoQueueEnabled(v);
+                              _showSnack(
+                                v ? 'retailer_auto_ussd_on'.tr() : 'retailer_auto_ussd_off'.tr(),
+                                isError: false,
+                              );
+                            },
+                          ),
+                          if (nums.isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            DropdownButtonFormField<String>(
+                              value: vfOk ? queue.defaultVfNumberId : null,
+                              decoration: InputDecoration(
+                                labelText: 'retailer_auto_ussd_default_vf'.tr(),
+                                border: const OutlineInputBorder(),
+                              ),
+                              items: nums
+                                  .map(
+                                    (n) => DropdownMenuItem<String>(
+                                      value: n.id,
+                                      child: Text(
+                                        '${n.phoneNumber} (${n.currentBalance.toStringAsFixed(0)} EGP)',
+                                      ),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (id) => queue.setDefaultVfNumberId(id),
+                            ),
+                          ],
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('retailer_auto_ussd_external'.tr(),
+                                style: TextStyle(color: textPrimary, fontSize: 13)),
+                            value: queue.defaultExternalWallet,
+                            onChanged: (v) => queue.setDefaultExternalWallet(v ?? false),
+                          ),
+                          CheckboxListTile(
+                            contentPadding: EdgeInsets.zero,
+                            title: Text('retailer_auto_ussd_credit'.tr(),
+                                style: TextStyle(color: textPrimary, fontSize: 13)),
+                            value: queue.defaultApplyCredit,
+                            onChanged: (v) => queue.setDefaultApplyCredit(v ?? false),
+                          ),
+                          if (queue.isProcessing)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Row(
+                                children: [
+                                  const SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  ),
+                                  const SizedBox(width: 10),
+                                  Expanded(
+                                    child: Text(
+                                      queue.statusLine ?? 'retailer_auto_ussd_processing'.tr(),
+                                      style: TextStyle(fontSize: 12, color: AppTheme.accent),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          if (queue.lastError != null && queue.lastError!.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(
+                                queue.lastError!,
+                                style: const TextStyle(fontSize: 12, color: Colors.orange),
+                              ),
+                            ),
+                        ],
+                      );
+                    },
+                  ),
+                ),
+              ),
+              const SizedBox(height: 24),
+            ],
             _sectionHeader('bybit_api_creds'.tr()),
             _panel(
               context,

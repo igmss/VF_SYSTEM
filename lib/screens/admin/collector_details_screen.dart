@@ -53,8 +53,9 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
     final List<FinancialTransaction> allTxs = dist.ledger.where((tx) {
       final isCollection =
           tx.type == FlowType.COLLECT_CASH && tx.toId == collector.id;
-      final isDeposit =
-          tx.type == FlowType.DEPOSIT_TO_BANK && tx.fromId == collector.id;
+      final isDeposit = (tx.type == FlowType.DEPOSIT_TO_BANK ||
+              tx.type == FlowType.DEPOSIT_TO_VFCASH) &&
+          tx.fromId == collector.id;
       return isCollection || isDeposit;
     }).toList();
 
@@ -63,7 +64,9 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
         .toList();
 
     final List<FinancialTransaction> depositedTxs = allTxs
-        .where((tx) => tx.type == FlowType.DEPOSIT_TO_BANK)
+        .where((tx) =>
+            tx.type == FlowType.DEPOSIT_TO_BANK ||
+            tx.type == FlowType.DEPOSIT_TO_VFCASH)
         .toList();
 
     return Scaffold(
@@ -173,9 +176,12 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
       itemBuilder: (context, index) {
         final tx = txs[index];
         final isCollection = tx.type == FlowType.COLLECT_CASH;
+        final isVfDeposit = tx.type == FlowType.DEPOSIT_TO_VFCASH;
         final txColor = isCollection
             ? AppTheme.positiveColor(context)
-            : AppTheme.infoColor(context);
+            : isVfDeposit
+                ? AppTheme.positiveColor(context)
+                : AppTheme.infoColor(context);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -207,14 +213,20 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
                         child: Icon(
                           isCollection
                               ? Icons.arrow_downward
-                              : Icons.account_balance,
+                              : isVfDeposit
+                                  ? Icons.phone_android
+                                  : Icons.account_balance,
                           color: txColor,
                           size: 18,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        isCollection ? 'Collected' : 'Deposited',
+                        isCollection
+                            ? 'Collected'
+                            : isVfDeposit
+                                ? 'Deposited to VF'
+                                : 'Deposited to Bank',
                         style: TextStyle(
                           color: txColor,
                           fontWeight: FontWeight.bold,
@@ -240,7 +252,9 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
                         Text(
                           isCollection
                               ? 'From: ${tx.fromLabel ?? 'Unknown Retailer'}'
-                              : 'To: ${tx.toLabel ?? 'Unknown Bank'}',
+                              : isVfDeposit
+                                  ? 'To: ${tx.toLabel ?? 'Unknown VF Number'}'
+                                  : 'To: ${tx.toLabel ?? 'Unknown Bank'}',
                           style: TextStyle(
                               color: AppTheme.textPrimaryColor(context),
                               fontSize: 12,

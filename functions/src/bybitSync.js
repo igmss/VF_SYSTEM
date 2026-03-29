@@ -20,16 +20,16 @@ let timeOffsetMs = 0;
 // ── Helpers ─────────────────────────────────────────────────────────────
 
 async function syncServerTime() {
-    try {
-        const res = await axios.get(`${BYBIT_BASE_URL}/v5/market/time`);
-        if (res.data && res.data.result && res.data.result.timeNano) {
-            const serverMs = Math.floor(parseInt(res.data.result.timeNano) / 1000000);
-            timeOffsetMs = serverMs - Date.now();
-            console.log(`[Sync] Synced server time. Offset: ${timeOffsetMs}ms`);
-        }
-    } catch (e) {
-        console.error(`[Sync] Failed to sync server time: ${e.message}`);
+  try {
+    const res = await axios.get(`${BYBIT_BASE_URL}/v5/market/time`);
+    if (res.data && res.data.result && res.data.result.timeNano) {
+      const serverMs = Math.floor(parseInt(res.data.result.timeNano) / 1000000);
+      timeOffsetMs = serverMs - Date.now();
+      console.log(`[Sync] Synced server time. Offset: ${timeOffsetMs}ms`);
     }
+  } catch (e) {
+    console.error(`[Sync] Failed to sync server time: ${e.message}`);
+  }
 }
 
 function generateSignature(secret, payload) {
@@ -213,17 +213,31 @@ async function acquireSyncLock(db, ownerId) {
     return;
   });
 
+  if (result.committed) {
+    console.log(`[Lock] Acquired by ${ownerId}. Expires at: ${new Date(result.snapshot.val().expiresAt).toISOString()}`);
+  } else {
+    const current = result.snapshot.val();
+    console.log(`[Lock] Acquisition failed for ${ownerId}. Currently held by ${current?.ownerId} until ${current ? new Date(current.expiresAt).toISOString() : 'unknown'}`);
+  }
+
   return result.committed ? result.snapshot.val() : null;
 }
 
 async function releaseSyncLock(db, ownerId) {
   const lockRef = db.ref(SYNC_LOCK_PATH);
-  await lockRef.transaction((current) => {
+  const result = await lockRef.transaction((current) => {
     if (current && current.ownerId === ownerId) {
       return null;
     }
     return;
   });
+
+  if (result.committed) {
+    console.log(`[Lock] Released by ${ownerId}`);
+  } else {
+    const current = result.snapshot.val();
+    console.log(`[Lock] Release failed for ${ownerId}. Lock was ${current ? 'held by ' + current.ownerId : 'already empty'}`);
+  }
 }
 
 async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) {
@@ -274,7 +288,14 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
       beginTime = beginTimeOverride;
       console.log(`[Sync] Using override beginTime: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
     } else {
-      beginTime = lastSyncedOrderTs > 0 ? lastSyncedOrderTs - 5000 : Date.now() - (24 * 60 * 60 * 1000);
+      // Extended lookback window (24h) to catch orders that complete late.
+      // Efficiency is maintained via optimized deduplication below.
+      const lookbackMs = 24 * 60 * 60 * 1000;
+      beginTime = lastSyncedOrderTs > 0 ? (lastSyncedOrderTs - lookbackMs) : (Date.now() - lookbackMs);
+
+      // Limit lookback to 48h to prevent excessive pagination on stale markers
+      const minBeginTime = Date.now() - (48 * 60 * 60 * 1000);
+      if (beginTime < minBeginTime) beginTime = minBeginTime;
     }
 
     console.log(`[Sync] Fetching orders created after: ${new Date(beginTime).toISOString()} (TS: ${beginTime})`);
@@ -282,27 +303,26 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
     const orders = await fetchAllOrdersSince(apiKey, apiSecret, beginTime);
     console.log(`[Sync] Bybit returned ${orders.length} potential new orders.`);
 
-    const [existingTxSnap, existingLedgerSnap] = await Promise.all([
-      db.ref('transactions').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
-      db.ref('financial_ledger').orderByChild('bybitOrderId').startAt('').once('value').catch(() => null),
-    ]);
-
-    const existingTxIds = new Set();
-    if (existingTxSnap && existingTxSnap.exists()) {
-      existingTxSnap.forEach((child) => {
-        const id = child.val().bybitOrderId;
-        if (id) existingTxIds.add(id);
-      });
-    }
-
+    // Faster deduplication: only check IDs present in the current Bybit batch.
+    // This avoids pre-loading thousands of historic IDs.
     const existingLedgerIds = new Set();
-    if (existingLedgerSnap && existingLedgerSnap.exists()) {
-      existingLedgerSnap.forEach((child) => {
-        const id = child.val().bybitOrderId;
-        if (id) existingLedgerIds.add(id);
+    const existingTxIds = new Set();
+
+    if (orders.length > 0) {
+      const checkStartTime = Date.now();
+      const checkPromises = orders.map(async (order) => {
+        const orderId = order.id || order.orderId;
+        const [lSnap, tSnap] = await Promise.all([
+          db.ref('financial_ledger').orderByChild('bybitOrderId').equalTo(orderId).limitToFirst(1).once('value'),
+          db.ref('transactions').orderByChild('bybitOrderId').equalTo(orderId).limitToFirst(1).once('value')
+        ]);
+        if (lSnap.exists()) existingLedgerIds.add(orderId);
+        if (tSnap.exists()) existingTxIds.add(orderId);
       });
+      await Promise.all(checkPromises);
+      console.log(`[Sync] Deduplication check for ${orders.length} orders took ${Date.now() - checkStartTime}ms.`);
     }
-    console.log(`[Sync] Pre-loaded ${existingTxIds.size} tx IDs and ${existingLedgerIds.size} ledger IDs for dedup.`);
+    console.log(`[Sync] Found ${existingLedgerIds.size} already in ledger and ${existingTxIds.size} already in transactions for dedup.`);
 
     let added = 0;
     let skipped = 0;
@@ -486,12 +506,10 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
 
     console.log(`[Sync] Finished. Added: ${added}, Skipped: ${skipped}, New Marker: ${Math.max(safeNewMarker, lastSyncedOrderTs)}`);
 
-    for (const phone of numbersToRecalculate) {
-      try {
-        await recalculateUsage(phone);
-      } catch (e) {
-        console.error(`Failed to recalculate usage for ${phone}:`, e);
-      }
+    // Sequential recalculation is disabled to prevent timeouts.
+    // Sync already uses ServerValue.increment() for real-time accuracy.
+    if (numbersToRecalculate.size > 0) {
+      console.log(`[Sync] Incremental usage updated for ${numbersToRecalculate.size} phones. Full recalculation skipped to save time.`);
     }
 
     return { added, skipped };
@@ -504,48 +522,48 @@ async function processSync(ignoreEnabledFlag = false, beginTimeOverride = null) 
   }
 }
 async function recalculateUsage(phoneNumber) {
-    const db = admin.database();
-    const [numSnap, txSnap] = await Promise.all([
-        db.ref('mobile_numbers').orderByChild('phoneNumber').equalTo(phoneNumber).once('value'),
-        db.ref('transactions').orderByChild('phoneNumber').equalTo(phoneNumber).once('value')
-    ]);
+  const db = admin.database();
+  const [numSnap, txSnap] = await Promise.all([
+    db.ref('mobile_numbers').orderByChild('phoneNumber').equalTo(phoneNumber).once('value'),
+    db.ref('transactions').orderByChild('phoneNumber').equalTo(phoneNumber).once('value')
+  ]);
 
-    if (!numSnap.exists()) return;
-    const numberKey = Object.keys(numSnap.val())[0];
-    const number = numSnap.val()[numberKey];
+  if (!numSnap.exists()) return;
+  const numberKey = Object.keys(numSnap.val())[0];
+  const number = numSnap.val()[numberKey];
 
-    const now = new Date();
-    const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-    const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
 
-    let inDailyUsed = 0, outDailyUsed = 0;
-    let inMonthlyUsed = 0, outMonthlyUsed = 0;
-    let inTotalUsed = 0, outTotalUsed = 0;
+  let inDailyUsed = 0, outDailyUsed = 0;
+  let inMonthlyUsed = 0, outMonthlyUsed = 0;
+  let inTotalUsed = 0, outTotalUsed = 0;
 
-    if (txSnap.exists()) {
-        Object.values(txSnap.val()).forEach(tx => {
-            if (tx.status !== 'completed') return;
+  if (txSnap.exists()) {
+    Object.values(txSnap.val()).forEach(tx => {
+      if (tx.status !== 'completed') return;
 
-            const txTs = new Date(tx.timestamp).getTime();
-            const amount = parseFloat(tx.amount);
-            const isIncoming = tx.side === 1;
+      const txTs = new Date(tx.timestamp).getTime();
+      const amount = parseFloat(tx.amount);
+      const isIncoming = tx.side === 1;
 
-            if (isIncoming) inTotalUsed += amount; else outTotalUsed += amount;
-            if (txTs >= todayStart) {
-                if (isIncoming) inDailyUsed += amount; else outDailyUsed += amount;
-            }
-            if (txTs >= monthStart) {
-                if (isIncoming) inMonthlyUsed += amount; else outMonthlyUsed += amount;
-            }
-        });
-    }
-
-    await db.ref(`mobile_numbers/${numberKey}`).update({
-        inDailyUsed, outDailyUsed,
-        inMonthlyUsed, outMonthlyUsed,
-        inTotalUsed, outTotalUsed,
-        lastUpdatedAt: new Date().toISOString()
+      if (isIncoming) inTotalUsed += amount; else outTotalUsed += amount;
+      if (txTs >= todayStart) {
+        if (isIncoming) inDailyUsed += amount; else outDailyUsed += amount;
+      }
+      if (txTs >= monthStart) {
+        if (isIncoming) inMonthlyUsed += amount; else outMonthlyUsed += amount;
+      }
     });
+  }
+
+  await db.ref(`mobile_numbers/${numberKey}`).update({
+    inDailyUsed, outDailyUsed,
+    inMonthlyUsed, outMonthlyUsed,
+    inTotalUsed, outTotalUsed,
+    lastUpdatedAt: new Date().toISOString()
+  });
 }
 
 
@@ -581,7 +599,7 @@ exports.manualSyncBybit = onCall({ region: REGION }, async (request) => {
   const userSnap = await admin.database().ref(`users/${uid}`).once('value');
   const user = userSnap.val();
   if (!user || (user.role !== 'ADMIN' && user.role !== 'FINANCE')) {
-      throw new HttpsError('permission-denied', 'Unauthorized');
+    throw new HttpsError('permission-denied', 'Unauthorized');
   }
   const beginTimeOverride = request.data?.beginTime ? parseInt(request.data.beginTime) : null;
   return await processSync(true, beginTimeOverride);

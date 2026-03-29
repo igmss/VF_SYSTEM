@@ -3,6 +3,7 @@ enum UserRole {
   FINANCE,
   COLLECTOR,
   OPERATOR,
+  RETAILER,
 }
 
 extension UserRoleExtension on UserRole {
@@ -16,6 +17,8 @@ extension UserRoleExtension on UserRole {
         return 'Collector';
       case UserRole.OPERATOR:
         return 'Operator';
+      case UserRole.RETAILER:
+        return 'Retailer';
     }
   }
 
@@ -29,6 +32,8 @@ extension UserRoleExtension on UserRole {
         return UserRole.COLLECTOR;
       case 'OPERATOR':
         return UserRole.OPERATOR;
+      case 'RETAILER':
+        return UserRole.RETAILER;
       default:
         return UserRole.OPERATOR;
     }
@@ -43,6 +48,9 @@ class AppUser {
   final bool isActive;
   final DateTime createdAt;
 
+  /// Firebase `retailers/{retailerId}` key when [role] is [UserRole.RETAILER].
+  final String? retailerId;
+
   AppUser({
     required this.uid,
     required this.email,
@@ -50,6 +58,7 @@ class AppUser {
     required this.role,
     this.isActive = true,
     required this.createdAt,
+    this.retailerId,
   });
 
   Map<String, dynamic> toMap() {
@@ -60,6 +69,7 @@ class AppUser {
       'role': role.toString().split('.').last,
       'isActive': isActive,
       'createdAt': createdAt.toIso8601String(),
+      if (retailerId != null && retailerId!.isNotEmpty) 'retailerId': retailerId,
     };
   }
 
@@ -71,10 +81,12 @@ class AppUser {
       role: UserRoleExtension.fromString(map['role']?.toString() ?? 'OPERATOR'),
       isActive: (map['isActive'] is bool) ? map['isActive'] : true,
       createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
+      retailerId: map['retailerId']?.toString(),
     );
   }
 
   bool get isAdmin => role == UserRole.ADMIN;
   bool get isFinance => role == UserRole.FINANCE || role == UserRole.ADMIN;
   bool get isCollector => role == UserRole.COLLECTOR;
+  bool get isRetailer => role == UserRole.RETAILER;
 }

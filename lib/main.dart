@@ -10,13 +10,18 @@ import 'providers/theme_provider.dart';
 import 'screens/auth/login_screen.dart';
 import 'screens/admin/admin_dashboard.dart';
 import 'screens/collector/collector_dashboard.dart';
+import 'screens/retailer/retailer_dashboard.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
 import 'firebase_options.dart';
 
+import 'package:vodafone_cash_tracker/services/ussd_service.dart';
+import 'package:vodafone_cash_tracker/services/retailer_ussd_auto_queue_service.dart';
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await EasyLocalization.ensureInitialized();
+  UssdService.init();
 
   try {
     await Firebase.initializeApp(
@@ -44,6 +49,13 @@ class MyApp extends StatelessWidget {
     return MultiProvider(
       providers: [
         ChangeNotifierProvider(create: (_) => AuthProvider()),
+        ChangeNotifierProvider(
+          create: (_) {
+            final s = RetailerUssdAutoQueueService();
+            s.loadPrefs();
+            return s;
+          },
+        ),
         ChangeNotifierProvider(create: (_) => DistributionProvider()),
         ChangeNotifierProvider(create: (_) => ThemeProvider()),
         ChangeNotifierProxyProvider<DistributionProvider, AppProvider>(
@@ -123,12 +135,20 @@ class _AppRouter extends StatelessWidget {
     }
 
     if (!auth.isLoggedIn) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        try {
+          context.read<RetailerUssdAutoQueueService>().detach();
+        } catch (_) {}
+      });
       return const LoginScreen();
     }
 
     final role = auth.currentUser?.role;
     if (role == UserRole.COLLECTOR) {
       return const CollectorDashboard();
+    }
+    if (role == UserRole.RETAILER) {
+      return const RetailerDashboard();
     }
     if (role == UserRole.ADMIN || role == UserRole.FINANCE || role == UserRole.OPERATOR) {
       return const AdminDashboard();

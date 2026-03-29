@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
+import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/retailer.dart';
@@ -8,6 +9,8 @@ import '../../models/collector.dart';
 import '../../models/bank_account.dart';
 import '../admin/retailer_details_screen.dart';
 import '../../theme/app_theme.dart';
+
+enum _DepositDestination { bank, vf }
 
 class CollectorDashboard extends StatefulWidget {
   const CollectorDashboard({super.key});
@@ -652,6 +655,7 @@ class _DepositTab extends StatefulWidget {
 class _DepositTabState extends State<_DepositTab> {
   BankAccount? _selectedBank;
   final _amountCtrl = TextEditingController();
+  _DepositDestination _destination = _DepositDestination.bank;
 
   @override
   void dispose() {
@@ -664,8 +668,15 @@ class _DepositTabState extends State<_DepositTab> {
     final collector = widget.collector;
     final cashOnHand = collector?.cashOnHand ?? 0;
     final dist = context.watch<DistributionProvider>();
+    final app = context.watch<AppProvider>();
     final isDepositing = dist.isDepositing;
     final isLight = !AppTheme.isDark(context);
+    final defaultVfNumber = app.defaultNumber;
+    final feeRate = app.collectorVfDepositFeePer1000;
+    final amount = double.tryParse(_amountCtrl.text) ?? 0.0;
+    final vfFee = _calculateVfFee(amount, feeRate);
+    final vfTransferTotal = amount + vfFee;
+    final isBankDestination = _destination == _DepositDestination.bank;
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -712,20 +723,111 @@ class _DepositTabState extends State<_DepositTab> {
             ),
           ),
           const SizedBox(height: 24),
-          Text('select_bank'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w700)),
+          Text('Deposit Destination', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
-          if (widget.bankAccounts.isEmpty)
-            Text('no_bank_accounts'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context)))
-          else
-            ...widget.bankAccounts.map((b) => _BankOption(
-                  bank: b,
-                  selected: _selectedBank?.id == b.id,
-                  onTap: () => setState(() => _selectedBank = b),
-                )),
-          const SizedBox(height: 24),
+          Row(
+            children: [
+              Expanded(
+                child: _DestinationOption(
+                  label: 'Bank Account',
+                  subtitle: 'Move collected cash into one of the tracked banks.',
+                  icon: Icons.account_balance,
+                  selected: isBankDestination,
+                  color: AppTheme.infoColor(context),
+                  onTap: () => setState(() => _destination = _DepositDestination.bank),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _DestinationOption(
+                  label: 'Default VF Number',
+                  subtitle: defaultVfNumber?.phoneNumber ?? 'No default VF number set',
+                  icon: Icons.phone_android,
+                  selected: !isBankDestination,
+                  color: AppTheme.positiveColor(context),
+                  onTap: () => setState(() => _destination = _DepositDestination.vf),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 20),
+          if (isBankDestination) ...[
+            Text('select_bank'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w700)),
+            const SizedBox(height: 12),
+            if (widget.bankAccounts.isEmpty)
+              Text('no_bank_accounts'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context)))
+            else
+              ...widget.bankAccounts.map((b) => _BankOption(
+                    bank: b,
+                    selected: _selectedBank?.id == b.id,
+                    onTap: () => setState(() => _selectedBank = b),
+                  )),
+          ] else ...[
+            Container(
+              width: double.infinity,
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.55),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: AppTheme.lineColor(context)),
+              ),
+              child: defaultVfNumber == null
+                  ? Text(
+                      'No default VF number is set yet. Ask admin to mark one as default first.',
+                      style: TextStyle(color: AppTheme.textMutedColor(context)),
+                    )
+                  : Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          defaultVfNumber.phoneNumber,
+                          style: TextStyle(
+                            color: AppTheme.textPrimaryColor(context),
+                            fontSize: 18,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'Fee rate: ${feeRate.toStringAsFixed(2)} EGP per 1000',
+                          style: TextStyle(
+                            color: AppTheme.textMutedColor(context),
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (amount > 0) ...[
+                          const SizedBox(height: 14),
+                          _summaryRow(
+                            context,
+                            'Cash deducted from you',
+                            '${amount.toStringAsFixed(2)} EGP',
+                            AppTheme.warningColor(context),
+                          ),
+                          const SizedBox(height: 6),
+                          _summaryRow(
+                            context,
+                            'VF retail profit',
+                            '+${vfFee.toStringAsFixed(2)} EGP',
+                            AppTheme.positiveColor(context),
+                          ),
+                          const SizedBox(height: 6),
+                          _summaryRow(
+                            context,
+                            'Total transferred to VF',
+                            '${vfTransferTotal.toStringAsFixed(2)} EGP',
+                            AppTheme.infoColor(context),
+                          ),
+                        ],
+                      ],
+                    ),
+            ),
+          ],
+          const SizedBox(height: 12),
           TextField(
             controller: _amountCtrl,
             keyboardType: TextInputType.number,
+            onChanged: (_) => setState(() {}),
             style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
             decoration: InputDecoration(
               labelText: 'deposit_amount'.tr(),
@@ -748,9 +850,17 @@ class _DepositTabState extends State<_DepositTab> {
                       ),
                     )
                   : const Icon(Icons.upload_rounded),
-              label: Text(isDepositing ? 'Processing...' : 'deposit_to_bank'.tr()),
+              label: Text(
+                isDepositing
+                    ? 'Processing...'
+                    : isBankDestination
+                        ? 'deposit_to_bank'.tr()
+                        : 'Deposit to Default VF',
+              ),
               style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.infoColor(context),
+                backgroundColor: isBankDestination
+                    ? AppTheme.infoColor(context)
+                    : AppTheme.positiveColor(context),
                 foregroundColor: Colors.white,
                 padding: const EdgeInsets.symmetric(vertical: 16),
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -766,19 +876,34 @@ class _DepositTabState extends State<_DepositTab> {
 
   Future<void> _doDeposit() async {
     final collector = widget.collector!;
+    final dist = Provider.of<DistributionProvider>(context, listen: false);
+    final app = Provider.of<AppProvider>(context, listen: false);
     final bank = _selectedBank;
+    final defaultVfNumber = app.defaultNumber;
     final amount = double.tryParse(_amountCtrl.text) ?? 0;
+    final feeRate = app.collectorVfDepositFeePer1000;
+    final vfFee = _calculateVfFee(amount, feeRate);
+    final vfTransferTotal = amount + vfFee;
 
-    if (bank == null) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('select_bank_first'.tr())));
-      return;
-    }
     if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red));
       return;
     }
     if (amount > collector.cashOnHand) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('deposit_exceeds_cash'.tr(args: [collector.cashOnHand.toStringAsFixed(0)])), backgroundColor: Colors.orange));
+      return;
+    }
+    if (_destination == _DepositDestination.bank && bank == null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('select_bank_first'.tr())));
+      return;
+    }
+    if (_destination == _DepositDestination.vf && defaultVfNumber == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('No default VF number is set yet.'),
+          backgroundColor: Colors.red,
+        ),
+      );
       return;
     }
 
@@ -788,12 +913,23 @@ class _DepositTabState extends State<_DepositTab> {
         backgroundColor: AppTheme.surfaceColor(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
         title: Text('Confirm Action', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
-        content: Text('Are you sure you want to deposit ${amount.toStringAsFixed(0)} EGP to ${bank.bankName}?', style: TextStyle(color: AppTheme.textMutedColor(context))),
+        content: Text(
+          _destination == _DepositDestination.bank
+              ? 'Are you sure you want to deposit ${amount.toStringAsFixed(0)} EGP to ${bank!.bankName}?'
+              : 'Deposit ${amount.toStringAsFixed(2)} EGP to ${defaultVfNumber!.phoneNumber}?\n\nCollector cash decreases by ${amount.toStringAsFixed(2)} EGP.\nVF receives ${vfTransferTotal.toStringAsFixed(2)} EGP.\nProfit recorded: ${vfFee.toStringAsFixed(2)} EGP.',
+          style: TextStyle(color: AppTheme.textMutedColor(context)),
+        ),
         actions: [
           TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context)))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.infoColor(context), elevation: 0, shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _destination == _DepositDestination.bank
+                  ? AppTheme.infoColor(context)
+                  : AppTheme.positiveColor(context),
+              elevation: 0,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            ),
             child: const Text('Confirm', style: TextStyle(color: Colors.white)),
           ),
         ],
@@ -803,19 +939,138 @@ class _DepositTabState extends State<_DepositTab> {
     if (confirm != true) return;
 
     try {
-      await Provider.of<DistributionProvider>(context, listen: false).depositToBank(
-            collectorId: collector.id,
-            bankAccountId: bank.id,
-            amount: amount,
-            createdByUid: Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ?? '',
-          );
+      if (_destination == _DepositDestination.bank) {
+        await dist.depositToBank(
+          collectorId: collector.id,
+          bankAccountId: bank!.id,
+          amount: amount,
+          createdByUid:
+              Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ??
+                  '',
+        );
+      } else {
+        await dist.depositToDefaultVf(
+          collectorId: collector.id,
+          amount: amount,
+          createdByUid:
+              Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ??
+                  '',
+        );
+      }
       if (!mounted) return;
       _amountCtrl.clear();
       setState(() => _selectedBank = null);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('deposit_success'.tr())));
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _destination == _DepositDestination.bank
+                ? 'deposit_success'.tr()
+                : 'Vodafone deposit recorded successfully',
+          ),
+        ),
+      );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
     }
+  }
+
+  double _calculateVfFee(double amount, double feeRatePer1000) {
+    if (amount <= 0 || feeRatePer1000 <= 0) return 0.0;
+    return double.parse(((amount / 1000.0) * feeRatePer1000).toStringAsFixed(2));
+  }
+
+  Widget _summaryRow(
+    BuildContext context,
+    String label,
+    String value,
+    Color color,
+  ) {
+    return Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(
+          label,
+          style: TextStyle(
+            color: AppTheme.textMutedColor(context),
+            fontSize: 12,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _DestinationOption extends StatelessWidget {
+  final String label;
+  final String subtitle;
+  final IconData icon;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  const _DestinationOption({
+    required this.label,
+    required this.subtitle,
+    required this.icon,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 220),
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: selected
+              ? color.withValues(alpha: 0.10)
+              : AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.55),
+          borderRadius: BorderRadius.circular(18),
+          border: Border.all(
+            color: selected ? color : AppTheme.lineColor(context),
+            width: selected ? 1.5 : 1.0,
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Icon(icon, color: selected ? color : AppTheme.textMutedColor(context)),
+            const SizedBox(height: 10),
+            Text(
+              label,
+              style: TextStyle(
+                color: selected ? color : AppTheme.textPrimaryColor(context),
+                fontSize: 14,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 4),
+            Text(
+              subtitle,
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: AppTheme.textMutedColor(context),
+                fontSize: 11,
+                height: 1.35,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 

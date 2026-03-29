@@ -114,6 +114,8 @@ class _LedgerTile extends StatelessWidget {
       } else {
         label = '${tx.type.label.tr()} (${tx.toLabel})';
       }
+    } else if (tx.type == FlowType.DEPOSIT_TO_VFCASH) {
+      label = 'Deposit to VF (${tx.toLabel})';
     } else if (tx.type == FlowType.BUY_USDT) {
       label = 'Buy USDT (${tx.fromLabel})';
     } else if (tx.type == FlowType.BANK_DEDUCTION) {
@@ -122,6 +124,8 @@ class _LedgerTile extends StatelessWidget {
       label = 'Credit Return (${tx.fromLabel})';
     } else if (tx.type == FlowType.CREDIT_RETURN_FEE) {
       label = 'Credit Return Fee (${tx.fromLabel})';
+    } else if (tx.type == FlowType.VFCASH_RETAIL_PROFIT) {
+      label = 'VF Retail Profit (${tx.toLabel})';
     }
 
     // Clean label for display (strip the suffix — we'll show a badge instead)
@@ -178,10 +182,12 @@ class _LedgerTile extends StatelessWidget {
                 // From → To row
                 if (tx.type != FlowType.FUND_BANK &&
                     tx.type != FlowType.DEPOSIT_TO_BANK &&
+                    tx.type != FlowType.DEPOSIT_TO_VFCASH &&
                     tx.type != FlowType.BUY_USDT &&
                     tx.type != FlowType.BANK_DEDUCTION &&
                     tx.type != FlowType.CREDIT_RETURN &&
-                    tx.type != FlowType.CREDIT_RETURN_FEE) ...[
+                    tx.type != FlowType.CREDIT_RETURN_FEE &&
+                    tx.type != FlowType.VFCASH_RETAIL_PROFIT) ...[
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
@@ -446,6 +452,8 @@ class _LedgerTile extends StatelessWidget {
         return const Color(0xFFA78BFA);
       case FlowType.DEPOSIT_TO_BANK:
         return AppTheme.infoColor(context);
+      case FlowType.DEPOSIT_TO_VFCASH:
+        return AppTheme.positiveColor(context);
       case FlowType.EXPENSE_VFCASH_FEE:
         return const Color(0xFFFF9800);
       case FlowType.ADMIN_ADJUSTMENT:
@@ -454,6 +462,8 @@ class _LedgerTile extends StatelessWidget {
         return AppTheme.positiveColor(context);
       case FlowType.CREDIT_RETURN_FEE:
         return AppTheme.warningColor(context);
+      case FlowType.VFCASH_RETAIL_PROFIT:
+        return const Color(0xFF2A9D8F);
       case FlowType.BANK_DEDUCTION:
         return const Color(0xFFE63946);
     }
@@ -473,6 +483,8 @@ class _LedgerTile extends StatelessWidget {
         return Icons.delivery_dining;
       case FlowType.DEPOSIT_TO_BANK:
         return Icons.account_balance;
+      case FlowType.DEPOSIT_TO_VFCASH:
+        return Icons.phone_android;
       case FlowType.EXPENSE_VFCASH_FEE:
         return Icons.money_off;
       case FlowType.ADMIN_ADJUSTMENT:
@@ -481,6 +493,8 @@ class _LedgerTile extends StatelessWidget {
         return Icons.keyboard_return;
       case FlowType.CREDIT_RETURN_FEE:
         return Icons.add_chart;
+      case FlowType.VFCASH_RETAIL_PROFIT:
+        return Icons.trending_up;
       case FlowType.BANK_DEDUCTION:
         return Icons.remove_circle_outline;
     }

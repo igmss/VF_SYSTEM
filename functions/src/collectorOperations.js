@@ -14,6 +14,10 @@ function asNumber(value) {
   return Number.isFinite(parsed) ? parsed : 0;
 }
 
+function roundCurrency(value) {
+  return Number(asNumber(value).toFixed(2));
+}
+
 function getRetailerPendingDebt(retailer) {
   const pending = asNumber(retailer.totalAssigned) - asNumber(retailer.totalCollected);
   return pending > 0 ? pending : 0;
@@ -25,25 +29,6 @@ async function getCallerRole(uid) {
   return user?.role || null;
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// collectRetailerCash
-//
-// Design:
-//   Phase 1 – Read retailer + collector data, compute split (no writes).
-//   Phase 2 – Single atomic multi-path db.update():
-//               • Ledger entry
-//               • Retailer totalCollected / credit  (via ServerValue.increment)
-//               • Collector cashOnHand / totalCollected (via ServerValue.increment)
-//
-// No transaction needed for the retailer path because:
-//   • totalCollected and credit only grow upward during collection.
-//   • We compute the exact split from the snapshot taken 1-2 ms ago.
-//   • ServerValue.increment is individually atomic per path.
-//   • A race where another collection fires simultaneously is extremely
-//     unlikely in this domain and does not cause data corruption — worst case
-//     is `totalCollected` slightly exceeds `totalAssigned` (credit would
-//     absorb the overshoot), which the existing credit logic already handles.
-// ─────────────────────────────────────────────────────────────────────────────
 exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
@@ -64,8 +49,6 @@ exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
   }
 
   const db = admin.database();
-
-  // ─── Phase 1: Read, validate, compute split ───────────────────────────────
   const [collectorSnap, retailerSnap] = await Promise.all([
     db.ref(`collectors/${collectorId}`).once('value'),
     db.ref(`retailers/${retailerId}`).once('value'),
@@ -87,8 +70,6 @@ exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
   const pendingDebt = getRetailerPendingDebt(retailer);
   const addedToCollected = pendingDebt > 0 ? Math.min(amount, pendingDebt) : 0;
   const addedToCredit = amount - addedToCollected;
-
-  // ─── Phase 2: Atomic multi-path write ────────────────────────────────────
   const txId = uuidv4();
   const nowIso = new Date().toISOString();
 
@@ -124,22 +105,6 @@ exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
   return { txId, addedToCollected, addedToCredit };
 });
 
-// ─────────────────────────────────────────────────────────────────────────────
-// depositCollectorCash
-//
-// Design:
-//   Phase 1 – Read both documents, validate collector has enough cashOnHand.
-//   Phase 2 – Transaction on cashOnHand only (balance check + debit, atomic).
-//   Phase 3 – Single atomic multi-path db.update():
-//               • Ledger entry
-//               • Collector totalDeposited  (ServerValue.increment)
-//               • Bank balance              (ServerValue.increment)
-//             On failure → rollback cashOnHand via another transaction.
-//
-// We need a transaction on cashOnHand (not just a read + write) because two
-// concurrent deposits from the same collector simultaneously must not both
-// pass the balance check against the same stale snapshot.
-// ─────────────────────────────────────────────────────────────────────────────
 exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
@@ -160,8 +125,6 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
   }
 
   const db = admin.database();
-
-  // ─── Phase 1: Read & validate ─────────────────────────────────────────────
   const [collectorSnap, bankSnap] = await Promise.all([
     db.ref(`collectors/${collectorId}`).once('value'),
     db.ref(`bank_accounts/${bankAccountId}`).once('value'),
@@ -178,15 +141,12 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('permission-denied', 'Collector is not allowed to deposit for this account.');
   }
 
-  // ─── Phase 2: Atomically debit cashOnHand ─────────────────────────────────
-  // Using a transaction ensures two simultaneous deposits cannot both pass
-  // the balance check against stale data.
   const cashResult = await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
-    if (current === null) return current; // Let Firebase retry with real value
+    if (current === null) return current;
 
     const cashOnHand = asNumber(current);
     if ((amount - cashOnHand) > 0.01) {
-      return; // Explicit abort: genuinely insufficient cash on hand
+      return;
     }
     return Math.max(0, cashOnHand - amount);
   });
@@ -199,7 +159,6 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
     );
   }
 
-  // ─── Phase 3: Atomic multi-path write ────────────────────────────────────
   const txId = uuidv4();
   const nowIso = new Date().toISOString();
 
@@ -223,7 +182,6 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
       [`bank_accounts/${bankAccountId}/lastUpdatedAt`]: nowIso,
     });
   } catch (error) {
-    // Roll back the cashOnHand debit — the ledger/bank write was never applied.
     await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
       return asNumber(current) + amount;
     }).catch(() => {});
@@ -231,4 +189,169 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
   }
 
   return { txId };
+});
+
+exports.depositCollectorCashToDefaultVf = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+
+  const role = await getCallerRole(uid);
+  if (!role || !['ADMIN', 'FINANCE', 'COLLECTOR'].includes(role)) {
+    throw new HttpsError('permission-denied', 'Unauthorized');
+  }
+
+  const collectorId = request.data?.collectorId?.toString();
+  const amount = asNumber(request.data?.amount);
+  const createdByUid = uid;
+  const notes = request.data?.notes?.toString().trim() || null;
+
+  if (!collectorId || amount <= 0) {
+    throw new HttpsError('invalid-argument', 'Invalid Vodafone deposit request.');
+  }
+
+  const db = admin.database();
+  const [collectorSnap, vfNumbersSnap, settingsSnap] = await Promise.all([
+    db.ref(`collectors/${collectorId}`).once('value'),
+    db.ref('mobile_numbers').once('value'),
+    db.ref('system/operation_settings').once('value'),
+  ]);
+
+  if (!collectorSnap.exists()) {
+    throw new HttpsError('not-found', 'Collector not found.');
+  }
+  if (!vfNumbersSnap.exists() || typeof vfNumbersSnap.val() !== 'object') {
+    throw new HttpsError('failed-precondition', 'No Vodafone numbers are configured.');
+  }
+
+  const collector = collectorSnap.val();
+  if (role === 'COLLECTOR' && collector.uid !== uid) {
+    throw new HttpsError('permission-denied', 'Collector is not allowed to deposit for this account.');
+  }
+
+  const vfEntries = Object.entries(vfNumbersSnap.val() || {}).filter(([, value]) => value && typeof value === 'object');
+  if (vfEntries.length === 0) {
+    throw new HttpsError('failed-precondition', 'No Vodafone numbers are configured.');
+  }
+
+  const [vfNumberId, rawVfNumber] = vfEntries.find(([, value]) => value.isDefault === true) || vfEntries[0];
+  const vfNumber = rawVfNumber || {};
+  const vfPhone = vfNumber.phoneNumber || 'Default VF Number';
+  const settings = settingsSnap.exists() && typeof settingsSnap.val() === 'object'
+    ? settingsSnap.val()
+    : {};
+  const feeRatePer1000 = Math.max(0, settings.collectorVfDepositFeePer1000 == null ? 7.0 : asNumber(settings.collectorVfDepositFeePer1000));
+  const feeProfit = roundCurrency((amount / 1000.0) * feeRatePer1000);
+  const transferredAmount = roundCurrency(amount + feeProfit);
+
+  const cashResult = await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
+    if (current === null) return current;
+
+    const cashOnHand = asNumber(current);
+    if ((amount - cashOnHand) > 0.01) {
+      return;
+    }
+    return Math.max(0, cashOnHand - amount);
+  });
+
+  if (!cashResult.committed) {
+    const cashOnHand = asNumber(cashResult.snapshot?.val());
+    throw new HttpsError(
+      'failed-precondition',
+      `Insufficient cash on hand. Available: ${cashOnHand.toFixed(2)} EGP, required: ${amount.toFixed(2)} EGP.`
+    );
+  }
+
+  const txId = uuidv4();
+  const profitTxId = uuidv4();
+  const generatedTxId = uuidv4();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowTs = now.getTime();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+
+  const detailNote =
+    `Transferred ${transferredAmount.toFixed(2)} EGP to ${vfPhone} ` +
+    `(cash ${amount.toFixed(2)} + profit ${feeProfit.toFixed(2)} @ ${feeRatePer1000.toFixed(2)}/1000)`;
+  const appliedNotes = notes ? `${notes} (${detailNote})` : detailNote;
+
+  const updates = {
+    [`financial_ledger/${txId}`]: {
+      id: txId,
+      type: 'DEPOSIT_TO_VFCASH',
+      amount,
+      transferredAmount,
+      feeAmount: feeProfit,
+      feeRatePer1000,
+      fromId: collectorId,
+      fromLabel: collector.name || 'Collector',
+      toId: vfNumberId,
+      toLabel: vfPhone,
+      createdByUid,
+      notes: appliedNotes,
+      generatedTransactionId: generatedTxId,
+      timestamp: nowTs,
+    },
+    [`collectors/${collectorId}/totalDeposited`]: admin.database.ServerValue.increment(amount),
+    [`collectors/${collectorId}/lastUpdatedAt`]: nowIso,
+    [`transactions/${generatedTxId}`]: {
+      id: generatedTxId,
+      phoneNumber: vfPhone,
+      amount: transferredAmount,
+      currency: 'EGP',
+      timestamp: nowIso,
+      bybitOrderId: `CLDV-${txId.substring(0, 8)}`,
+      status: 'completed',
+      paymentMethod: 'Vodafone Collector Deposit',
+      side: 1,
+      relatedLedgerId: txId,
+      chatHistory:
+        `Collector deposit from ${collector.name || 'Collector'} ` +
+        `(Cash: ${amount.toFixed(2)}, Profit: ${feeProfit.toFixed(2)})`,
+    },
+    // Record the full transferred amount (cash + profit) as incoming to the VF number.
+    // This increases inTotalUsed which is used by getMobileNumberBalance to compute the current balance.
+    [`mobile_numbers/${vfNumberId}/inTotalUsed`]: admin.database.ServerValue.increment(transferredAmount),
+    [`mobile_numbers/${vfNumberId}/lastUpdatedAt`]: nowIso,
+  };
+
+  if (nowTs >= todayStart) {
+    updates[`mobile_numbers/${vfNumberId}/inDailyUsed`] = admin.database.ServerValue.increment(transferredAmount);
+  }
+  if (nowTs >= monthStart) {
+    updates[`mobile_numbers/${vfNumberId}/inMonthlyUsed`] = admin.database.ServerValue.increment(transferredAmount);
+  }
+  if (feeProfit > 0) {
+    updates[`financial_ledger/${profitTxId}`] = {
+      id: profitTxId,
+      type: 'VFCASH_RETAIL_PROFIT',
+      amount: feeProfit,
+      fromId: collectorId,
+      fromLabel: collector.name || 'Collector',
+      toId: vfNumberId,
+      toLabel: vfPhone,
+      createdByUid,
+      relatedLedgerId: txId,
+      notes: 'Collector Vodafone deposit profit',
+      timestamp: nowTs,
+    };
+  }
+
+  try {
+    await db.ref().update(updates);
+  } catch (error) {
+    await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
+      return asNumber(current) + amount;
+    }).catch(() => {});
+    throw new HttpsError('internal', error.message || 'Unable to complete Vodafone deposit.');
+  }
+
+  return {
+    txId,
+    vfNumberId,
+    vfPhone,
+    transferredAmount,
+    feeAmount: feeProfit,
+    feeRatePer1000,
+  };
 });

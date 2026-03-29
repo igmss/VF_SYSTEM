@@ -20,6 +20,9 @@ enum FlowType {
   /// Collector deposited cash into a Bank Account — Collector cashOnHand decreased, Bank balance increased
   DEPOSIT_TO_BANK,
 
+  /// Collector deposited cash into the default Vodafone number — Collector cashOnHand decreased, VF balance increased
+  DEPOSIT_TO_VFCASH,
+
   /// Vodafone Cash tracking transfer fee deducted during distribution
   EXPENSE_VFCASH_FEE,
 
@@ -31,6 +34,9 @@ enum FlowType {
   
   /// Fee collected during a Credit Return transaction
   CREDIT_RETURN_FEE,
+
+  /// Profit retained on Vodafone retail operations
+  VFCASH_RETAIL_PROFIT,
 
   /// Manual deduction from a bank account (e.g. balance correction for a missed BUY_USDT deduction)
   BANK_DEDUCTION,
@@ -45,10 +51,12 @@ extension FlowTypeExtension on FlowType {
       case FlowType.DISTRIBUTE_VFCASH: return 'distribute_vfcash_action';
       case FlowType.COLLECT_CASH:    return 'collect_cash';
       case FlowType.DEPOSIT_TO_BANK: return 'deposit_to_bank_action';
+      case FlowType.DEPOSIT_TO_VFCASH: return 'deposit_to_vfcash_action';
       case FlowType.EXPENSE_VFCASH_FEE: return 'expense_vfcash_fee';
       case FlowType.ADMIN_ADJUSTMENT:   return 'admin_adjustment';
       case FlowType.CREDIT_RETURN:      return 'credit_return';
       case FlowType.CREDIT_RETURN_FEE:  return 'credit_return_fee';
+      case FlowType.VFCASH_RETAIL_PROFIT: return 'vfcash_retail_profit';
       case FlowType.BANK_DEDUCTION:     return 'bank_deduction';
     }
   }

@@ -42,6 +42,7 @@ class AppProvider extends ChangeNotifier {
   String _syncStatus = '';      // live progress text e.g. "Fetching page 2..."
   bool _isLiveSyncEnabled = false;
   Timer? _liveSyncTimer;
+  double _collectorVfDepositFeePer1000 = 7.0;
 
   // ── Getters ───────────────────────────────────────────────────────────────
   // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
@@ -49,6 +50,7 @@ class AppProvider extends ChangeNotifier {
   StreamSubscription<List<CashTransaction>>? _transactionsSub;
   StreamSubscription<DatabaseEvent>? _syncDataSub;
   StreamSubscription<DatabaseEvent>? _bybitMetadataSub;
+  StreamSubscription<DatabaseEvent>? _operationSettingsSub;
 
   List<MobileNumber> get mobileNumbers => _mobileNumbers;
   List<CashTransaction> get transactions => _transactions;
@@ -60,6 +62,7 @@ class AppProvider extends ChangeNotifier {
   String get syncStatus => _syncStatus;
   bool get isLiveSyncEnabled => _isLiveSyncEnabled;
   bool get useServerSync => true;
+  double get collectorVfDepositFeePer1000 => _collectorVfDepositFeePer1000;
 
   // Callback to trigger Bank logic in DistributionProvider
   Future<void> Function({
@@ -123,6 +126,12 @@ class AppProvider extends ChangeNotifier {
     }
   }
 
+  double _asDouble(dynamic value) {
+    if (value == null) return 0.0;
+    if (value is num) return value.toDouble();
+    return double.tryParse(value.toString()) ?? 0.0;
+  }
+
   void _initializeListeners() {
     _numbersSub?.cancel();
     _numbersSub = _dbService.streamMobileNumbers().listen((numbers) {
@@ -175,6 +184,22 @@ class AppProvider extends ChangeNotifier {
       }
       notifyListeners();
     });
+
+    _operationSettingsSub?.cancel();
+    _operationSettingsSub = FirebaseDatabase.instance
+        .ref('system/operation_settings')
+        .onValue
+        .listen((event) {
+      final snap = event.snapshot;
+      if (snap.exists && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _collectorVfDepositFeePer1000 =
+            _asDouble(data['collectorVfDepositFeePer1000']);
+      } else {
+        _collectorVfDepositFeePer1000 = 7.0;
+      }
+      notifyListeners();
+    });
   }
 
   @override
@@ -184,6 +209,7 @@ class AppProvider extends ChangeNotifier {
     _transactionsSub?.cancel();
     _syncDataSub?.cancel();
     _bybitMetadataSub?.cancel();
+    _operationSettingsSub?.cancel();
     _syncConfigSub?.cancel();
     super.dispose();
   }
@@ -205,6 +231,15 @@ class AppProvider extends ChangeNotifier {
     final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
     await functions.httpsCallable('clearBybitCredentials').call();
     _hasApiCredentials = false;
+    notifyListeners();
+  }
+
+  Future<void> saveCollectorVfDepositFeePer1000(double feePer1000) async {
+    final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
+    await functions.httpsCallable('setCollectorVfDepositFeePer1000').call({
+      'feePer1000': feePer1000,
+    });
+    _collectorVfDepositFeePer1000 = feePer1000;
     notifyListeners();
   }
 

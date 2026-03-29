@@ -128,7 +128,7 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      auth.currentUser?.name ?? 'Collector',
+                      auth.currentUser?.name ?? 'collector'.tr(),
                       style: TextStyle(
                         color: textPrimary,
                         fontWeight: FontWeight.bold,
@@ -192,7 +192,7 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                         style: TextStyle(
                             color: textMuted, fontSize: 13)),
                     Text(
-                      '${cashOnHand.toStringAsFixed(0)} / ${cashLimit.toStringAsFixed(0)} EGP',
+                      '${cashOnHand.toStringAsFixed(0)} / ${cashLimit.toStringAsFixed(0)} ${'currency'.tr()}',
                       style: TextStyle(
                           color: progressColor,
                           fontSize: 13,
@@ -386,7 +386,7 @@ class _RetailerCard extends StatelessWidget {
                     Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
                     _buildStatColumn(context, 'collected'.tr(), retailer.totalCollected, AppTheme.positiveColor(context)),
                     Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
-                    _buildStatColumn(context, 'pending'.tr(), debt, debtColor),
+                    _buildStatColumn(context, 'pending_debt'.tr(), debt, debtColor),
                   ],
                 ),
               ),
@@ -405,7 +405,7 @@ class _RetailerCard extends StatelessWidget {
                             ),
                           )
                         : const Icon(Icons.payments_outlined, size: 16),
-                    label: Text(isBusy ? 'Processing...' : 'collect_from'.tr()),
+                    label: Text(isBusy ? 'processing'.tr() : 'collect_from'.tr()),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: debtColor,
                       foregroundColor: Colors.white,
@@ -441,7 +441,7 @@ class _RetailerCard extends StatelessWidget {
     return Column(
       children: [
         Text(
-          '${amount.toStringAsFixed(0)} EGP',
+          '${amount.toStringAsFixed(0)} ${'currency'.tr()}',
           style: TextStyle(
             color: color,
             fontWeight: FontWeight.bold,
@@ -495,7 +495,7 @@ class _RetailerCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '${'pending_debt'.tr()}: ${debt.toStringAsFixed(0)} EGP',
+                  '${'pending_debt'.tr()}: ${debt.toStringAsFixed(0)} ${'currency'.tr()}',
                   style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.w600),
                 ),
                 const SizedBox(height: 14),
@@ -506,7 +506,7 @@ class _RetailerCard extends StatelessWidget {
                   onChanged: (_) => setSt(() {}),
                   decoration: InputDecoration(
                     labelText: 'amount'.tr(),
-                    suffixText: 'EGP',
+                    suffixText: 'currency'.tr(),
                     filled: true,
                     fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
                   ),
@@ -529,16 +529,16 @@ class _RetailerCard extends StatelessWidget {
                       children: [
                         _breakdownRow(
                           context,
-                          '↓ Debt Reduced',
-                          '${debtPaid.toStringAsFixed(0)} EGP',
+                          'debt_reduced'.tr(),
+                          '${debtPaid.toStringAsFixed(0)} ${'currency'.tr()}',
                           AppTheme.warningColor(context),
                         ),
                         if (credit > 0) ...[
                           const SizedBox(height: 4),
                           _breakdownRow(
                             context,
-                            '⊕ Credit Added',
-                            '+${credit.toStringAsFixed(0)} EGP',
+                            'credit_added'.tr(),
+                            '+${credit.toStringAsFixed(0)} ${'currency'.tr()}',
                             AppTheme.positiveColor(context),
                           ),
                         ],
@@ -568,17 +568,25 @@ class _RetailerCard extends StatelessWidget {
                     builder: (c) => AlertDialog(
                       backgroundColor: AppTheme.surfaceColor(context),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-                      title: Text('Confirm Action', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
+                      title: Text('confirm_action'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
                       content: Text(
                         amount > debt
-                            ? 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?\n\n• Debt reduced: ${debt.toStringAsFixed(0)} EGP\n• Credit added: ${(amount - debt).toStringAsFixed(0)} EGP'
-                            : 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?',
+                            ? 'collect_confirm_msg_with_credit'.tr(args: [
+                                amount.toStringAsFixed(0),
+                                retailer.name,
+                                debt.toStringAsFixed(0),
+                                (amount - debt).toStringAsFixed(0)
+                              ])
+                            : 'collect_confirm_msg'.tr(args: [
+                                amount.toStringAsFixed(0),
+                                retailer.name
+                              ]),
                         style: TextStyle(color: AppTheme.textMutedColor(context)),
                       ),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(c, false),
-                          child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context))),
+                          child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
                         ),
                         ElevatedButton(
                           onPressed: () => Navigator.pop(c, true),
@@ -586,7 +594,7 @@ class _RetailerCard extends StatelessWidget {
                               backgroundColor: currentColor,
                               elevation: 0,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                          child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+                          child: Text('confirm'.tr(), style: const TextStyle(color: Colors.white)),
                         ),
                       ],
                     ),
@@ -607,7 +615,7 @@ class _RetailerCard extends StatelessWidget {
                     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('collect_success'.tr())));
                   } catch (e) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
+                      SnackBar(content: Text('error_with_msg'.tr(args: [e.toString()])), backgroundColor: Colors.red),
                     );
                   }
                 },
@@ -717,7 +725,7 @@ class _DepositTabState extends State<_DepositTab> {
                     Text('cash_on_hand'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
                     const SizedBox(height: 2),
                     Text(
-                      '${cashOnHand.toStringAsFixed(0)} EGP',
+                      '${cashOnHand.toStringAsFixed(0)} ${'currency'.tr()}',
                       style: TextStyle(color: AppTheme.positiveColor(context), fontSize: 26, fontWeight: FontWeight.w900, letterSpacing: -0.5),
                     ),
                   ],
@@ -726,14 +734,14 @@ class _DepositTabState extends State<_DepositTab> {
             ),
           ),
           const SizedBox(height: 24),
-          Text('Deposit Destination', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w700)),
+          Text('deposit_destination'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15, fontWeight: FontWeight.w700)),
           const SizedBox(height: 12),
           Row(
             children: [
               Expanded(
                 child: _DestinationOption(
-                  label: 'Bank Account',
-                  subtitle: 'Move collected cash into one of the tracked banks.',
+                  label: 'bank_account'.tr(),
+                  subtitle: 'bank_account_desc'.tr(),
                   icon: Icons.account_balance,
                   selected: isBankDestination,
                   color: AppTheme.infoColor(context),
@@ -743,8 +751,8 @@ class _DepositTabState extends State<_DepositTab> {
               const SizedBox(width: 12),
               Expanded(
                 child: _DestinationOption(
-                  label: 'Default VF Number',
-                  subtitle: defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'No default VF number set',
+                  label: 'default_vf_number'.tr(),
+                  subtitle: defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'no_default_vf_set'.tr(),
                   icon: Icons.phone_android,
                   selected: !isBankDestination,
                   color: AppTheme.positiveColor(context),
@@ -776,7 +784,7 @@ class _DepositTabState extends State<_DepositTab> {
               ),
               child: !hasDefaultVf
                   ? Text(
-                      'No default VF number is set yet. Ask admin to mark one as default first.',
+                      'no_default_vf_hint'.tr(),
                       style: TextStyle(color: AppTheme.textMutedColor(context)),
                     )
                   : Column(
@@ -792,7 +800,7 @@ class _DepositTabState extends State<_DepositTab> {
                         ),
                         const SizedBox(height: 6),
                         Text(
-                          'Fee rate: ${feeRate.toStringAsFixed(2)} EGP per 1000',
+                          'vf_fee_rate_notice'.tr(args: [feeRate.toStringAsFixed(2)]),
                           style: TextStyle(
                             color: AppTheme.textMutedColor(context),
                             fontSize: 12,
@@ -803,22 +811,22 @@ class _DepositTabState extends State<_DepositTab> {
                           const SizedBox(height: 14),
                           _summaryRow(
                             context,
-                            'Cash deducted from you',
-                            '${amount.toStringAsFixed(2)} EGP',
+                            'cash_deducted_from_you'.tr(),
+                            '${amount.toStringAsFixed(2)} ${'currency'.tr()}',
                             AppTheme.warningColor(context),
                           ),
                           const SizedBox(height: 6),
                           _summaryRow(
                             context,
-                            'VF retail profit',
-                            '+${vfFee.toStringAsFixed(2)} EGP',
+                            'vf_retail_profit'.tr(),
+                            '+${vfFee.toStringAsFixed(2)} ${'currency'.tr()}',
                             AppTheme.positiveColor(context),
                           ),
                           const SizedBox(height: 6),
                           _summaryRow(
                             context,
-                            'Total transferred to VF',
-                            '${vfTransferTotal.toStringAsFixed(2)} EGP',
+                            'total_transferred_to_vf'.tr(),
+                            '${vfTransferTotal.toStringAsFixed(2)} ${'currency'.tr()}',
                             AppTheme.infoColor(context),
                           ),
                         ],
@@ -834,7 +842,7 @@ class _DepositTabState extends State<_DepositTab> {
             style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
             decoration: InputDecoration(
               labelText: 'deposit_amount'.tr(),
-              suffixText: 'EGP',
+            suffixText: 'currency'.tr(),
               filled: true,
               fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
             ),
@@ -855,10 +863,10 @@ class _DepositTabState extends State<_DepositTab> {
                   : const Icon(Icons.upload_rounded),
               label: Text(
                 isDepositing
-                    ? 'Processing...'
+                    ? 'processing'.tr()
                     : isBankDestination
                         ? 'deposit_to_bank'.tr()
-                        : 'Deposit to Default VF',
+                        : 'deposit_to_default_vf'.tr(),
               ),
               style: ElevatedButton.styleFrom(
                 backgroundColor: isBankDestination
@@ -904,8 +912,8 @@ class _DepositTabState extends State<_DepositTab> {
     }
     if (_destination == _DepositDestination.vf && !hasDefaultVf) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('No default VF number is set yet.'),
+        SnackBar(
+          content: Text('no_default_vf_set'.tr()),
           backgroundColor: Colors.red,
         ),
       );
@@ -917,15 +925,21 @@ class _DepositTabState extends State<_DepositTab> {
       builder: (ctx) => AlertDialog(
         backgroundColor: AppTheme.surfaceColor(context),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-        title: Text('Confirm Action', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
+        title: Text('confirm_action'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
         content: Text(
           _destination == _DepositDestination.bank
-              ? 'Are you sure you want to deposit ${amount.toStringAsFixed(0)} EGP to ${bank!.bankName}?'
-              : 'Deposit ${amount.toStringAsFixed(2)} EGP to ${defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'Default VF'}?\n\nCollector cash decreases by ${amount.toStringAsFixed(2)} EGP.\nVF receives ${vfTransferTotal.toStringAsFixed(2)} EGP.\nProfit recorded: ${vfFee.toStringAsFixed(2)} EGP.',
+              ? 'deposit_bank_confirm_msg'.tr(args: [amount.toStringAsFixed(0), bank!.bankName])
+              : 'deposit_vf_confirm_msg'.tr(args: [
+                  amount.toStringAsFixed(2),
+                  defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'default_vf_number'.tr(),
+                  amount.toStringAsFixed(2),
+                  vfTransferTotal.toStringAsFixed(2),
+                  vfFee.toStringAsFixed(2)
+                ]),
           style: TextStyle(color: AppTheme.textMutedColor(context)),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context)))),
+          TextButton(onPressed: () => Navigator.pop(ctx, false), child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context)))),
           ElevatedButton(
             onPressed: () => Navigator.pop(ctx, true),
             style: ElevatedButton.styleFrom(
@@ -935,7 +949,7 @@ class _DepositTabState extends State<_DepositTab> {
               elevation: 0,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
             ),
-            child: const Text('Confirm', style: TextStyle(color: Colors.white)),
+            child: Text('confirm'.tr(), style: const TextStyle(color: Colors.white)),
           ),
         ],
       ),
@@ -970,12 +984,12 @@ class _DepositTabState extends State<_DepositTab> {
           content: Text(
             _destination == _DepositDestination.bank
                 ? 'deposit_success'.tr()
-                : 'Vodafone deposit recorded successfully',
+                : 'vf_deposit_success'.tr(),
           ),
         ),
       );
     } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('error_with_msg'.tr(args: [e.toString()])), backgroundColor: Colors.red));
     }
   }
 

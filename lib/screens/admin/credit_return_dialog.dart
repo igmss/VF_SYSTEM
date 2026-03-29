@@ -94,11 +94,11 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'Credit Return',
+                          'credit_return'.tr(),
                           style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 18),
                         ),
                         Text(
-                          'Settling debt for ${retailer.name}',
+                          'settling_debt_for'.tr(args: [retailer.name]),
                           style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12),
                         ),
                       ],
@@ -120,7 +120,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        'Remaining debt: ${remainingDebt.toStringAsFixed(2)} EGP',
+                        'remaining_debt_with_amount'.tr(args: [remainingDebt.toStringAsFixed(2)]),
                         style: TextStyle(color: AppTheme.warningColor(context), fontWeight: FontWeight.bold, fontSize: 13),
                       ),
                     ),
@@ -128,7 +128,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                 ),
               ),
               const SizedBox(height: 16),
-              Text('Target VF Number', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 13)),
+              Text('target_vf_number'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 13)),
               const SizedBox(height: 8),
               DropdownButtonFormField<String>(
                 value: _selectedVfNumberId,
@@ -149,7 +149,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
               const SizedBox(height: 16),
               _field(
                 controller: _amountController,
-                label: 'Return Amount',
+                label: 'return_amount'.tr(),
                 icon: Icons.money_off,
                 keyboard: TextInputType.number,
                 hint: 'e.g. 5000',
@@ -161,7 +161,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text('Fee Rate (per 1K)', style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 12)),
+                        Text('fee_rate_per_1k'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7), fontSize: 12)),
                         const SizedBox(height: 6),
                         TextField(
                           controller: _feeRateController,
@@ -188,7 +188,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                   Expanded(
                     child: _field(
                       controller: _feesController,
-                      label: 'Calculated Fee',
+                      label: 'calculated_fee'.tr(),
                       icon: Icons.add_chart,
                       keyboard: TextInputType.number,
                       enabled: !isSubmitting,
@@ -206,18 +206,18 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                 ),
                 child: Column(
                   children: [
-                    _summaryRow('Retailer Pays Total:', _totalAmount, isBold: true),
+                    _summaryRow('retailer_pays_total'.tr(), _totalAmount, isBold: true),
                     Divider(color: AppTheme.lineColor(context), height: 20),
-                    _summaryRow('Debt Deduction:', _amountOnly),
+                    _summaryRow('debt_deduction'.tr(), _amountOnly),
                   ],
                 ),
               ),
               const SizedBox(height: 16),
               _field(
                 controller: _notesController,
-                label: 'Notes (Optional)',
+                label: '${'notes'.tr()} (${'optional'.tr()})',
                 icon: Icons.notes,
-                hint: 'Transaction details...',
+                hint: '...',
                 enabled: !isSubmitting,
               ),
               const SizedBox(height: 24),
@@ -244,7 +244,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                             height: 18,
                             child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                           )
-                        : const Text('Confirm Return', style: TextStyle(fontWeight: FontWeight.bold)),
+                    : Text('confirm_return'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -258,12 +258,12 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
   String get _totalAmount {
     final amt = double.tryParse(_amountController.text) ?? 0.0;
     final fees = double.tryParse(_feesController.text) ?? 0.0;
-    return '${(amt + fees).toStringAsFixed(2)} EGP';
+    return '${(amt + fees).toStringAsFixed(2)} ${'currency'.tr()}';
   }
 
   String get _amountOnly {
     final amt = double.tryParse(_amountController.text) ?? 0.0;
-    return '${amt.toStringAsFixed(2)} EGP';
+    return '${amt.toStringAsFixed(2)} ${'currency'.tr()}';
   }
 
   Widget _summaryRow(String label, String value, {bool isBold = false}) {
@@ -318,7 +318,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
 
     if (amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please enter a valid amount'), backgroundColor: Colors.red),
+        SnackBar(content: Text('enter_valid_amount'.tr()), backgroundColor: Colors.red),
       );
       return;
     }
@@ -326,7 +326,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
     if ((amount - remainingDebt) > 0.01) {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Return amount cannot exceed remaining debt (${remainingDebt.toStringAsFixed(2)} EGP).'),
+          content: Text('return_exceeds_debt'.tr(args: [remainingDebt.toStringAsFixed(2)])),
           backgroundColor: Colors.red,
         ),
       );
@@ -335,7 +335,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
 
     if (_selectedVfNumberId == null) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Please select a target VF number'), backgroundColor: Colors.red),
+        SnackBar(content: Text('select_target_vf'.tr()), backgroundColor: Colors.red),
       );
       return;
     }
@@ -357,12 +357,12 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
       if (!mounted) return;
       Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Credit return recorded successfully'), backgroundColor: Colors.green),
+        SnackBar(content: Text('credit_return_success'.tr()), backgroundColor: Colors.green),
       );
     } catch (e) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+        SnackBar(content: Text('error_with_msg'.tr(args: [e.toString()])), backgroundColor: Colors.red),
       );
     }
   }

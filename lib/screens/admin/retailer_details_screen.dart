@@ -89,9 +89,9 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
           labelStyle: const TextStyle(fontWeight: FontWeight.bold),
           unselectedLabelColor: AppTheme.textMutedColor(context),
           tabs: [
-            Tab(text: 'All (${allTxs.length})'),
-            Tab(text: 'Assigned (${assignedTxs.length})'),
-            Tab(text: 'Collected (${collectedTxs.length})'),
+            Tab(text: 'all_with_count'.tr(args: [allTxs.length.toString()])),
+            Tab(text: 'assigned_with_count'.tr(args: [assignedTxs.length.toString()])),
+            Tab(text: 'collected_with_count'.tr(args: [collectedTxs.length.toString()])),
           ],
         ),
       ),
@@ -126,7 +126,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                     width: double.infinity,
                     child: ElevatedButton.icon(
                       icon: const Icon(Icons.keyboard_return, size: 18),
-                      label: Text('Credit Return (VF Cash)'.tr()),
+                      label: Text('credit_return_vf'.tr()),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: AppTheme.positiveColor(context),
                         foregroundColor: Colors.white,
@@ -174,7 +174,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
           const SizedBox(height: 4),
           FittedBox(
             fit: BoxFit.scaleDown,
-            child: Text('${_fmt(val)} EGP',
+            child: Text('${_fmt(val)} ${'currency'.tr()}',
                 style: TextStyle(
                     color: color, fontWeight: FontWeight.w900, fontSize: 16, letterSpacing: -0.5)),
           ),
@@ -251,12 +251,12 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                       const SizedBox(width: 12),
                         Text(
                           isAssigned
-                              ? 'Assigned'
+                              ? 'assigned'.tr()
                               : isCreditReturn
-                                  ? 'Credit Return'
+                                  ? 'credit_return'.tr()
                                   : isCreditReturnFee
-                                      ? 'Return Fee'
-                                      : 'Collected',
+                                      ? 'return_fee'.tr()
+                                      : 'collected'.tr(),
                           style: TextStyle(
                             color: txColor,
                             fontWeight: FontWeight.bold,
@@ -283,7 +283,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                             isAssigned
                                 ? '${'from'.tr()}: ${tx.fromLabel ?? 'Unknown Number'}'
                                 : isCreditReturn || isCreditReturnFee
-                                    ? 'To VF Number: ${tx.toLabel ?? 'Unknown Number'}'
+                                    ? '${'to'.tr()} ${'vf_cash'.tr()}: ${tx.toLabel ?? 'Unknown Number'}'
                                     : '${'by'.tr()}: ${tx.toLabel ?? 'Unknown Collector'}',
                           style: TextStyle(
                               color: AppTheme.textPrimaryColor(context),
@@ -302,7 +302,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                     ),
                   ),
                   Text(
-                    '${_fmt(tx.amount)} EGP',
+                    '${_fmt(tx.amount)} ${'currency'.tr()}',
                     style: TextStyle(
                       color: AppTheme.textPrimaryColor(context),
                       fontSize: 15,

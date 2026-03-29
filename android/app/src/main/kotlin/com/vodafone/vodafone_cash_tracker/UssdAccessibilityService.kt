@@ -128,6 +128,7 @@ class UssdAccessibilityService : AccessibilityService() {
 
     private fun extractBalance(text: String): Double? {
         val patterns = listOf(
+            "رصيد حسابك في فودافون كاش الحالي\\s*([0-9.]+)".toRegex(),
             "رصيدك الحالي هو\\s*([0-9.]+)\\s*جنيه".toRegex(),
             "Your current balance is\\s*([0-9.]+)\\s*EGP".toRegex(RegexOption.IGNORE_CASE),
             "رصيد محفظتك هو\\s*([0-9.]+)\\s*جنيه".toRegex()

@@ -3,20 +3,22 @@ import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:permission_handler/permission_handler.dart';
 
-enum UssdStatus { idle, dialing, waitingPin, feePreview, pinEntered, success, error }
+enum UssdStatus { idle, dialing, waitingPin, feePreview, balanceDetected, pinEntered, success, error }
 
 class UssdResponse {
   final UssdStatus status;
   final String message;
   final String? screenshotPath;
-  final double? extractedFee; // New field
-  final String? sessionId;   // New field
+  final double? extractedFee;
+  final double? extractedBalance; // New field
+  final String? sessionId;
 
   UssdResponse({
     required this.status,
     required this.message,
     this.screenshotPath,
     this.extractedFee,
+    this.extractedBalance,
     this.sessionId,
   });
 }
@@ -71,6 +73,15 @@ class UssdService {
           extractedFee: v,
           sessionId: sid,
         ));
+      } else if (msg.startsWith('BALANCE_DETECTED:')) {
+        final raw = msg.replaceFirst('BALANCE_DETECTED:', '').trim();
+        final v = double.tryParse(raw);
+        _statusController.add(UssdResponse(
+          status: UssdStatus.balanceDetected,
+          message: 'Balance from USSD screen',
+          extractedBalance: v,
+          sessionId: sid,
+        ));
       } else if (msg.startsWith('SUCCESS:')) {
         var cleanMsg = msg.replaceFirst('SUCCESS:', '').trim();
         double? fee;
@@ -115,6 +126,51 @@ class UssdService {
     // This is hard to check directly, but we can try to run a dummy command or 
     // just rely on the user enabling it.
     return true; 
+  }
+
+  static Future<void> runVodafoneCashBalanceCheck({
+    required String sessionId,
+  }) async {
+    final status = await Permission.phone.request();
+    if (!status.isGranted) {
+      _statusController.add(UssdResponse(
+        status: UssdStatus.error,
+        message: 'Phone permission denied.',
+        sessionId: sessionId,
+      ));
+      return;
+    }
+
+    final pin = await getPin();
+    if (pin == null || pin.isEmpty) {
+      _statusController.add(UssdResponse(
+        status: UssdStatus.error,
+        message: 'USSD PIN not set. Please set it in settings.',
+        sessionId: sessionId,
+      ));
+      return;
+    }
+
+    const code = '*9*13#';
+    _statusController.add(UssdResponse(
+      status: UssdStatus.dialing,
+      message: 'Dialing $code...',
+      sessionId: sessionId,
+    ));
+
+    try {
+      await _methodChannel.invokeMethod('runUssd', {
+        'code': code,
+        'pin': pin,
+        'sessionId': sessionId,
+      });
+    } on PlatformException catch (e) {
+      _statusController.add(UssdResponse(
+        status: UssdStatus.error,
+        message: 'Failed to run USSD: ${e.message}',
+        sessionId: sessionId,
+      ));
+    }
   }
 
   static Future<void> runVodafoneCashTransfer({

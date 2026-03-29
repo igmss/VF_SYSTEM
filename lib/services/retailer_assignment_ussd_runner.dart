@@ -28,6 +28,8 @@ class RetailerUssdRunResult {
 class RetailerAssignmentUssdRunner {
   RetailerAssignmentUssdRunner._();
 
+  static const int _maxRetries = 2;
+
   static double _estimateFeesForBalance({
     required double amount,
     required bool isExternalWallet,
@@ -69,27 +71,108 @@ class RetailerAssignmentUssdRunner {
       return const RetailerUssdRunResult(success: false, message: 'Invalid amount', didUnlock: false);
     }
 
-    MobileNumber srcNum;
     try {
-      srcNum = app.mobileNumbers.firstWhere((n) => n.id == selectedNumId);
+      app.mobileNumbers.firstWhere((n) => n.id == selectedNumId);
     } catch (_) {
       return const RetailerUssdRunResult(success: false, message: 'VF number not found', didUnlock: false);
     }
 
-    if (!hasLikelySufficientBalance(
-      vfNumber: srcNum,
-      amount: amount,
-      isExternalWallet: isExternalWallet,
-    )) {
-      return RetailerUssdRunResult(
+    int retryCount = 0;
+    double? baselineBalance;
+
+    try {
+      await portal.lockRequestAdmin(
+        portalUserUid: row.portalUserUid,
+        requestId: row.request.id,
+        adminUid: adminUid,
+      );
+    } catch (e) {
+      return RetailerUssdRunResult(success: false, message: 'Could not lock request: $e', didUnlock: false);
+    }
+
+    Future<double?> getBalance() async {
+      final sessionId = const Uuid().v4();
+      final completer = Completer<double?>();
+      StreamSubscription? sub;
+      Timer? timer;
+
+      sub = UssdService.onUpdate.listen((resp) {
+        if (resp.sessionId == sessionId && resp.status == UssdStatus.balanceDetected) {
+          timer?.cancel();
+          sub?.cancel();
+          completer.complete(resp.extractedBalance);
+        } else if (resp.sessionId == sessionId && resp.status == UssdStatus.error) {
+          timer?.cancel();
+          sub?.cancel();
+          completer.complete(null);
+        }
+      });
+
+      timer = Timer(const Duration(seconds: 45), () {
+        sub?.cancel();
+        if (!completer.isCompleted) completer.complete(null);
+      });
+
+      try {
+        await UssdService.runVodafoneCashBalanceCheck(sessionId: sessionId);
+      } catch (_) {
+        timer.cancel();
+        sub.cancel();
+        completer.complete(null);
+      }
+
+      return completer.future;
+    }
+
+    baselineBalance = await getBalance();
+    if (baselineBalance == null) {
+      await portal.unlockRequestAdmin(portalUserUid: row.portalUserUid, requestId: row.request.id);
+      return const RetailerUssdRunResult(
         success: false,
-        message: 'Insufficient VF balance for this transfer (including fees).',
-        didUnlock: false,
+        message: 'Could not fetch baseline balance. Aborting for safety.',
+        didUnlock: true,
       );
     }
 
-    final expectedSessionId = const Uuid().v4();
+    return _runTransferLoop(
+      row: row,
+      adminUid: adminUid,
+      selectedNumId: selectedNumId,
+      amount: amount,
+      formFees: formFees,
+      isExternalWallet: isExternalWallet,
+      applyCredit: applyCredit,
+      adminNotes: adminNotes,
+      distribution: distribution,
+      app: app,
+      portal: portal,
+      onSuccessUi: onSuccessUi,
+      baselineBalance: baselineBalance,
+      retryCount: retryCount,
+      getBalance: getBalance,
+    );
+  }
 
+  static Future<RetailerUssdRunResult> _runTransferLoop({
+    required RetailerPortalRequestRow row,
+    required String adminUid,
+    required String selectedNumId,
+    required double amount,
+    required double formFees,
+    required bool isExternalWallet,
+    required bool applyCredit,
+    required String adminNotes,
+    required DistributionProvider distribution,
+    required AppProvider app,
+    required RetailerPortalService portal,
+    required double baselineBalance,
+    required int retryCount,
+    required Future<double?> Function() getBalance,
+    void Function()? onSuccessUi,
+  }) async {
+    final srcNum = app.mobileNumbers.firstWhere((n) => n.id == selectedNumId);
+
+    final expectedSessionId = const Uuid().v4();
     StreamSubscription<UssdResponse>? sub;
     Timer? timeoutTimer;
     double? bufferedFee;
@@ -104,106 +187,101 @@ class RetailerAssignmentUssdRunner {
       if (!completer.isCompleted) completer.complete(r);
     }
 
-    Future<void> cleanupSubsOnly() async {
-      timeoutTimer?.cancel();
-      await sub?.cancel();
-    }
-
-    Future<void> unlockQuiet() async {
-      try {
-        await portal.unlockRequestAdmin(portalUserUid: row.portalUserUid, requestId: row.request.id);
-      } catch (_) {}
-    }
-
-    // Timeouts must cover: pre-PIN wait + post-success wait + screenshot + upload (see Android USSD delays).
-    timeoutTimer = Timer(const Duration(minutes: 5), () async {
-      if (finished) return;
-      await cleanupSubsOnly();
-      await unlockQuiet();
-      await safeComplete(const RetailerUssdRunResult(
-        success: false,
-        message: 'USSD timed out; request returned to pending.',
-        didUnlock: true,
-      ));
-    });
-
-    // Subscribe BEFORE lock + dial so we never miss SUCCESS/SCREENSHOT for this session.
-    sub = UssdService.onUpdate.listen((resp) async {
+    Future<void> handleFailure(String errorMsg) async {
       if (finished) return;
 
-      if (resp.sessionId != expectedSessionId) {
-        return;
-      }
+      // If we fail/timeout, we must check the balance before retrying or giving up.
+      final currentBalance = await getBalance();
+      if (currentBalance != null) {
+        if ((currentBalance - baselineBalance).abs() < 1.0) {
+          // Balance is same, SAFE TO RETRY if we haven't exceeded max retries
+          if (retryCount < _maxRetries) {
+            finished = true;
+            timeoutTimer?.cancel();
+            await sub?.cancel();
 
-      if (resp.extractedFee != null) {
-        bufferedFee = resp.extractedFee;
-      }
-
-      if (resp.status == UssdStatus.success && resp.screenshotPath != null) {
-        await cleanupSubsOnly();
+            final r = await _runTransferLoop(
+              row: row,
+              adminUid: adminUid,
+              selectedNumId: selectedNumId,
+              amount: amount,
+              formFees: formFees,
+              isExternalWallet: isExternalWallet,
+              applyCredit: applyCredit,
+              adminNotes: adminNotes,
+              distribution: distribution,
+              app: app,
+              portal: portal,
+              baselineBalance: baselineBalance,
+              retryCount: retryCount + 1,
+              getBalance: getBalance,
+              onSuccessUi: onSuccessUi,
+            );
+            if (!completer.isCompleted) completer.complete(r);
+            return;
+          } else {
+            // Max retries reached, unlock and fail.
+            try {
+              await portal.unlockRequestAdmin(portalUserUid: row.portalUserUid, requestId: row.request.id);
+            } catch (_) {}
+            await safeComplete(RetailerUssdRunResult(success: false, message: 'Max retries reached: $errorMsg', didUnlock: true));
+          }
+        } else {
+          // Balance changed! Money moved but we didn't get success. MOVE TO MANUAL_REVIEW.
+          try {
+            await portal.updateRequestAdmin(
+              portalUserUid: row.portalUserUid,
+              requestId: row.request.id,
+              updates: {
+                'status': 'MANUAL_REVIEW',
+                'adminNotes': 'Balance dropped from $baselineBalance to $currentBalance but USSD failed/timed out. DO NOT RETRY.',
+              },
+            );
+          } catch (_) {}
+          await safeComplete(const RetailerUssdRunResult(success: false, message: 'Balance dropped! Moved to MANUAL_REVIEW.', didUnlock: false));
+        }
+      } else {
+        // Balance check failed after transfer failure. Very dangerous. MANUAL_REVIEW.
         try {
-          final file = File(resp.screenshotPath!);
-          final ref = FirebaseStorage.instance.ref().child('assignment_proofs/${row.request.id}_ussd.jpg');
-          await ref.putFile(file);
-          final downloadUrl = await ref.getDownloadURL();
-
-          final finalFee = (bufferedFee ?? formFees).clamp(0.0, double.infinity);
-          final chargeRetailer = bufferedFee != null ? finalFee > 1.0 : isExternalWallet;
-
-          await distribution.processRetailerRequest(
+          await portal.updateRequestAdmin(
             portalUserUid: row.portalUserUid,
             requestId: row.request.id,
-            status: 'COMPLETED',
-            proofImageUrl: downloadUrl,
-            adminNotes: 'Auto-USSD: ${resp.message}. $adminNotes',
-            retailerId: row.request.retailerId,
-            fromVfNumberId: selectedNumId,
-            fromVfPhone: srcNum.phoneNumber,
-            amount: amount,
-            fees: finalFee,
-            chargeFeesToRetailer: chargeRetailer,
-            applyCredit: applyCredit,
+            updates: {
+              'status': 'MANUAL_REVIEW',
+              'adminNotes': 'USSD failed/timed out and balance check also failed. Manual verification required.',
+            },
           );
-
-          onSuccessUi?.call();
-          await safeComplete(const RetailerUssdRunResult(
-            success: true,
-            message: 'ok',
-            didUnlock: false,
-          ));
-        } catch (e) {
-          // Do NOT unlock: money may have already moved on the phone; retrying would double-send.
-          await safeComplete(RetailerUssdRunResult(
-            success: false,
-            message: 'Finalize failed: $e',
-            didUnlock: false,
-          ));
-        }
-        return;
+        } catch (_) {}
+        await safeComplete(const RetailerUssdRunResult(success: false, message: 'Verification failed. Moved to MANUAL_REVIEW.', didUnlock: false));
       }
+    }
 
-      if (resp.status == UssdStatus.error) {
-        await cleanupSubsOnly();
-        await unlockQuiet();
-        await safeComplete(RetailerUssdRunResult(
-          success: false,
-          message: resp.message,
-          didUnlock: true,
+    timeoutTimer = Timer(const Duration(minutes: 5), () => handleFailure('USSD timed out'));
+
+    sub = UssdService.onUpdate.listen((resp) async {
+      if (finished || resp.sessionId != expectedSessionId) return;
+
+      if (resp.extractedFee != null) bufferedFee = resp.extractedFee;
+
+      if (resp.status == UssdStatus.success && resp.screenshotPath != null) {
+        await safeComplete(await _finalizeSuccess(
+          resp: resp,
+          row: row,
+          selectedNumId: selectedNumId,
+          srcNum: srcNum,
+          amount: amount,
+          formFees: formFees,
+          isExternalWallet: isExternalWallet,
+          applyCredit: applyCredit,
+          adminNotes: adminNotes,
+          bufferedFee: bufferedFee,
+          distribution: distribution,
+          onSuccessUi: onSuccessUi,
         ));
+      } else if (resp.status == UssdStatus.error) {
+        await handleFailure(resp.message);
       }
     });
-
-    try {
-      await portal.lockRequestAdmin(
-        portalUserUid: row.portalUserUid,
-        requestId: row.request.id,
-        adminUid: adminUid,
-      );
-    } catch (e) {
-      await cleanupSubsOnly();
-      await safeComplete(RetailerUssdRunResult(success: false, message: 'Could not lock request: $e', didUnlock: false));
-      return completer.future;
-    }
 
     try {
       await UssdService.runVodafoneCashTransfer(
@@ -212,16 +290,54 @@ class RetailerAssignmentUssdRunner {
         sessionId: expectedSessionId,
       );
     } catch (e) {
-      await cleanupSubsOnly();
-      await unlockQuiet();
-      await safeComplete(RetailerUssdRunResult(
-        success: false,
-        message: 'USSD start failed: $e',
-        didUnlock: true,
-      ));
-      return completer.future;
+      await handleFailure('USSD start failed: $e');
     }
 
     return completer.future;
+  }
+
+  static Future<RetailerUssdRunResult> _finalizeSuccess({
+    required UssdResponse resp,
+    required RetailerPortalRequestRow row,
+    required String selectedNumId,
+    required MobileNumber srcNum,
+    required double amount,
+    required double formFees,
+    required bool isExternalWallet,
+    required bool applyCredit,
+    required String adminNotes,
+    required double? bufferedFee,
+    required DistributionProvider distribution,
+    void Function()? onSuccessUi,
+  }) async {
+    try {
+      final file = File(resp.screenshotPath!);
+      final ref = FirebaseStorage.instance.ref().child('assignment_proofs/${row.request.id}_ussd.jpg');
+      await ref.putFile(file);
+      final downloadUrl = await ref.getDownloadURL();
+
+      final finalFee = (bufferedFee ?? formFees).clamp(0.0, double.infinity);
+      final chargeRetailer = bufferedFee != null ? finalFee > 1.0 : isExternalWallet;
+
+      await distribution.processRetailerRequest(
+        portalUserUid: row.portalUserUid,
+        requestId: row.request.id,
+        status: 'COMPLETED',
+        proofImageUrl: downloadUrl,
+        adminNotes: 'Auto-USSD: ${resp.message}. $adminNotes',
+        retailerId: row.request.retailerId,
+        fromVfNumberId: selectedNumId,
+        fromVfPhone: srcNum.phoneNumber,
+        amount: amount,
+        fees: finalFee,
+        chargeFeesToRetailer: chargeRetailer,
+        applyCredit: applyCredit,
+      );
+
+      onSuccessUi?.call();
+      return const RetailerUssdRunResult(success: true, message: 'ok', didUnlock: false);
+    } catch (e) {
+      return RetailerUssdRunResult(success: false, message: 'Finalize failed: $e', didUnlock: false);
+    }
   }
 }

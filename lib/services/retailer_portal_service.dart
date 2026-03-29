@@ -107,12 +107,21 @@ class RetailerPortalService {
     required String requestId,
     required String adminUid,
   }) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _db.ref('retailer_portal/$portalUserUid/requests/$requestId').update({
-      'status': 'PROCESSING',
-      'processingBy': adminUid,
-      'updatedAt': now,
+    final ref = _db.ref('retailer_portal/$portalUserUid/requests/$requestId');
+    final result = await ref.runTransaction((Object? data) {
+      if (data == null) return Transaction.abort();
+      final map = Map<String, dynamic>.from(data as Map);
+      if (map['status'] != 'PENDING') return Transaction.abort();
+
+      map['status'] = 'PROCESSING';
+      map['processingBy'] = adminUid;
+      map['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
+      return Transaction.success(map);
     });
+
+    if (!result.committed) {
+      throw Exception('Request is no longer PENDING and could not be locked.');
+    }
   }
 
   Future<void> unlockRequestAdmin({

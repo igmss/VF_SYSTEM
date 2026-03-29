@@ -1113,6 +1113,8 @@ exports.processRetailerRequest = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('not-found', 'Retailer request not found.');
   }
   const rData = reqSnap.val();
+  // Allow processing if status is PENDING, PROCESSING, or MANUAL_REVIEW.
+  // Block if already COMPLETED or REJECTED.
   if (rData.status === 'COMPLETED' || rData.status === 'REJECTED') {
     throw new HttpsError('failed-precondition', 'This request has already been finalized.');
   }

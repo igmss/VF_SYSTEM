@@ -663,7 +663,9 @@ class _RequestTile extends StatelessWidget {
                               ? Colors.orange.withValues(alpha: 0.2) 
                               : isProcessing 
                                   ? Colors.blue.withValues(alpha: 0.2)
-                                  : AppTheme.textMutedColor(context).withValues(alpha: 0.15),
+                                  : r.status == 'MANUAL_REVIEW'
+                                      ? Colors.red.withValues(alpha: 0.2)
+                                      : AppTheme.textMutedColor(context).withValues(alpha: 0.15),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -671,7 +673,11 @@ class _RequestTile extends StatelessWidget {
                           style: TextStyle(
                             fontSize: 11, 
                             fontWeight: FontWeight.w800,
-                            color: isProcessing ? Colors.blue : null,
+                            color: isProcessing
+                                ? Colors.blue
+                                : r.status == 'MANUAL_REVIEW'
+                                    ? Colors.red
+                                    : null,
                           )
                         ),
                       ),

@@ -112,10 +112,33 @@ class UssdAccessibilityService : AccessibilityService() {
     private fun tryEmitFeePreview(root: AccessibilityNodeInfo) {
         val allText = getAllText(root)
         if (allText.isEmpty()) return
+
+        // Check for balance extraction (*9*13#)
+        val balance = extractBalance(allText)
+        if (balance != null) {
+            sendUpdate("BALANCE_DETECTED:$balance")
+            return
+        }
+
         val fee = extractFee(allText) ?: return
         if (lastEmittedFeePreview != null && abs(fee - lastEmittedFeePreview!!) < 0.001) return
         lastEmittedFeePreview = fee
         sendUpdate("FEE_DETECTED:$fee")
+    }
+
+    private fun extractBalance(text: String): Double? {
+        val patterns = listOf(
+            "رصيدك الحالي هو\\s*([0-9.]+)\\s*جنيه".toRegex(),
+            "Your current balance is\\s*([0-9.]+)\\s*EGP".toRegex(RegexOption.IGNORE_CASE),
+            "رصيد محفظتك هو\\s*([0-9.]+)\\s*جنيه".toRegex()
+        )
+        for (pattern in patterns) {
+            val match = pattern.find(text)
+            if (match != null) {
+                return match.groupValues[1].toDoubleOrNull()
+            }
+        }
+        return null
     }
 
     private fun injectPinAndSend() {

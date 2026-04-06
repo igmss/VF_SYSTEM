@@ -7,8 +7,10 @@ import '../../providers/distribution_provider.dart';
 import '../../models/retailer.dart';
 import '../../models/collector.dart';
 import '../../models/bank_account.dart';
+import '../../models/financial_transaction.dart';
 import '../admin/retailer_details_screen.dart';
 import '../../theme/app_theme.dart';
+import 'package:intl/intl.dart';
 
 enum _DepositDestination { bank, vf }
 
@@ -71,10 +73,12 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                         collector: collector,
                         bankAccounts: dist.bankAccounts,
                       )
-                    : _DepositTab(
-                        collector: collector,
-                        bankAccounts: dist.bankAccounts,
-                      ),
+                    : _tab == 1
+                        ? _DepositTab(
+                            collector: collector,
+                            bankAccounts: dist.bankAccounts,
+                          )
+                        : _HistoryTab(collector: collector),
               ),
             ],
           ),
@@ -247,6 +251,12 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
               icon: Icons.account_balance,
               selected: _tab == 1,
               onTap: () => setState(() => _tab = 1)),
+          const SizedBox(width: 10),
+          _TabChip(
+              label: 'history'.tr(),
+              icon: Icons.history,
+              selected: _tab == 2,
+              onTap: () => setState(() => _tab = 2)),
         ],
       ),
     );
@@ -664,6 +674,33 @@ class _DepositTabState extends State<_DepositTab> {
   BankAccount? _selectedBank;
   final _amountCtrl = TextEditingController();
   _DepositDestination _destination = _DepositDestination.bank;
+  bool _isFetchingVf = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Auto-fetch the latest default VF number when the deposit tab opens
+    WidgetsBinding.instance.addPostFrameCallback((_) => _fetchVfNumber());
+  }
+
+  Future<void> _fetchVfNumber() async {
+    if (!mounted) return;
+    setState(() => _isFetchingVf = true);
+    try {
+      await context.read<AppProvider>().fetchLatestDefaultVfNumber();
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('error_with_msg'.tr(args: [e.toString()])),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _isFetchingVf = false);
+    }
+  }
 
   @override
   void dispose() {
@@ -681,7 +718,6 @@ class _DepositTabState extends State<_DepositTab> {
     final isLight = !AppTheme.isDark(context);
     final defaultVfNumber = app.defaultNumber;
     final publicVfPhone = app.publicDefaultNumberPhone;
-    final publicVfId = app.publicDefaultNumberId;
     final hasDefaultVf = defaultVfNumber != null || publicVfPhone != null;
     final feeRate = app.collectorVfDepositFeePer1000;
     final amount = double.tryParse(_amountCtrl.text) ?? 0.0;
@@ -752,7 +788,9 @@ class _DepositTabState extends State<_DepositTab> {
               Expanded(
                 child: _DestinationOption(
                   label: 'default_vf_number'.tr(),
-                  subtitle: defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'no_default_vf_set'.tr(),
+                  subtitle: _isFetchingVf
+                      ? 'loading'.tr()
+                      : defaultVfNumber?.phoneNumber ?? publicVfPhone ?? 'no_default_vf_set'.tr(),
                   icon: Icons.phone_android,
                   selected: !isBankDestination,
                   color: AppTheme.positiveColor(context),
@@ -783,20 +821,38 @@ class _DepositTabState extends State<_DepositTab> {
                 border: Border.all(color: AppTheme.lineColor(context)),
               ),
               child: !hasDefaultVf
-                  ? Text(
-                      'no_default_vf_hint'.tr(),
-                      style: TextStyle(color: AppTheme.textMutedColor(context)),
-                    )
+                  ? _buildNoVfNumberCard(context)
                   : Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        Text(
-                          defaultVfNumber?.phoneNumber ?? publicVfPhone ?? '',
-                          style: TextStyle(
-                            color: AppTheme.textPrimaryColor(context),
-                            fontSize: 18,
-                            fontWeight: FontWeight.w800,
-                          ),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Text(
+                                defaultVfNumber?.phoneNumber ?? publicVfPhone ?? '',
+                                style: TextStyle(
+                                  color: AppTheme.textPrimaryColor(context),
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w800,
+                                ),
+                              ),
+                            ),
+                            // Refresh button to fetch latest number from Firebase
+                            _isFetchingVf
+                                ? const SizedBox(
+                                    width: 22,
+                                    height: 22,
+                                    child: CircularProgressIndicator(strokeWidth: 2),
+                                  )
+                                : IconButton(
+                                    tooltip: 'fetch_current_vf_number'.tr(),
+                                    icon: const Icon(Icons.refresh_rounded),
+                                    color: AppTheme.positiveColor(context),
+                                    onPressed: _fetchVfNumber,
+                                    visualDensity: VisualDensity.compact,
+                                    padding: EdgeInsets.zero,
+                                  ),
+                          ],
                         ),
                         const SizedBox(height: 6),
                         Text(
@@ -834,6 +890,7 @@ class _DepositTabState extends State<_DepositTab> {
                     ),
             ),
           ],
+
           const SizedBox(height: 12),
           TextField(
             controller: _amountCtrl,
@@ -998,6 +1055,61 @@ class _DepositTabState extends State<_DepositTab> {
     return double.parse(((amount / 1000.0) * feeRatePer1000).toStringAsFixed(2));
   }
 
+  /// Shown when no default VF number is cached — gives the collector a clear
+  /// action to fetch the current number set by the admin.
+  Widget _buildNoVfNumberCard(BuildContext context) {
+    final warningColor = AppTheme.warningColor(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          children: [
+            Icon(Icons.warning_amber_rounded, color: warningColor, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'no_default_vf_hint'.tr(),
+                style: TextStyle(
+                  color: warningColor,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 13,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        SizedBox(
+          width: double.infinity,
+          child: OutlinedButton.icon(
+            icon: _isFetchingVf
+                ? const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.refresh_rounded, size: 18),
+            label: Text(
+              _isFetchingVf
+                  ? 'loading'.tr()
+                  : 'fetch_current_vf_number'.tr(),
+              style: const TextStyle(fontWeight: FontWeight.w700),
+            ),
+            style: OutlinedButton.styleFrom(
+              foregroundColor: warningColor,
+              side: BorderSide(color: warningColor),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(14),
+              ),
+              padding: const EdgeInsets.symmetric(vertical: 12),
+            ),
+            onPressed: _isFetchingVf ? null : _fetchVfNumber,
+          ),
+        ),
+      ],
+    );
+  }
+
   Widget _summaryRow(
     BuildContext context,
     String label,
@@ -1131,6 +1243,7 @@ class _BankOption extends StatelessWidget {
   }
 }
 
+
 class _TabChip extends StatelessWidget {
   final String label;
   final IconData icon;
@@ -1163,6 +1276,136 @@ class _TabChip extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _HistoryTab extends StatelessWidget {
+  final Collector? collector;
+
+  const _HistoryTab({required this.collector});
+
+  @override
+  Widget build(BuildContext context) {
+    if (collector == null) {
+      return Center(child: Text('no_collector_record'.tr()));
+    }
+
+    final dist = context.watch<DistributionProvider>();
+    final isLight = !AppTheme.isDark(context);
+    final textMuted = AppTheme.textMutedColor(context);
+
+    // Filter ledger for transactions where this collector was either the source or destination
+    final history = dist.ledger.where((tx) {
+      final isMyCollect = tx.type == FlowType.COLLECT_CASH && tx.toId == collector!.id;
+      final isMyBankDeposit = tx.type == FlowType.DEPOSIT_TO_BANK && tx.fromId == collector!.id;
+      final isMyVfDeposit = tx.type == FlowType.DEPOSIT_TO_VFCASH && tx.fromId == collector!.id;
+      return isMyCollect || isMyBankDeposit || isMyVfDeposit;
+    }).toList();
+
+    if (history.isEmpty) {
+      return Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Icon(Icons.history_outlined, size: 64, color: textMuted.withValues(alpha: 0.3)),
+            const SizedBox(height: 16),
+            Text('no_data'.tr(), style: TextStyle(color: textMuted)),
+          ],
+        ),
+      );
+    }
+
+    return ListView.builder(
+      padding: const EdgeInsets.all(16),
+      itemCount: history.length,
+      itemBuilder: (context, index) {
+        final tx = history[index];
+        final isInbound = tx.type == FlowType.COLLECT_CASH;
+        final color = isInbound ? AppTheme.positiveColor(context) : AppTheme.errorColor(context);
+        final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(tx.timestamp);
+
+        return Container(
+          margin: const EdgeInsets.only(bottom: 12),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.6),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: AppTheme.lineColor(context)),
+          ),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(
+                  isInbound ? Icons.arrow_downward : Icons.arrow_upward,
+                  color: color,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                flex: 3, // Give the title more share
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      tx.type.label.tr(),
+                      style: TextStyle(
+                        color: AppTheme.textPrimaryColor(context),
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                      maxLines: 2,
+                      overflow: TextOverflow.visible,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${isInbound ? "from".tr() : "to".tr()}: ${isInbound ? (tx.fromLabel ?? 'Retailer') : (tx.toLabel ?? 'Bank / VF')}',
+                      style: TextStyle(color: textMuted, fontSize: 12),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(dateStr, style: TextStyle(color: textMuted, fontSize: 11)),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                flex: 2, // Amount column
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '${isInbound ? "+" : "-"}${tx.amount.toStringAsFixed(0)} ${'currency'.tr()}',
+                      style: TextStyle(
+                        color: color,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      textAlign: TextAlign.end,
+                    ),
+                    if (tx.notes != null && tx.notes!.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          tx.notes!,
+                          style: TextStyle(color: textMuted, fontSize: 10, fontStyle: FontStyle.italic),
+                          textAlign: TextAlign.end,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        );
+      },
     );
   }
 }

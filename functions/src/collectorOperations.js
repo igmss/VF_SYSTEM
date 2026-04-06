@@ -192,6 +192,8 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
 });
 
 exports.depositCollectorCashToDefaultVf = onCall({ region: REGION }, async (request) => {
+  // NOTE: Despite the legacy name, this function now accepts an explicit vfNumberId
+  // chosen by the collector. Falls back to the isDefault flag if none provided.
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
 
@@ -201,6 +203,7 @@ exports.depositCollectorCashToDefaultVf = onCall({ region: REGION }, async (requ
   }
 
   const collectorId = request.data?.collectorId?.toString();
+  const vfNumberIdParam = request.data?.vfNumberId?.toString() || null;
   const amount = asNumber(request.data?.amount);
   const createdByUid = uid;
   const notes = request.data?.notes?.toString().trim() || null;
@@ -233,8 +236,20 @@ exports.depositCollectorCashToDefaultVf = onCall({ region: REGION }, async (requ
     throw new HttpsError('failed-precondition', 'No Vodafone numbers are configured.');
   }
 
-  const [vfNumberId, rawVfNumber] = vfEntries.find(([, value]) => value.isDefault === true) || vfEntries[0];
-  const vfNumber = rawVfNumber || {};
+  // Resolve the VF number: use explicit ID from client, or fall back to isDefault
+  let rawVfNumberEntry;
+  if (vfNumberIdParam) {
+    rawVfNumberEntry = vfEntries.find(([id]) => id === vfNumberIdParam);
+    if (!rawVfNumberEntry) {
+      throw new HttpsError('not-found', `Vodafone number '${vfNumberIdParam}' not found.`);
+    }
+  } else {
+    rawVfNumberEntry = vfEntries.find(([, value]) => value.isDefault === true);
+    if (!rawVfNumberEntry) {
+      throw new HttpsError('failed-precondition', 'No default Vodafone Cash number is set. Please select a VF number or ask admin to set a default.');
+    }
+  }
+  const [vfNumberId, vfNumber] = rawVfNumberEntry;
   const vfPhone = vfNumber.phoneNumber || 'Default VF Number';
   const settings = settingsSnap.exists() && typeof settingsSnap.val() === 'object'
     ? settingsSnap.val()

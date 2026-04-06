@@ -45,6 +45,7 @@ class AppProvider extends ChangeNotifier {
   double _collectorVfDepositFeePer1000 = 7.0;
   String? _publicDefaultNumberId;
   String? _publicDefaultNumberPhone;
+  List<Map<String, String>> _publicVfNumbers = [];
 
   // ── Getters ───────────────────────────────────────────────────────────────
   // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
@@ -67,6 +68,8 @@ class AppProvider extends ChangeNotifier {
   double get collectorVfDepositFeePer1000 => _collectorVfDepositFeePer1000;
   String? get publicDefaultNumberId => _publicDefaultNumberId;
   String? get publicDefaultNumberPhone => _publicDefaultNumberPhone;
+  /// List of {id, phoneNumber} maps readable by collectors.
+  List<Map<String, String>> get publicVfNumbers => _publicVfNumbers;
 
   // Callback to trigger Bank logic in DistributionProvider
   Future<void> Function({
@@ -148,23 +151,10 @@ class AppProvider extends ChangeNotifier {
       });
       _defaultNumber = _mobileNumbers.isEmpty
           ? null
-          : _mobileNumbers.firstWhere((n) => n.isDefault,
-              orElse: () => _mobileNumbers.first);
+          : _mobileNumbers.where((n) => n.isDefault).firstOrNull ?? _mobileNumbers.first;
 
-      // Admin/Finance Auto-Sync: If we can see numbers, ensure the public settings node
-      // is in sync with our default number so Collectors (who can't see this node)
-      // still know where to deposit.
-      if (_defaultNumber != null) {
-        final id = _defaultNumber!.id;
-        final phone = _defaultNumber!.phoneNumber;
-        if (id != _publicDefaultNumberId || phone != _publicDefaultNumberPhone) {
-          FirebaseDatabase.instance.ref('system/operation_settings').update({
-            'defaultVfNumberId': id,
-            'defaultVfNumberPhone': phone,
-          }).catchError((e) => debugPrint('Public sync failed (likely no permission): $e'));
-        }
-      }
-
+      // Admin/Finance Auto-Sync: Ensure public settings are up to date.
+      pushDefaultNumberToPublic();
       notifyListeners();
     });
 
@@ -216,13 +206,69 @@ class AppProvider extends ChangeNotifier {
             _asDouble(data['collectorVfDepositFeePer1000']);
         _publicDefaultNumberId = data['defaultVfNumberId']?.toString();
         _publicDefaultNumberPhone = data['defaultVfNumberPhone']?.toString();
+        // Read the public VF numbers list
+        final rawList = data['vfNumbers'];
+        if (rawList is List) {
+          _publicVfNumbers = rawList
+              .whereType<Map>()
+              .map((m) => {
+                    'id': m['id']?.toString() ?? '',
+                    'phoneNumber': m['phoneNumber']?.toString() ?? '',
+                  })
+              .where((m) => m['id']!.isNotEmpty && m['phoneNumber']!.isNotEmpty)
+              .toList();
+        } else {
+          _publicVfNumbers = [];
+        }
       } else {
         _collectorVfDepositFeePer1000 = 7.0;
         _publicDefaultNumberId = null;
         _publicDefaultNumberPhone = null;
+        _publicVfNumbers = [];
       }
       notifyListeners();
     });
+  }
+
+  /// Fetches the very latest default VF number directly from Firebase (one-shot read).
+  /// Use this in the collector dashboard to guarantee up-to-date info before a deposit.
+  Future<void> fetchLatestDefaultVfNumber() async {
+    try {
+      final snap = await FirebaseDatabase.instance
+          .ref('system/operation_settings')
+          .get();
+      if (snap.exists && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _publicDefaultNumberId = data['defaultVfNumberId']?.toString();
+        _publicDefaultNumberPhone = data['defaultVfNumberPhone']?.toString();
+      } else {
+        _publicDefaultNumberId = null;
+        _publicDefaultNumberPhone = null;
+      }
+      notifyListeners();
+    } catch (e) {
+      debugPrint('fetchLatestDefaultVfNumber error: $e');
+      rethrow;
+    }
+  }
+
+  /// Syncs the current internal [_defaultNumber] to the public node `system/operation_settings`.
+  /// Also writes the full VF numbers list so collectors can pick any number.
+  Future<void> pushDefaultNumberToPublic({MobileNumber? override}) async {
+    final numToPush = override ?? _defaultNumber;
+    // Build a safe public list — only id and phoneNumber, no sensitive fields
+    final vfList = _mobileNumbers
+        .map((n) => {'id': n.id, 'phoneNumber': n.phoneNumber})
+        .toList();
+    final updates = <String, dynamic>{
+      'defaultVfNumberId': numToPush?.id,
+      'defaultVfNumberPhone': numToPush?.phoneNumber,
+      'vfNumbers': vfList,
+    };
+    await FirebaseDatabase.instance
+        .ref('system/operation_settings')
+        .update(updates)
+        .catchError((e) => debugPrint('Public sync failed: $e'));
   }
 
   @override
@@ -386,7 +432,10 @@ class AppProvider extends ChangeNotifier {
         lastUpdatedAt: DateTime.now(),
       );
       await _dbService.addMobileNumber(number);
-      await loadMobileNumbers();
+      // Synchronously update local list so we can find it
+      _mobileNumbers.add(number);
+      
+      pushDefaultNumberToPublic(override: number.isDefault ? number : null); 
     } catch (e) {
       _error = e.toString();
       notifyListeners();
@@ -400,7 +449,14 @@ class AppProvider extends ChangeNotifier {
   Future<void> setDefaultNumber(String numberId) async {
     try {
       await _dbService.setDefaultNumber(numberId);
-      await loadMobileNumbers();
+      
+      // Find the target number in our local list for immediate sync
+      final target = _mobileNumbers.where((n) => n.id == numberId).firstOrNull;
+      if (target != null) {
+        await pushDefaultNumberToPublic(override: target);
+      } else {
+        pushDefaultNumberToPublic();
+      }
     } catch (e) {
       _error = e.toString();
       notifyListeners();
@@ -410,7 +466,14 @@ class AppProvider extends ChangeNotifier {
   Future<void> deleteMobileNumber(String numberId) async {
     try {
       await _dbService.deleteMobileNumber(numberId);
-      await loadMobileNumbers();
+      _mobileNumbers.removeWhere((n) => n.id == numberId);
+      
+      // Recalculate default number locally for immediate sync
+      _defaultNumber = _mobileNumbers.isEmpty
+          ? null
+          : _mobileNumbers.where((n) => n.isDefault).firstOrNull ?? _mobileNumbers.first;
+
+      pushDefaultNumberToPublic(); 
     } catch (e) {
       _error = e.toString();
       notifyListeners();

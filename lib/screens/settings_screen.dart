@@ -24,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _isSaving = false;
   bool _isSyncing = false;
   bool _isSavingCollectorVfFee = false;
+  bool _isSyncingPublic = false;
   DateTime? _selectedDate;
   double? _lastLoadedCollectorVfFee;
 
@@ -99,6 +100,18 @@ class _SettingsScreenState extends State<SettingsScreen> {
       isError: false,
     );
     await _doSync(fromDate: _selectedDate);
+  }
+
+  Future<void> _syncPublicSettings() async {
+    setState(() => _isSyncingPublic = true);
+    try {
+      await context.read<AppProvider>().pushDefaultNumberToPublic();
+      _showSnack('Collector view synchronized with current default VF number.', isError: false);
+    } catch (e) {
+      _showSnack('Sync failed: $e');
+    } finally {
+      if (mounted) setState(() => _isSyncingPublic = false);
+    }
   }
 
   Future<void> _runAutoSync() async {
@@ -317,6 +330,26 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           style: ElevatedButton.styleFrom(
                             backgroundColor: AppTheme.infoColor(context),
                             foregroundColor: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: OutlinedButton.icon(
+                          onPressed: _isSyncingPublic ? null : _syncPublicSettings,
+                          icon: _isSyncingPublic
+                              ? const SizedBox(
+                                  width: 16,
+                                  height: 16,
+                                  child: CircularProgressIndicator(strokeWidth: 2),
+                                )
+                              : const Icon(Icons.sync_alt, size: 18),
+                          label: const Text('Sync with Collector View'),
+                          style: OutlinedButton.styleFrom(
+                            foregroundColor: AppTheme.textMutedColor(context),
+                            padding: const EdgeInsets.symmetric(vertical: 12),
+                            side: BorderSide(color: AppTheme.lineColor(context)),
                           ),
                         ),
                       ),

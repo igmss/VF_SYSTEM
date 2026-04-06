@@ -1260,3 +1260,150 @@ exports.processRetailerRequest = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('internal', 'Distribution transaction failed globally. Rolled back VF lock.');
   }
 });
+
+exports.transferInternalVfCash = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { fromVfId, toVfId, amount, fees, notes } = request.data;
+  const numAmount = asNumber(amount);
+  const numFees = asNumber(fees);
+
+  if (!fromVfId || !toVfId || fromVfId === toVfId || numAmount <= 0 || numFees < 0) {
+    throw new HttpsError('invalid-argument', 'Invalid internal transfer request.');
+  }
+
+  const db = admin.database();
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowTs = now.getTime();
+
+  // Deduct from source number first using the existing transaction ledger wrapper
+  const totalDeduction = numAmount + numFees;
+  const vfReservation = await updateMobileNumberUsageTransaction({
+    numberId: fromVfId,
+    amountDelta: totalDeduction,
+    direction: 'outgoing', // Since money is leaving this number
+    timestampMs: nowTs,
+    nowIso,
+    requireSufficientBalance: true,
+  });
+
+  if (!vfReservation.committed) {
+    throw new HttpsError('failed-precondition', 'Insufficient Vodafone balance in the source number.');
+  }
+
+  const sourceNumber = vfReservation.snapshot.val() || {};
+  const sourceVfPhone = sourceNumber.phoneNumber || fromVfId;
+
+  // Add to destination number
+  const destSnap = await db.ref(`mobile_numbers/${toVfId}`).once('value');
+  if (!destSnap.exists()) {
+    // Rollback if destination doesn't exist
+    await updateMobileNumberUsageTransaction({
+      numberId: fromVfId,
+      amountDelta: -totalDeduction,
+      direction: 'incoming',
+      timestampMs: nowTs,
+      nowIso,
+      requireSufficientBalance: false,
+    });
+    throw new HttpsError('not-found', 'Destination Vodafone number not found.');
+  }
+  
+  const destNumber = destSnap.val();
+  const destVfPhone = destNumber.phoneNumber || toVfId;
+
+  // We write the destination balance increase into the main multi-path update
+  const updates = {};
+  applyMobileNumberUsageDelta(updates, {
+    numberId: toVfId,
+    amountDelta: numAmount,
+    direction: 'incoming', // Since money is entering this number
+    timestampMs: nowTs,
+    nowIso,
+  });
+
+  const txId = uuidv4();
+  const cashTxIdDest = uuidv4();
+  const cashTxIdSource = uuidv4();
+
+  // Ledger entry
+  updates[`financial_ledger/${txId}`] = {
+    id: txId,
+    type: 'INTERNAL_VF_TRANSFER',
+    amount: numAmount,
+    fromId: fromVfId,
+    fromLabel: sourceVfPhone,
+    toId: toVfId,
+    toLabel: destVfPhone,
+    createdByUid: uid,
+    notes: notes || `Internal Transfer from ${sourceVfPhone} to ${destVfPhone}`,
+    timestamp: nowTs,
+  };
+
+  // Transaction for source number
+  updates[`transactions/${cashTxIdSource}`] = {
+    id: cashTxIdSource,
+    phoneNumber: sourceVfPhone,
+    amount: totalDeduction,
+    currency: 'EGP',
+    timestamp: nowIso,
+    bybitOrderId: `INT-${txId.substring(0, 8)}`,
+    status: 'completed',
+    paymentMethod: 'Internal VF Transfer (Out)',
+    side: 0, // Sell/Out
+    relatedLedgerId: txId,
+    chatHistory: `Sent to ${destVfPhone} (Amount: ${numAmount}, Fee: ${numFees})`,
+  };
+
+  // Transaction for destination number
+  updates[`transactions/${cashTxIdDest}`] = {
+    id: cashTxIdDest,
+    phoneNumber: destVfPhone,
+    amount: numAmount,
+    currency: 'EGP',
+    timestamp: nowIso,
+    bybitOrderId: `INT-${txId.substring(0, 8)}`,
+    status: 'completed',
+    paymentMethod: 'Internal VF Transfer (In)',
+    side: 1, // Buy/In
+    relatedLedgerId: txId,
+    chatHistory: `Received from ${sourceVfPhone}`,
+  };
+
+  // Ledger for Fee
+  if (numFees > 0) {
+    const feeTxId = uuidv4();
+    updates[`financial_ledger/${feeTxId}`] = {
+      id: feeTxId,
+      type: 'INTERNAL_VF_TRANSFER_FEE',
+      amount: numFees,
+      fromId: fromVfId,
+      fromLabel: sourceVfPhone,
+      toId: toVfId,
+      toLabel: destVfPhone,
+      createdByUid: uid,
+      relatedLedgerId: txId,
+      notes: 'Transfer Fee',
+      timestamp: nowTs,
+    };
+  }
+
+  try {
+    await db.ref().update(updates);
+    return { success: true, txId };
+  } catch (error) {
+    // Rollback source if write fails
+    await updateMobileNumberUsageTransaction({
+      numberId: fromVfId,
+      amountDelta: -totalDeduction,
+      direction: 'incoming',
+      timestampMs: nowTs,
+      nowIso,
+      requireSufficientBalance: false,
+    });
+    throw new HttpsError('internal', 'Internal transfer failed. Rolled back VF source.');
+  }
+});

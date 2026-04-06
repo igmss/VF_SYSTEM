@@ -34,11 +34,13 @@ class DistributionProvider extends ChangeNotifier {
   bool _isCorrecting = false;
   bool _isCreditReturning = false;
   bool _isDeleting = false;
+  bool _isInternalTransferring = false;
 
   bool get isDistributing    => _isDistributing;
   bool get isCollecting      => _isCollecting;
   bool get isDepositing      => _isDepositing;
   bool get isCreditReturning => _isCreditReturning;
+  bool get isInternalTransferring => _isInternalTransferring;
   String? _error;
 
   StreamSubscription<DatabaseEvent>? _usdExchangeSub;
@@ -1183,6 +1185,39 @@ class DistributionProvider extends ChangeNotifier {
       notifyListeners();
     }
   }
+
+  /// Internal transfer of VF Cash from one number to another
+  Future<void> transferInternalVfCash({
+    required String fromVfId,
+    required String toVfId,
+    required double amount,
+    required double fees,
+    String? notes,
+  }) async {
+    if (_isInternalTransferring) {
+      throw StateError('An internal transfer is already in progress.');
+    }
+    _isInternalTransferring = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('transferInternalVfCash');
+      await callable.call({
+        'fromVfId': fromVfId,
+        'toVfId': toVfId,
+        'amount': amount,
+        'fees': fees,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Internal Transfer error: $e');
+      rethrow;
+    } finally {
+      _isInternalTransferring = false;
+      notifyListeners();
+    }
+  }
+
   /// Admin: Delete a transaction and reverse its financial impact on the server.
   Future<void> deleteTransaction(FinancialTransaction tx) async {
     if (_isDeleting) return;

@@ -126,6 +126,10 @@ class _LedgerTile extends StatelessWidget {
       label = 'Credit Return Fee (${tx.fromLabel})';
     } else if (tx.type == FlowType.VFCASH_RETAIL_PROFIT) {
       label = 'VF Retail Profit (${tx.toLabel})';
+    } else if (tx.type == FlowType.INTERNAL_VF_TRANSFER) {
+      label = 'Internal Transfer (${tx.fromLabel} → ${tx.toLabel})';
+    } else if (tx.type == FlowType.INTERNAL_VF_TRANSFER_FEE) {
+      label = 'Internal Transfer Fee (${tx.fromLabel})';
     }
 
     // Clean label for display (strip the suffix — we'll show a badge instead)
@@ -187,7 +191,9 @@ class _LedgerTile extends StatelessWidget {
                     tx.type != FlowType.BANK_DEDUCTION &&
                     tx.type != FlowType.CREDIT_RETURN &&
                     tx.type != FlowType.CREDIT_RETURN_FEE &&
-                    tx.type != FlowType.VFCASH_RETAIL_PROFIT) ...[
+                    tx.type != FlowType.VFCASH_RETAIL_PROFIT &&
+                    tx.type != FlowType.INTERNAL_VF_TRANSFER &&
+                    tx.type != FlowType.INTERNAL_VF_TRANSFER_FEE) ...[
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
@@ -466,6 +472,10 @@ class _LedgerTile extends StatelessWidget {
         return const Color(0xFF2A9D8F);
       case FlowType.BANK_DEDUCTION:
         return const Color(0xFFE63946);
+      case FlowType.INTERNAL_VF_TRANSFER:
+        return const Color(0xFF3861FB);
+      case FlowType.INTERNAL_VF_TRANSFER_FEE:
+        return AppTheme.warningColor(context);
     }
   }
 
@@ -497,6 +507,10 @@ class _LedgerTile extends StatelessWidget {
         return Icons.trending_up;
       case FlowType.BANK_DEDUCTION:
         return Icons.remove_circle_outline;
+      case FlowType.INTERNAL_VF_TRANSFER:
+        return Icons.sync_alt_rounded;
+      case FlowType.INTERNAL_VF_TRANSFER_FEE:
+        return Icons.money_off;
     }
   }
 }

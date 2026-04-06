@@ -82,6 +82,14 @@ class AppTheme {
           ? const Color(0xFF73B8F6).withValues(alpha: 0.12)
           : const Color(0xFF2F6B9A).withValues(alpha: 0.10);
 
+  static Color errorColor(BuildContext context) =>
+      isDark(context) ? const Color(0xFFFF6B6B) : const Color(0xFFD84343);
+
+  static Color errorColorSoft(BuildContext context) =>
+      isDark(context)
+          ? const Color(0xFFFF6B6B).withValues(alpha: 0.12)
+          : const Color(0xFFD84343).withValues(alpha: 0.10);
+
   static Color warningColor(BuildContext context) =>
       isDark(context) ? const Color(0xFFE3B86B) : const Color(0xFFB47B32);
 

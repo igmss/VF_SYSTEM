@@ -6,6 +6,7 @@ import '../models/models.dart';
 import '../theme/app_theme.dart';
 import 'add_number_screen.dart';
 import 'number_details_screen.dart';
+import 'admin/vf_transfer_dialog.dart';
 
 class HomeScreen extends StatefulWidget {
   final bool embedded;
@@ -177,14 +178,32 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ],
         ),
       ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => Navigator.push(
-          context,
-          MaterialPageRoute(builder: (_) => const AddNumberScreen()),
-        ),
-        label: Text('add_number'.tr()),
-        icon: const Icon(Icons.add),
-        backgroundColor: AppTheme.accent,
+      floatingActionButton: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          FloatingActionButton.extended(
+            heroTag: 'transfer_btn',
+            onPressed: () => showDialog(
+              context: context,
+              builder: (_) => const VfTransferDialog(),
+            ),
+            label: Text('transfer_vf_balance'.tr()),
+            icon: const Icon(Icons.sync_alt_rounded),
+            backgroundColor: AppTheme.positiveColor(context),
+          ),
+          const SizedBox(height: 12),
+          FloatingActionButton.extended(
+            heroTag: 'add_btn',
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const AddNumberScreen()),
+            ),
+            label: Text('add_number'.tr()),
+            icon: const Icon(Icons.add),
+            backgroundColor: AppTheme.accent,
+          ),
+        ],
       ),
     );
   }

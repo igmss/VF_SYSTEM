@@ -40,6 +40,12 @@ enum FlowType {
 
   /// Manual deduction from a bank account (e.g. balance correction for a missed BUY_USDT deduction)
   BANK_DEDUCTION,
+
+  /// Internal transfer of Vodafone Cash from one number to another
+  INTERNAL_VF_TRANSFER,
+
+  /// Fee deducted for an internal Vodafone Cash transfer
+  INTERNAL_VF_TRANSFER_FEE,
 }
 
 extension FlowTypeExtension on FlowType {
@@ -58,6 +64,8 @@ extension FlowTypeExtension on FlowType {
       case FlowType.CREDIT_RETURN_FEE:  return 'credit_return_fee';
       case FlowType.VFCASH_RETAIL_PROFIT: return 'vfcash_retail_profit';
       case FlowType.BANK_DEDUCTION:     return 'bank_deduction';
+      case FlowType.INTERNAL_VF_TRANSFER: return 'internal_vf_transfer';
+      case FlowType.INTERNAL_VF_TRANSFER_FEE: return 'internal_vf_transfer_fee';
     }
   }
 

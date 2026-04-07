@@ -9,6 +9,9 @@ import '../../models/retailer.dart';
 import '../../theme/app_theme.dart';
 import 'collector_details_screen.dart';
 
+part 'collector_card.dart';
+part 'collector_dialogs.dart';
+
 class CollectorsScreen extends StatelessWidget {
   const CollectorsScreen({Key? key}) : super(key: key);
 
@@ -18,7 +21,6 @@ class CollectorsScreen extends StatelessWidget {
     final auth = context.watch<AuthProvider>();
     final textPrimary = AppTheme.textPrimaryColor(context);
     final surface = AppTheme.surfaceColor(context);
-    final isLight = !AppTheme.isDark(context);
 
     final isEmbedded = auth.isAdmin || auth.isFinance;
 
@@ -159,11 +161,8 @@ class CollectorsScreen extends StatelessWidget {
         ),
       );
 
-  /// Shows all COLLECTOR-role users (from users/ node) who are NOT yet
-  /// in the collectors list. Admin taps one to instantly add them.
   void _showPickUserDialog(BuildContext context) async {
     final dist = context.read<DistributionProvider>();
-    // Load all users from Firebase to find COLLECTOR-role ones
     showDialog(
       context: context,
       barrierDismissible: false,
@@ -173,9 +172,8 @@ class CollectorsScreen extends StatelessWidget {
 
     try {
       final allUsers = await context.read<AuthProvider>().getAllUsers();
-      Navigator.pop(context); // dismiss loading
+      Navigator.pop(context);
 
-      // Filter: role == COLLECTOR and not already in collectors list
       final unlinked = allUsers.where((u) {
         if (u.role.name != 'COLLECTOR') return false;
         return !dist.collectors.any((c) => c.uid == u.uid);
@@ -235,7 +233,7 @@ class CollectorsScreen extends StatelessWidget {
         ),
       );
     } catch (e) {
-      Navigator.pop(context); // dismiss loading if still shown
+      Navigator.pop(context);
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Error: $e'), backgroundColor: Colors.red),
       );
@@ -274,11 +272,9 @@ class CollectorsScreen extends StatelessWidget {
   void _showCollectDialog(BuildContext context, Collector collector,
       DistributionProvider dist, AuthProvider auth) {
     final amtCtrl = TextEditingController();
-    // Show ALL active retailers — admin may collect more than the debt (credit)
     final retailers = dist.retailers;
     if (retailers.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('no_data'.tr())));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('no_data'.tr())));
       return;
     }
     String selectedRetailerId = retailers.first.id;
@@ -286,8 +282,7 @@ class CollectorsScreen extends StatelessWidget {
       context: context,
       builder: (ctx2) => StatefulBuilder(
         builder: (context2, setSt) {
-          final selectedRetailer =
-              retailers.firstWhere((r) => r.id == selectedRetailerId);
+          final selectedRetailer = retailers.firstWhere((r) => r.id == selectedRetailerId);
           final entered   = double.tryParse(amtCtrl.text) ?? 0.0;
           final debt      = selectedRetailer.pendingDebt;
           final debtPaid  = entered > debt ? debt : entered;
@@ -305,22 +300,17 @@ class CollectorsScreen extends StatelessWidget {
                   labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
                   filled: true,
                   fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
-                  border:
-                      OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
                 ),
-                items: retailers
-                    .map((r) => DropdownMenuItem(
-                        value: r.id,
-                        child: Text('${r.name} (${_fmt(r.pendingDebt)} EGP)')))
-                    .toList(),
-                onChanged: (v) =>
-                    setSt(() => selectedRetailerId = v ?? selectedRetailerId),
+                items: retailers.map((r) => DropdownMenuItem(
+                  value: r.id,
+                  child: Text('${r.name} (${_fmt(r.pendingDebt)} EGP)'))).toList(),
+                onChanged: (v) => setSt(() => selectedRetailerId = v ?? selectedRetailerId),
               ),
               const SizedBox(height: 12),
               _tf(context, amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
                   keyboard: TextInputType.number,
                   onChanged: (_) => setSt(() {})),
-              // Live breakdown
               if (entered > 0) ...[
                 const SizedBox(height: 8),
                 Container(
@@ -328,25 +318,15 @@ class CollectorsScreen extends StatelessWidget {
                   decoration: BoxDecoration(
                     color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.04),
                     borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: credit > 0
-                          ? const Color(0xFF4ADE80).withOpacity(0.4)
-                          : AppTheme.lineColor(context),
-                    ),
+                    border: Border.all(color: credit > 0 ? const Color(0xFF4ADE80).withOpacity(0.4) : AppTheme.lineColor(context)),
                   ),
                   child: Column(
                     children: [
                       Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          Text('↓ Debt Reduced',
-                              style: TextStyle(
-                                  color: AppTheme.textMutedColor(context), fontSize: 12)),
-                          Text('${debtPaid.toStringAsFixed(0)} EGP',
-                              style: const TextStyle(
-                                  color: Color(0xFFFBBF24),
-                                  fontSize: 12,
-                                  fontWeight: FontWeight.bold)),
+                          Text('↓ Debt Reduced', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
+                          Text('${debtPaid.toStringAsFixed(0)} EGP', style: const TextStyle(color: Color(0xFFFBBF24), fontSize: 12, fontWeight: FontWeight.bold)),
                         ],
                       ),
                       if (credit > 0) ...[
@@ -354,14 +334,8 @@ class CollectorsScreen extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            Text('⊕ Credit Added',
-                                style: TextStyle(
-                                    color: AppTheme.textMutedColor(context), fontSize: 12)),
-                            Text('+${credit.toStringAsFixed(0)} EGP',
-                                style: const TextStyle(
-                                    color: Color(0xFF4ADE80),
-                                    fontSize: 12,
-                                    fontWeight: FontWeight.bold)),
+                            Text('⊕ Credit Added', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12)),
+                            Text('+${credit.toStringAsFixed(0)} EGP', style: const TextStyle(color: Color(0xFF4ADE80), fontSize: 12, fontWeight: FontWeight.bold)),
                           ],
                         ),
                       ],
@@ -373,9 +347,7 @@ class CollectorsScreen extends StatelessWidget {
             onConfirm: () async {
               final amount = double.tryParse(amtCtrl.text) ?? 0;
               if (amount <= 0) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
-                );
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red));
                 return false;
               }
               await dist.collectFromRetailer(
@@ -392,14 +364,11 @@ class CollectorsScreen extends StatelessWidget {
     );
   }
 
-  void _showDepositDialog(BuildContext context, Collector collector,
-      DistributionProvider dist, AuthProvider auth) {
-    final amtCtrl = TextEditingController(
-        text: collector.cashOnHand.toStringAsFixed(0));
+  void _showDepositDialog(BuildContext context, Collector collector, DistributionProvider dist, AuthProvider auth) {
+    final amtCtrl = TextEditingController(text: collector.cashOnHand.toStringAsFixed(0));
     final banks = dist.bankAccounts;
     if (banks.isEmpty) {
-      ScaffoldMessenger.of(context)
-          .showSnackBar(SnackBar(content: Text('no_data'.tr())));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('no_data'.tr())));
       return;
     }
     String selectedBankId = banks.first.id;
@@ -420,21 +389,16 @@ class CollectorsScreen extends StatelessWidget {
                 fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
-              items: banks
-                  .map((b) => DropdownMenuItem(value: b.id, child: Text(b.bankName)))
-                  .toList(),
+              items: banks.map((b) => DropdownMenuItem(value: b.id, child: Text(b.bankName))).toList(),
               onChanged: (v) => setSt(() => selectedBankId = v ?? selectedBankId),
             ),
             const SizedBox(height: 12),
-            _tf(context, amtCtrl, 'amount_egp'.tr(), Icons.monetization_on,
-                keyboard: TextInputType.number),
+            _tf(context, amtCtrl, 'amount_egp'.tr(), Icons.monetization_on, keyboard: TextInputType.number),
           ],
           onConfirm: () async {
             final amount = double.tryParse(amtCtrl.text) ?? 0;
             if (amount <= 0) {
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
-              );
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red));
               return false;
             }
             await dist.depositToBank(
@@ -450,63 +414,41 @@ class CollectorsScreen extends StatelessWidget {
     );
   }
 
-  void _showAssignRetailersDialog(
-      BuildContext context, Collector collector, DistributionProvider dist) {
+  void _showAssignRetailersDialog(BuildContext context, Collector collector, DistributionProvider dist) {
     final surface = AppTheme.surfaceColor(context);
     final allRetailers = dist.retailers;
-    // Which retailer IDs are currently assigned to this collector?
     final Set<String> assigned = allRetailers
         .where((r) => r.assignedCollectorId == collector.uid)
-        .map((r) => r.id)
-        .toSet();
+        .map((r) => r.id).toSet();
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) => AlertDialog(
           backgroundColor: surface,
-          title: Text(
-            '${'assign_retailers'.tr()} — ${collector.name}',
-            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15),
-          ),
+          title: Text('${'assign_retailers'.tr()} — ${collector.name}',
+            style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 15)),
           content: SizedBox(
             width: double.maxFinite,
             child: allRetailers.isEmpty
-                ? Text('no_data'.tr(),
-                    style: TextStyle(color: AppTheme.textMutedColor(context)))
+                ? Text('no_data'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context)))
                 : ListView(
                     shrinkWrap: true,
                     children: allRetailers.map((r) {
                       final isChecked = assigned.contains(r.id);
-                      final currentCollector =
-                          r.assignedCollectorId != null &&
-                                  r.assignedCollectorId != collector.uid
-                              ? dist.collectors
-                                  .where((c) =>
-                                      c.uid == r.assignedCollectorId)
-                                  .map((c) => c.name)
-                                  .firstOrNull
-                              : null;
+                      final currentCollector = r.assignedCollectorId != null && r.assignedCollectorId != collector.uid
+                          ? dist.collectors.where((c) => c.uid == r.assignedCollectorId).map((c) => c.name).firstOrNull : null;
                       return CheckboxListTile(
                         value: isChecked,
-                        title: Text(r.name,
-                            style: TextStyle(color: AppTheme.textPrimaryColor(context))),
+                        title: Text(r.name, style: TextStyle(color: AppTheme.textPrimaryColor(context))),
                         subtitle: currentCollector != null
-                            ? Text(
-                                '${'assigned_to'.tr()}: $currentCollector',
-                                style: const TextStyle(
-                                    color: Colors.orange, fontSize: 11))
-                            : Text(r.area,
-                                style: TextStyle(
-                                    color: AppTheme.textMutedColor(context), fontSize: 11)),
+                            ? Text('${'assigned_to'.tr()}: $currentCollector', style: const TextStyle(color: Colors.orange, fontSize: 11))
+                            : Text(r.area, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 11)),
                         activeColor: const Color(0xFFA78BFA),
                         checkColor: AppTheme.textPrimaryColor(context),
                         onChanged: (val) => setSt(() {
-                          if (val == true) {
-                            assigned.add(r.id);
-                          } else {
-                            assigned.remove(r.id);
-                          }
+                          if (val == true) assigned.add(r.id);
+                          else assigned.remove(r.id);
                         }),
                       );
                     }).toList(),
@@ -515,37 +457,23 @@ class CollectorsScreen extends StatelessWidget {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context),
-              child: Text('cancel'.tr(),
-                  style: TextStyle(color: AppTheme.textMutedColor(context))),
+              child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
             ),
             ElevatedButton(
               onPressed: () async {
                 Navigator.pop(context);
                 final collectorUid = collector.uid;
-                if (collectorUid == null || collectorUid.isEmpty) {
-                  ScaffoldMessenger.of(context).showSnackBar(SnackBar(
-                      content: Text('collector_no_uid'.tr()),
-                      backgroundColor: Colors.red));
-                  return;
-                }
-                // For each retailer, assign/unassign
+                if (collectorUid == null || collectorUid.isEmpty) { return; }
                 for (final r in allRetailers) {
                   final shouldBeAssigned = assigned.contains(r.id);
-                  final currentlyAssigned =
-                      r.assignedCollectorId == collectorUid;
-                  if (shouldBeAssigned && !currentlyAssigned) {
-                    await dist.assignRetailerToCollector(r.id, collectorUid);
-                  } else if (!shouldBeAssigned && currentlyAssigned) {
-                    await dist.assignRetailerToCollector(r.id, null);
-                  }
+                  final currentlyAssigned = r.assignedCollectorId == collectorUid;
+                  if (shouldBeAssigned && !currentlyAssigned) await dist.assignRetailerToCollector(r.id, collectorUid);
+                  else if (!shouldBeAssigned && currentlyAssigned) await dist.assignRetailerToCollector(r.id, null);
                 }
-                ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('retailers_assigned'.tr())));
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('retailers_assigned'.tr())));
               },
-              style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFFA78BFA)),
-              child: Text('save'.tr(),
-                  style: TextStyle(color: AppTheme.textPrimaryColor(context))),
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFA78BFA)),
+              child: Text('save'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context))),
             ),
           ],
         ),
@@ -554,8 +482,7 @@ class CollectorsScreen extends StatelessWidget {
   }
 
   static Widget _tf(BuildContext context, TextEditingController c, String label, IconData icon,
-      {TextInputType keyboard = TextInputType.text,
-      void Function(String)? onChanged}) =>
+      {TextInputType keyboard = TextInputType.text, void Function(String)? onChanged}) =>
       Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: TextField(
@@ -568,13 +495,7 @@ class CollectorsScreen extends StatelessWidget {
             labelStyle: TextStyle(color: AppTheme.textMutedColor(context)),
             prefixIcon: Icon(icon, color: AppTheme.textMutedColor(context), size: 20),
             filled: true,
-            fillColor: AppTheme.textPrimaryColor(context).withValues(alpha: 0.06),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1))),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.1))),
-            focusedBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: const BorderSide(color: Color(0xFFE63946))),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
           ),
         ),
       );
@@ -583,277 +504,3 @@ class CollectorsScreen extends StatelessWidget {
     return NumberFormat('#,##0.00', 'en_US').format(v);
   }
 }
-
-class _CollectorCard extends StatelessWidget {
-  final Collector collector;
-  final bool isAdmin;
-  final VoidCallback onCollect;
-  final VoidCallback onDeposit;
-  final VoidCallback? onEdit;
-  final VoidCallback? onAssignRetailers;
-
-  const _CollectorCard({
-    required this.collector,
-    required this.isAdmin,
-    required this.onCollect,
-    required this.onDeposit,
-    this.onEdit,
-    this.onAssignRetailers,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final percent = (collector.cashOnHand / collector.cashLimit).clamp(0.0, 1.0);
-    final isCritical = collector.cashOnHand >= collector.cashLimit;
-
-    return GestureDetector(
-      onTap: () {
-        Navigator.push(
-          context,
-          MaterialPageRoute(
-            builder: (_) => CollectorDetailsScreen(collector: collector),
-          ),
-        );
-      },
-      child: Container(
-        margin: const EdgeInsets.only(bottom: 16),
-      decoration: BoxDecoration(
-        color: AppTheme.isDark(context) ? AppTheme.surfaceColor(context) : Colors.white,
-        borderRadius: BorderRadius.circular(24),
-        border: Border.all(
-          color: isCritical
-              ? Colors.red.withOpacity(0.4)
-              : AppTheme.lineColor(context),
-          width: isCritical ? 1.5 : 1,
-        ),
-        boxShadow: AppTheme.softShadow(context),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              children: [
-                CircleAvatar(
-                  radius: 22,
-                  backgroundColor: (isCritical ? Colors.red : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239))).withOpacity(0.1),
-                  child: Icon(Icons.delivery_dining, 
-                      color: isCritical ? Colors.red : (AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239)), 
-                      size: 24),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(collector.name,
-                          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800, fontSize: 16)),
-                      const SizedBox(height: 2),
-                      Row(
-                        children: [
-                          Icon(Icons.phone, size: 12, color: AppTheme.textMutedColor(context)),
-                          const SizedBox(width: 4),
-                          Text(collector.phone,
-                              style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
-                        ],
-                      ),
-                    ]
-                  ),
-                ),
-                if (onEdit != null)
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: AppTheme.lineColor(context).withOpacity(0.5),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: IconButton(
-                      icon: Icon(Icons.edit, color: AppTheme.textPrimaryColor(context), size: 18),
-                      onPressed: onEdit,
-                      padding: EdgeInsets.zero,
-                    ),
-                  ),
-              ],
-            ),
-          ),
-          
-          Divider(height: 1, color: AppTheme.lineColor(context)),
-          
-          Padding(
-            padding: const EdgeInsets.all(16),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text('Cash in Hand', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_f(collector.cashOnHand)} EGP',
-                      style: TextStyle(
-                          color: isCritical ? Colors.redAccent : AppTheme.textPrimaryColor(context),
-                          fontWeight: FontWeight.w900,
-                          fontSize: 18),
-                    ),
-                  ],
-                ),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  children: [
-                    Text('Limit', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.w500)),
-                    const SizedBox(height: 4),
-                    Text(
-                      '${_f(collector.cashLimit)} EGP',
-                      style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 14),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: LinearProgressIndicator(
-                value: percent,
-                minHeight: 8,
-                backgroundColor: AppTheme.lineColor(context),
-                valueColor: AlwaysStoppedAnimation<Color>(
-                    isCritical ? Colors.redAccent : const Color(0xFF4ADE80)),
-              ),
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          if (isAdmin)
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: AppTheme.lineColor(context).withOpacity(0.3),
-                borderRadius: const BorderRadius.vertical(bottom: Radius.circular(24)),
-              ),
-              child: Column(
-                children: [
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: onCollect,
-                          icon: const Icon(Icons.arrow_downward, size: 16),
-                          label: Text('collected'.tr(), style: const TextStyle(fontWeight: FontWeight.w600)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4ADE80).withOpacity(0.15),
-                            foregroundColor: const Color(0xFF16A34A),
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: ElevatedButton.icon(
-                          onPressed: onDeposit,
-                          icon: const Icon(Icons.account_balance_wallet, size: 16),
-                          label: Text('deposit'.tr(), style: const TextStyle(fontWeight: FontWeight.w600)),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF4CC9F0).withOpacity(0.15),
-                            foregroundColor: const Color(0xFF0284C7),
-                            elevation: 0,
-                            padding: const EdgeInsets.symmetric(vertical: 12),
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  if (onAssignRetailers != null) ...[                           
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      child: TextButton.icon(
-                        onPressed: onAssignRetailers,
-                        icon: const Icon(Icons.store_outlined, size: 18),
-                        label: Text('assign_retailers'.tr(),
-                            style: const TextStyle(fontWeight: FontWeight.w600)),
-                        style: TextButton.styleFrom(
-                          foregroundColor: AppTheme.isDark(context) ? Colors.white70 : const Color(0xFF8C6239),
-                          backgroundColor: AppTheme.isDark(context) ? Colors.white.withOpacity(0.05) : const Color(0xFF8C6239).withOpacity(0.05),
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(12)),
-                        ),
-                      ),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-        ],
-      ),
-    ));
-  }
-
-  String _f(double v) {
-    return NumberFormat('#,##0.00', 'en_US').format(v);
-  }
-}
-
-class _Dialog extends StatelessWidget {
-  final String title;
-  final List<Widget> fields;
-  final Future<bool> Function() onConfirm;
-
-  const _Dialog({required this.title, required this.fields, required this.onConfirm});
-
-  @override
-  Widget build(BuildContext context) {
-    return Dialog(
-      backgroundColor: AppTheme.surfaceColor(context),
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(18)),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title,
-                style: TextStyle(
-                    color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 16)),
-            const SizedBox(height: 18),
-            ...fields,
-            Row(
-              mainAxisAlignment: MainAxisAlignment.end,
-              children: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
-                ),
-                const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () async {
-                    final shouldClose = await onConfirm();
-                    if (shouldClose && context.mounted) {
-                      Navigator.pop(context);
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: AppTheme.isDark(context) ? AppTheme.accent : const Color(0xFF8C6239),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                  ),
-                  child: Text('save'.tr(), style: const TextStyle(color: Colors.white)),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-

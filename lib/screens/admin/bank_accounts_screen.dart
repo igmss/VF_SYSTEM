@@ -371,7 +371,13 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
   // ─────────────────────────────────────────────────────────────────────────
 
   Widget _buildTxRow(BuildContext context, FinancialTransaction tx) {
-    final isOut = tx.type == FlowType.BUY_USDT;
+    // Determine if EGP is leaving this bank
+    final type = tx.type;
+    final isOut = type == FlowType.BUY_USDT ||
+                  type == FlowType.DISTRIBUTE_INSTAPAY ||
+                  type == FlowType.EXPENSE_INSTAPAY_FEE ||
+                  type == FlowType.BANK_DEDUCTION;
+
     final color = isOut ? _kRed : _kGreen;
     final icon  = isOut ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded;
 

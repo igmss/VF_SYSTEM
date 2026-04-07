@@ -23,6 +23,11 @@ function getRetailerPendingDebt(retailer) {
   return pending > 0 ? pending : 0;
 }
 
+function getRetailerInstaPayPendingDebt(retailer) {
+  const pending = asNumber(retailer.instaPayTotalAssigned) - asNumber(retailer.instaPayTotalCollected);
+  return pending > 0 ? pending : 0;
+}
+
 async function getCallerRole(uid) {
   const snap = await admin.database().ref(`users/${uid}`).once('value');
   const user = snap.val();
@@ -41,11 +46,23 @@ exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
   const collectorId = request.data?.collectorId?.toString();
   const retailerId = request.data?.retailerId?.toString();
   const amount = asNumber(request.data?.amount);
+  let vfAmount = asNumber(request.data?.vfAmount);
+  let instaPayAmount = asNumber(request.data?.instaPayAmount);
   const createdByUid = uid;
   const notes = request.data?.notes?.toString().trim() || null;
 
   if (!collectorId || !retailerId || amount <= 0) {
     throw new HttpsError('invalid-argument', 'Invalid collection request.');
+  }
+
+  // Backward compatibility: If no specific amounts provided, treat total amount as VF portion
+  if (vfAmount === 0 && instaPayAmount === 0) {
+    vfAmount = amount;
+  }
+
+  // Validate that the sum of portions matches the total amount
+  if (Math.abs((vfAmount + instaPayAmount) - amount) > 0.01) {
+    throw new HttpsError('invalid-argument', 'The sum of VF and InstaPay portions must match the total amount.');
   }
 
   const db = admin.database();
@@ -67,23 +84,43 @@ exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
     }
   }
 
+  // ─── Phase 1: Handle VF Channel Collection ──────────────
   const pendingDebt = getRetailerPendingDebt(retailer);
-  const addedToCollected = pendingDebt > 0 ? Math.min(amount, pendingDebt) : 0;
-  const addedToCredit = amount - addedToCollected;
-  const txId = uuidv4();
-  const nowIso = new Date().toISOString();
+  if (vfAmount > pendingDebt + 0.01) {
+    throw new HttpsError('failed-precondition', `VF amount ${vfAmount} exceeds VF pending debt ${pendingDebt.toFixed(2)}.`);
+  }
+  const addedToCollected = pendingDebt > 0 ? Math.min(vfAmount, pendingDebt) : 0;
+  const addedToCredit = vfAmount - addedToCollected;
 
-  let appliedNotes = notes;
-  if (addedToCredit > 0) {
-    const creditNote = `(+${addedToCredit.toFixed(0)} EGP added to Credit)`;
-    appliedNotes = appliedNotes ? `${appliedNotes} ${creditNote}` : creditNote;
+  // ─── Phase 2: Handle InstaPay Channel Collection ──────────────
+  const instaPayPendingDebt = getRetailerInstaPayPendingDebt(retailer);
+  if (instaPayAmount > instaPayPendingDebt + 0.01) {
+    throw new HttpsError('failed-precondition', `InstaPay amount ${instaPayAmount} exceeds InstaPay pending debt ${instaPayPendingDebt.toFixed(2)}.`);
   }
 
-  await db.ref().update({
-    [`financial_ledger/${txId}`]: {
+  const txId = uuidv4();
+  const instaTxId = uuidv4();
+  const nowIso = new Date().toISOString();
+
+  const updates = {
+    [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
+    [`collectors/${collectorId}/cashOnHand`]: admin.database.ServerValue.increment(amount),
+    [`collectors/${collectorId}/totalCollected`]: admin.database.ServerValue.increment(amount),
+    [`collectors/${collectorId}/lastUpdatedAt`]: nowIso,
+  };
+
+  // VF Ledger & Retailer update
+  if (vfAmount > 0) {
+    let appliedNotes = notes;
+    if (addedToCredit > 0) {
+      const creditNote = `(+${addedToCredit.toFixed(0)} EGP added to Credit)`;
+      appliedNotes = appliedNotes ? `${appliedNotes} ${creditNote}` : creditNote;
+    }
+
+    updates[`financial_ledger/${txId}`] = {
       id: txId,
       type: 'COLLECT_CASH',
-      amount,
+      amount: vfAmount,
       collectedPortion: addedToCollected,
       creditPortion: addedToCredit,
       fromId: retailerId,
@@ -93,16 +130,35 @@ exports.collectRetailerCash = onCall({ region: REGION }, async (request) => {
       createdByUid,
       notes: appliedNotes,
       timestamp: Date.now(),
-    },
-    [`retailers/${retailerId}/totalCollected`]: admin.database.ServerValue.increment(addedToCollected),
-    [`retailers/${retailerId}/credit`]: admin.database.ServerValue.increment(addedToCredit),
-    [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
-    [`collectors/${collectorId}/cashOnHand`]: admin.database.ServerValue.increment(amount),
-    [`collectors/${collectorId}/totalCollected`]: admin.database.ServerValue.increment(amount),
-    [`collectors/${collectorId}/lastUpdatedAt`]: nowIso,
-  });
+    };
+    if (addedToCollected > 0) {
+      updates[`retailers/${retailerId}/totalCollected`] = admin.database.ServerValue.increment(addedToCollected);
+    }
+    if (addedToCredit > 0) {
+      updates[`retailers/${retailerId}/credit`] = admin.database.ServerValue.increment(addedToCredit);
+    }
+  }
 
-  return { txId, addedToCollected, addedToCredit };
+  // InstaPay Ledger & Retailer update
+  if (instaPayAmount > 0) {
+    updates[`financial_ledger/${instaTxId}`] = {
+      id: instaTxId,
+      type: 'COLLECT_INSTAPAY_CASH',
+      amount: instaPayAmount,
+      fromId: retailerId,
+      fromLabel: retailer.name || 'Retailer',
+      toId: collectorId,
+      toLabel: collector.name || 'Collector',
+      createdByUid,
+      notes: notes,
+      timestamp: Date.now(),
+    };
+    updates[`retailers/${retailerId}/instaPayTotalCollected`] = admin.database.ServerValue.increment(instaPayAmount);
+  }
+
+  await db.ref().update(updates);
+
+  return { txId, instaTxId: instaPayAmount > 0 ? instaTxId : null, addedToCollected, addedToCredit };
 });
 
 exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
@@ -183,6 +239,7 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
     });
   } catch (error) {
     await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
+      if (current === null) return current;
       return asNumber(current) + amount;
     }).catch(() => {});
     throw new HttpsError('internal', error.message || 'Unable to complete deposit.');
@@ -356,6 +413,7 @@ exports.depositCollectorCashToDefaultVf = onCall({ region: REGION }, async (requ
     await db.ref().update(updates);
   } catch (error) {
     await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
+      if (current === null) return current;
       return asNumber(current) + amount;
     }).catch(() => {});
     throw new HttpsError('internal', error.message || 'Unable to complete Vodafone deposit.');

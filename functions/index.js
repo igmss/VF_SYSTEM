@@ -18,6 +18,7 @@ exports.fundBankAccount = adminFinance.fundBankAccount;
 exports.deductBankBalance = adminFinance.deductBankBalance;
 exports.correctBankBalance = adminFinance.correctBankBalance;
 exports.distributeVfCash = adminFinance.distributeVfCash;
+exports.distributeInstaPay = adminFinance.distributeInstaPay;
 exports.creditReturn = adminFinance.creditReturn;
 exports.correctFinancialTransaction = adminFinance.correctFinancialTransaction;
 exports.deleteFinancialTransaction = adminFinance.deleteFinancialTransaction;

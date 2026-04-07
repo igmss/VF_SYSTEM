@@ -28,7 +28,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -53,25 +53,35 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
     // Filter ledger for this specific retailer
     final List<FinancialTransaction> allTxs = dist.ledger.where((tx) {
       final isAssigned =
-          tx.type == FlowType.DISTRIBUTE_VFCASH && tx.toId == retailer.id;
+          (tx.type == FlowType.DISTRIBUTE_VFCASH || tx.type == FlowType.DISTRIBUTE_INSTAPAY) && tx.toId == retailer.id;
       final isCollected =
-          tx.type == FlowType.COLLECT_CASH && tx.fromId == retailer.id;
+          (tx.type == FlowType.COLLECT_CASH || tx.type == FlowType.COLLECT_INSTAPAY_CASH) && tx.fromId == retailer.id;
+      final isProfit = 
+          tx.type == FlowType.INSTAPAY_DIST_PROFIT && tx.toId == retailer.id;
       final isCreditReturn =
           tx.type == FlowType.CREDIT_RETURN && tx.fromId == retailer.id;
       final isCreditReturnFee =
           tx.type == FlowType.CREDIT_RETURN_FEE && tx.fromId == retailer.id;
-      return isAssigned || isCollected || isCreditReturn || isCreditReturnFee;
+      return isAssigned || isCollected || isProfit || isCreditReturn || isCreditReturnFee;
     }).toList();
 
     final List<FinancialTransaction> assignedTxs = allTxs
-        .where((tx) => tx.type == FlowType.DISTRIBUTE_VFCASH)
+        .where((tx) => tx.type == FlowType.DISTRIBUTE_VFCASH || tx.type == FlowType.DISTRIBUTE_INSTAPAY)
         .toList();
 
     final List<FinancialTransaction> collectedTxs = allTxs
         .where((tx) =>
             tx.type == FlowType.COLLECT_CASH ||
+            tx.type == FlowType.COLLECT_INSTAPAY_CASH ||
             tx.type == FlowType.CREDIT_RETURN ||
             tx.type == FlowType.CREDIT_RETURN_FEE)
+        .toList();
+
+    final List<FinancialTransaction> instaPayTxs = allTxs
+        .where((tx) =>
+            tx.type == FlowType.DISTRIBUTE_INSTAPAY ||
+            tx.type == FlowType.COLLECT_INSTAPAY_CASH ||
+            tx.type == FlowType.INSTAPAY_DIST_PROFIT)
         .toList();
 
     return Scaffold(
@@ -92,6 +102,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
             Tab(text: 'all_with_count'.tr(args: [allTxs.length.toString()])),
             Tab(text: 'assigned_with_count'.tr(args: [assignedTxs.length.toString()])),
             Tab(text: 'collected_with_count'.tr(args: [collectedTxs.length.toString()])),
+            Tab(text: 'InstaPay (${instaPayTxs.length})'),
           ],
         ),
       ),
@@ -112,6 +123,15 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
             ),
             child: Column(
               children: [
+                // VF Section
+                Row(
+                  children: [
+                    Icon(Icons.phonelink_ring_rounded, color: AppTheme.warningColor(context), size: 16),
+                    const SizedBox(width: 8),
+                    Text('Vodafone Cash', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 13, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 12),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
@@ -120,22 +140,46 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                     Expanded(child: _buildSummaryStat(context, 'debt'.tr(), retailer.pendingDebt, AppTheme.warningColor(context))),
                   ],
                 ),
-                if ((auth.currentUser?.isAdmin ?? false) && retailer.pendingDebt > 0) ...[
-                  const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton.icon(
-                      icon: const Icon(Icons.keyboard_return, size: 18),
-                      label: Text('credit_return_vf'.tr()),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.positiveColor(context),
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        elevation: 0,
+                const SizedBox(height: 20),
+                // Divider
+                Container(height: 1, color: AppTheme.lineColor(context).withValues(alpha: 0.5)),
+                const SizedBox(height: 20),
+                // InstaPay Section
+                Row(
+                  children: [
+                    Icon(Icons.account_balance_rounded, color: AppTheme.positiveColor(context), size: 16),
+                    const SizedBox(width: 8),
+                    Text('InstaPay', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 13, fontWeight: FontWeight.bold)),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceAround,
+                  children: [
+                    Expanded(child: _buildSummaryStat(context, 'assigned'.tr(), retailer.instaPayTotalAssigned, AppTheme.infoColor(context))),
+                    Expanded(child: _buildSummaryStat(context, 'collected'.tr(), retailer.instaPayTotalCollected, AppTheme.positiveColor(context))),
+                    Expanded(child: _buildSummaryStat(context, 'debt'.tr(), retailer.instaPayPendingDebt, AppTheme.positiveColor(context))),
+                  ],
+                ),
+                if ((auth.currentUser?.isAdmin ?? false) && (retailer.pendingDebt > 0 || retailer.instaPayPendingDebt > 0)) ...[
+                  const SizedBox(height: 24),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: ElevatedButton.icon(
+                          icon: const Icon(Icons.keyboard_return, size: 18),
+                          label: Text('Credit Return'.tr()),
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.positiveColor(context),
+                            foregroundColor: Colors.white,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                            padding: const EdgeInsets.symmetric(vertical: 14),
+                            elevation: 0,
+                          ),
+                          onPressed: () => _showCreditReturnDialog(context, retailer),
+                        ),
                       ),
-                      onPressed: () => _showCreditReturnDialog(context, retailer),
-                    ),
+                    ],
                   ),
                 ],
               ],
@@ -151,6 +195,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                 _buildTransactionList(allTxs),
                 _buildTransactionList(assignedTxs),
                 _buildTransactionList(collectedTxs),
+                _buildInstaPayTabView(retailer, instaPayTxs),
               ],
             ),
           ),
@@ -202,10 +247,11 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
       itemCount: txs.length,
       itemBuilder: (context, index) {
         final tx = txs[index];
-        final isAssigned = tx.type == FlowType.DISTRIBUTE_VFCASH;
+        final isAssigned = tx.type == FlowType.DISTRIBUTE_VFCASH || tx.type == FlowType.DISTRIBUTE_INSTAPAY;
         final isCreditReturn = tx.type == FlowType.CREDIT_RETURN;
         final isCreditReturnFee = tx.type == FlowType.CREDIT_RETURN_FEE;
-        final txColor = isAssigned
+        final isProfit = tx.type == FlowType.INSTAPAY_DIST_PROFIT;
+        final txColor = (isAssigned || isProfit)
             ? AppTheme.infoColor(context)
             : isCreditReturnFee
                 ? AppTheme.warningColor(context)
@@ -239,11 +285,13 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                           borderRadius: BorderRadius.circular(10),
                         ),
                         child: Icon(
-                          isAssigned
+                          (tx.type == FlowType.DISTRIBUTE_VFCASH || tx.type == FlowType.DISTRIBUTE_INSTAPAY)
                               ? Icons.arrow_downward
                               : isCreditReturnFee
                                   ? Icons.receipt_long_outlined
-                                  : Icons.check_circle_outline,
+                                  : isProfit
+                                      ? Icons.trending_up
+                                      : Icons.check_circle_outline,
                           color: txColor,
                           size: 18,
                         ),
@@ -256,7 +304,9 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
                                   ? 'credit_return'.tr()
                                   : isCreditReturnFee
                                       ? 'return_fee'.tr()
-                                      : 'collected'.tr(),
+                                      : isProfit
+                                          ? 'Profit Margin'
+                                          : 'collected'.tr(),
                           style: TextStyle(
                             color: txColor,
                             fontWeight: FontWeight.bold,
@@ -322,6 +372,31 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
     showDialog(
       context: context,
       builder: (_) => CreditReturnDialog(retailer: retailer),
+    );
+  }
+
+  Widget _buildInstaPayTabView(Retailer retailer, List<FinancialTransaction> txs) {
+    return Column(
+      children: [
+        Container(
+          margin: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppTheme.positiveColor(context).withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(20),
+            border: Border.all(color: AppTheme.positiveColor(context).withValues(alpha: 0.1)),
+          ),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
+            children: [
+              _buildSummaryStat(context, 'assigned'.tr(), retailer.instaPayTotalAssigned, AppTheme.infoColor(context)),
+              _buildSummaryStat(context, 'collected'.tr(), retailer.instaPayTotalCollected, AppTheme.positiveColor(context)),
+              _buildSummaryStat(context, 'ip_debt'.tr(), retailer.instaPayPendingDebt, AppTheme.warningColor(context)),
+            ],
+          ),
+        ),
+        Expanded(child: _buildTransactionList(txs)),
+      ],
     );
   }
 }

@@ -63,6 +63,7 @@ class _AdminDashboardState extends State<AdminDashboard> {
           vfCash: _calcTotalVfCash(app),
           vfDepositProfit: dist.totalVfDepositProfit,
           creditReturnProfit: dist.totalCreditReturnProfit,
+          instaPayProfit: dist.totalInstaPayProfit,
           retailerDebt: dist.totalRetailerDebt,
           collectorCash: dist.totalCollectorCash,
           usdtBalance: dist.usdtBalance,
@@ -283,6 +284,7 @@ class _Overview extends StatelessWidget {
   final double vfCash;
   final double vfDepositProfit;
   final double creditReturnProfit;
+  final double instaPayProfit;
   final double retailerDebt;
   final double collectorCash;
   final double usdtBalance;
@@ -296,6 +298,7 @@ class _Overview extends StatelessWidget {
     required this.vfCash,
     required this.vfDepositProfit,
     required this.creditReturnProfit,
+    required this.instaPayProfit,
     required this.retailerDebt,
     required this.collectorCash,
     required this.usdtBalance,
@@ -411,6 +414,8 @@ class _Overview extends StatelessWidget {
                   _AssetCard(icon: Icons.phone_android, label: 'VF Deposit Profit', amount: vfDepositProfit, color: const Color(0xFF2A9D8F), muted: true),
                 if (creditReturnProfit > 0)
                   _AssetCard(icon: Icons.keyboard_return, label: 'Retailer Return Profit', amount: creditReturnProfit, color: const Color(0xFF27AE60), muted: true),
+                if (instaPayProfit > 0)
+                  _AssetCard(icon: Icons.payment, label: 'InstaPay Dist Profit', amount: instaPayProfit, color: const Color(0xFF1B5E20), muted: true),
                 
                 // ── Section 3: Expenses ───────────────────────────────────────────
                 if (transferFees > 0) ...[

@@ -59,8 +59,10 @@ class _RetailerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dist = context.watch<DistributionProvider>();
-    final debt = retailer.pendingDebt;
-    final debtColor = debt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
+    final vfDebt = retailer.pendingDebt;
+    final ipDebt = retailer.instaPayPendingDebt;
+    final totalDebt = vfDebt + ipDebt;
+    final debtColor = totalDebt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
     final isBusy = dist.isCollecting;
     final isLight = !AppTheme.isDark(context);
 
@@ -119,25 +121,51 @@ class _RetailerCard extends StatelessWidget {
                   ),
                 ],
               ),
-              const SizedBox(height: 16),
+              const SizedBox(height: 12),
+              // VF Section
+              _buildSectionHeader(context, Icons.phonelink_ring_rounded, 'Vodafone Cash', AppTheme.warningColor(context)),
+              const SizedBox(height: 10),
               Container(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
                 decoration: BoxDecoration(
-                  color: AppTheme.lineColor(context).withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(16),
+                  color: AppTheme.warningColor(context).withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppTheme.warningColor(context).withValues(alpha: 0.1)),
                 ),
                 child: Row(
                   mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                   children: [
-                    _buildStatColumn(context, 'total_assigned'.tr(), retailer.totalAssigned, AppTheme.textPrimaryColor(context).withValues(alpha: 0.8)),
-                    Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
-                    _buildStatColumn(context, 'collected'.tr(), retailer.totalCollected, AppTheme.positiveColor(context)),
-                    Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
-                    _buildStatColumn(context, 'pending_debt'.tr(), debt, debtColor),
+                    Expanded(child: _buildStatColumn(context, 'assigned'.tr(), retailer.totalAssigned, AppTheme.textPrimaryColor(context).withValues(alpha: 0.7))),
+                    Container(width: 1, height: 24, color: AppTheme.warningColor(context).withValues(alpha: 0.1)),
+                    Expanded(child: _buildStatColumn(context, 'collected'.tr(), retailer.totalCollected, AppTheme.positiveColor(context))),
+                    Container(width: 1, height: 24, color: AppTheme.warningColor(context).withValues(alpha: 0.1)),
+                    Expanded(child: _buildStatColumn(context, 'debt'.tr(), retailer.pendingDebt, AppTheme.warningColor(context))),
                   ],
                 ),
               ),
-              if (debt > 0) ...[
+              const SizedBox(height: 16),
+              // InstaPay Section
+              _buildSectionHeader(context, Icons.account_balance_rounded, 'InstaPay', AppTheme.positiveColor(context)),
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+                decoration: BoxDecoration(
+                  color: AppTheme.positiveColor(context).withValues(alpha: 0.05),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppTheme.positiveColor(context).withValues(alpha: 0.1)),
+                ),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                  children: [
+                    Expanded(child: _buildStatColumn(context, 'assigned'.tr(), retailer.instaPayTotalAssigned, AppTheme.textPrimaryColor(context).withValues(alpha: 0.7))),
+                    Container(width: 1, height: 24, color: AppTheme.positiveColor(context).withValues(alpha: 0.1)),
+                    Expanded(child: _buildStatColumn(context, 'collected'.tr(), retailer.instaPayTotalCollected, AppTheme.positiveColor(context))),
+                    Container(width: 1, height: 24, color: AppTheme.positiveColor(context).withValues(alpha: 0.1)),
+                    Expanded(child: _buildStatColumn(context, 'debt'.tr(), retailer.instaPayPendingDebt, AppTheme.positiveColor(context))),
+                  ],
+                ),
+              ),
+              if (totalDebt > 0) ...[
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -184,23 +212,47 @@ class _RetailerCard extends StatelessWidget {
     );
   }
 
-  Widget _buildStatColumn(BuildContext context, String label, double amount, Color color) {
-    return Column(
+  Widget _buildSectionHeader(BuildContext context, IconData icon, String title, Color color) {
+    return Row(
       children: [
+        Icon(icon, color: color, size: 14),
+        const SizedBox(width: 6),
         Text(
-          '${amount.toStringAsFixed(0)} ${'currency'.tr()}',
+          title,
           style: TextStyle(
-            color: color,
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
+            color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7),
+            fontSize: 12,
+            fontWeight: FontWeight.w800,
+            letterSpacing: 0.5,
           ),
         ),
-        const SizedBox(height: 4),
+      ],
+    );
+  }
+
+  Widget _buildStatColumn(BuildContext context, String label, double amount, Color color) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        FittedBox(
+          fit: BoxFit.scaleDown,
+          child: Text(
+            '${amount.toStringAsFixed(0)} ${'currency'.tr()}',
+            style: TextStyle(
+              color: color,
+              fontWeight: FontWeight.w900,
+              fontSize: 14,
+              letterSpacing: -0.5,
+            ),
+          ),
+        ),
+        const SizedBox(height: 2),
         Text(
-          label,
+          label.toUpperCase(),
           style: TextStyle(
-            color: AppTheme.textMutedColor(context),
-            fontSize: 11,
+            color: AppTheme.textMutedColor(context).withValues(alpha: 0.6),
+            fontSize: 9,
+            fontWeight: FontWeight.w700,
           ),
         ),
       ],
@@ -216,19 +268,31 @@ class _RetailerCard extends StatelessWidget {
       return;
     }
     
-    final ctrl = TextEditingController(text: retailer.pendingDebt.toStringAsFixed(0));
+    final vfDebt = retailer.pendingDebt;
+    final ipDebt = retailer.instaPayPendingDebt;
+
+    final vfCtrl = TextEditingController(text: vfDebt > 0 ? vfDebt.toStringAsFixed(0) : '0');
+    final ipCtrl = TextEditingController(text: ipDebt > 0 ? ipDebt.toStringAsFixed(0) : '0');
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) {
           final dist = Provider.of<DistributionProvider>(ctx);
-          final entered  = double.tryParse(ctrl.text) ?? 0.0;
-          final debt     = retailer.pendingDebt;
-          final debtPaid = entered > debt ? debt : entered;
-          final credit   = entered > debt ? entered - debt : 0.0;
-          final currentColor = debt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
+          final enteredVf = double.tryParse(vfCtrl.text) ?? 0.0;
+          final enteredIp = double.tryParse(ipCtrl.text) ?? 0.0;
+          final totalAmount = enteredVf + enteredIp;
+
+          final vfApplied = enteredVf > vfDebt ? vfDebt : enteredVf;
+          final vfCredit  = enteredVf > vfDebt ? enteredVf - vfDebt : 0.0;
+          
+          final ipApplied = enteredIp > ipDebt ? ipDebt : enteredIp;
+          // Note: InstaPay usually doesn't have "credit" in the same way, 
+          // but we follow the backend which validates ipAmount <= ipPendingDebt.
+          // If user enters more than IP debt, we should probably warn or cap it.
+
           final isSubmitting = dist.isCollecting;
+          final primaryColor = (vfDebt > 0 || ipDebt > 0) ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
 
           return AlertDialog(
             backgroundColor: AppTheme.surfaceColor(context),
@@ -237,63 +301,55 @@ class _RetailerCard extends StatelessWidget {
               '${'collect_from'.tr()} ${retailer.name}',
               style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800),
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${'pending_debt'.tr()}: ${debt.toStringAsFixed(0)} ${'currency'.tr()}',
-                  style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: ctrl,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
-                  onChanged: (_) => setSt(() {}),
-                  decoration: InputDecoration(
-                    labelText: 'amount'.tr(),
-                    suffixText: 'currency'.tr(),
-                    filled: true,
-                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
-                  ),
-                ),
-                if (entered > 0) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.lineColor(context).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: credit > 0
-                            ? AppTheme.positiveColor(context).withValues(alpha: 0.4)
-                            : AppTheme.lineColor(context),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  if (vfDebt > 0 && ipDebt > 0) ...[
+                    _debtInfo(context, 'VF Pending', vfDebt),
+                    const SizedBox(height: 8),
+                    _tf(context, vfCtrl, 'Collect for VF', Icons.phone_android, () => setSt(() {})),
+                    const SizedBox(height: 16),
+                    _debtInfo(context, 'InstaPay Pending', ipDebt, isIp: true),
+                    const SizedBox(height: 8),
+                    _tf(context, ipCtrl, 'Collect for InstaPay', Icons.payment, () => setSt(() {})),
+                  ] else if (ipDebt > 0) ...[
+                    _debtInfo(context, 'InstaPay Pending', ipDebt, isIp: true),
+                    const SizedBox(height: 8),
+                    _tf(context, ipCtrl, 'Amount', Icons.payment, () => setSt(() {})),
+                  ] else ...[
+                    _debtInfo(context, 'VF Pending', vfDebt),
+                    const SizedBox(height: 8),
+                    _tf(context, vfCtrl, 'Amount', Icons.phone_android, () => setSt(() {})),
+                  ],
+
+                  if (totalAmount > 0) ...[
+                    const SizedBox(height: 20),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lineColor(context).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: AppTheme.lineColor(context)),
+                      ),
+                      child: Column(
+                        children: [
+                          if (enteredVf > 0) ...[
+                            _breakdownRow(context, 'VF Applied', '${vfApplied.toStringAsFixed(0)} EGP', AppTheme.warningColor(context)),
+                            if (vfCredit > 0)
+                              _breakdownRow(context, 'VF Credit Added', '+${vfCredit.toStringAsFixed(0)} EGP', AppTheme.positiveColor(context)),
+                          ],
+                          if (enteredIp > 0)
+                            _breakdownRow(context, 'InstaPay Applied', '${ipApplied.toStringAsFixed(0)} EGP', AppTheme.positiveColor(context)),
+                          const Divider(),
+                          _breakdownRow(context, 'Total Collection', '${totalAmount.toStringAsFixed(0)} EGP', AppTheme.textPrimaryColor(context), isBold: true),
+                        ],
                       ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _breakdownRow(
-                          context,
-                          'debt_reduced'.tr(),
-                          '${debtPaid.toStringAsFixed(0)} ${'currency'.tr()}',
-                          AppTheme.warningColor(context),
-                        ),
-                        if (credit > 0) ...[
-                          const SizedBox(height: 4),
-                          _breakdownRow(
-                            context,
-                            'credit_added'.tr(),
-                            '+${credit.toStringAsFixed(0)} ${'currency'.tr()}',
-                            AppTheme.positiveColor(context),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
             actions: [
               TextButton(
@@ -302,14 +358,16 @@ class _RetailerCard extends StatelessWidget {
               ),
               ElevatedButton(
                 onPressed: isSubmitting ? null : () async {
-                  final amount = double.tryParse(ctrl.text) ?? 0;
-                  if (amount <= 0) {
+                  if (totalAmount <= 0) return;
+                  
+                  // Validation
+                  if (enteredIp > ipDebt + 0.01) {
                     ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
+                      SnackBar(content: Text('InstaPay amount exceeds pending debt.'), backgroundColor: Colors.red),
                     );
                     return;
                   }
-                  
+
                   final confirm = await showDialog<bool>(
                     context: context,
                     builder: (c) => AlertDialog(
@@ -317,17 +375,7 @@ class _RetailerCard extends StatelessWidget {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
                       title: Text('confirm_action'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
                       content: Text(
-                        amount > debt
-                            ? 'collect_confirm_msg_with_credit'.tr(args: [
-                                amount.toStringAsFixed(0),
-                                retailer.name,
-                                debt.toStringAsFixed(0),
-                                (amount - debt).toStringAsFixed(0)
-                              ])
-                            : 'collect_confirm_msg'.tr(args: [
-                                amount.toStringAsFixed(0),
-                                retailer.name
-                              ]),
+                        'Confirm collection of ${totalAmount.toStringAsFixed(0)} EGP from ${retailer.name}?',
                         style: TextStyle(color: AppTheme.textMutedColor(context)),
                       ),
                       actions: [
@@ -338,7 +386,7 @@ class _RetailerCard extends StatelessWidget {
                         ElevatedButton(
                           onPressed: () => Navigator.pop(c, true),
                           style: ElevatedButton.styleFrom(
-                              backgroundColor: currentColor,
+                              backgroundColor: primaryColor,
                               elevation: 0,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                           child: Text('confirm'.tr(), style: const TextStyle(color: Colors.white)),
@@ -354,7 +402,9 @@ class _RetailerCard extends StatelessWidget {
                         .collectFromRetailer(
                           collectorId: collector.id,
                           retailerId: retailer.id,
-                          amount: amount,
+                          amount: totalAmount,
+                          vfAmount: enteredVf,
+                          instaPayAmount: enteredIp,
                           createdByUid: Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ?? '',
                         );
                     if (!ctx.mounted) return;
@@ -367,7 +417,7 @@ class _RetailerCard extends StatelessWidget {
                   }
                 },
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: currentColor,
+                    backgroundColor: primaryColor,
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                 child: isSubmitting
@@ -388,11 +438,35 @@ class _RetailerCard extends StatelessWidget {
     );
   }
 
-  Widget _breakdownRow(BuildContext context, String label, String value, Color color) => Row(
+  Widget _debtInfo(BuildContext context, String label, double amount, {bool isIp = false}) => Row(
+    children: [
+      Icon(isIp ? Icons.payment : Icons.phone_android, size: 14, color: isIp ? Colors.green : Colors.orange),
+      const SizedBox(width: 6),
+      Text(
+        '$label: ${amount.toStringAsFixed(0)} EGP',
+        style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 12, fontWeight: FontWeight.bold),
+      ),
+    ],
+  );
+
+  Widget _tf(BuildContext context, TextEditingController ctrl, String label, IconData icon, VoidCallback onUpdate) => TextField(
+    controller: ctrl,
+    keyboardType: TextInputType.number,
+    style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
+    onChanged: (_) => onUpdate(),
+    decoration: InputDecoration(
+      labelText: label,
+      prefixIcon: Icon(icon, size: 18),
+      filled: true,
+      fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+    ),
+  );
+
+  Widget _breakdownRow(BuildContext context, String label, String value, Color color, {bool isBold = false}) => Row(
         mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
-          Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
+          Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: isBold ? FontWeight.w800 : FontWeight.w600)),
+          Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: isBold ? FontWeight.w900 : FontWeight.bold)),
         ],
       );
 }

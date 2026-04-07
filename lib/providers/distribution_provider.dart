@@ -85,7 +85,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   }
 
   double get totalRetailerDebt =>
-      _retailers.fold(0, (sum, r) => sum + r.pendingDebt);
+      _retailers.fold(0, (sum, r) => sum + r.pendingDebt + r.instaPayPendingDebt);
 
   double get totalCollectorCash =>
       _collectors.fold(0, (sum, c) => sum + c.cashOnHand);
@@ -99,6 +99,10 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
 
   double get totalCreditReturnProfit => _ledger
       .where((tx) => tx.type == FlowType.CREDIT_RETURN_FEE)
+      .fold(0.0, (sum, tx) => sum + tx.amount);
+
+  double get totalInstaPayProfit => _ledger
+      .where((tx) => tx.type == FlowType.INSTAPAY_DIST_PROFIT)
       .fold(0.0, (sum, tx) => sum + tx.amount);
 
 

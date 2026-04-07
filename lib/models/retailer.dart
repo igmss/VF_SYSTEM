@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:uuid/uuid.dart';
 
 /// A merchant / shop that receives Vodafone Cash from us
@@ -22,6 +23,21 @@ class Retailer {
   double get pendingDebt {
     final outstanding = totalAssigned - totalCollected;
     return outstanding > 0 ? outstanding : 0.0;
+  }
+
+  /// profit margin per 1000 EGP distributed via InstaPay
+  final double instaPayProfitPer1000;
+
+  /// cumulative EGP debt assigned via InstaPay channel
+  final double instaPayTotalAssigned;
+
+  /// cumulative EGP collected against InstaPay debt
+  final double instaPayTotalCollected;
+
+  /// Pending debt for InstaPay channel
+  double get instaPayPendingDebt {
+    final outstanding = instaPayTotalAssigned - instaPayTotalCollected;
+    return max(0.0, outstanding);
   }
   final bool isActive;
   final DateTime createdAt;
@@ -48,6 +64,9 @@ class Retailer {
     DateTime? lastUpdatedAt,
     this.assignedCollectorId,
     this.discountPer1000 = 0.0,
+    this.instaPayProfitPer1000 = 0.0,
+    this.instaPayTotalAssigned = 0.0,
+    this.instaPayTotalCollected = 0.0,
   })  : id = id ?? const Uuid().v4(),
         createdAt = createdAt ?? DateTime.now(),
         lastUpdatedAt = lastUpdatedAt ?? DateTime.now();
@@ -65,6 +84,9 @@ class Retailer {
         'lastUpdatedAt': lastUpdatedAt.toIso8601String(),
         'assignedCollectorId': assignedCollectorId,
         'discountPer1000': discountPer1000,
+        'instaPayProfitPer1000': instaPayProfitPer1000,
+        'instaPayTotalAssigned': instaPayTotalAssigned,
+        'instaPayTotalCollected': instaPayTotalCollected,
       };
 
   factory Retailer.fromMap(Map<String, dynamic> map) {
@@ -87,6 +109,9 @@ class Retailer {
       lastUpdatedAt: DateTime.tryParse(map['lastUpdatedAt']?.toString() ?? '') ?? DateTime.now(),
       assignedCollectorId: map['assignedCollectorId']?.toString(),
       discountPer1000: asDouble(map['discountPer1000']),
+      instaPayProfitPer1000: asDouble(map['instaPayProfitPer1000']),
+      instaPayTotalAssigned: asDouble(map['instaPayTotalAssigned']),
+      instaPayTotalCollected: asDouble(map['instaPayTotalCollected']),
     );
   }
 
@@ -100,6 +125,9 @@ class Retailer {
     bool? isActive,
     DateTime? lastUpdatedAt,
     double? discountPer1000,
+    double? instaPayProfitPer1000,
+    double? instaPayTotalAssigned,
+    double? instaPayTotalCollected,
     Object? assignedCollectorId = _sentinel,
   }) =>
       Retailer(
@@ -117,6 +145,9 @@ class Retailer {
             ? this.assignedCollectorId
             : assignedCollectorId as String?,
         discountPer1000: discountPer1000 ?? this.discountPer1000,
+        instaPayProfitPer1000: instaPayProfitPer1000 ?? this.instaPayProfitPer1000,
+        instaPayTotalAssigned: instaPayTotalAssigned ?? this.instaPayTotalAssigned,
+        instaPayTotalCollected: instaPayTotalCollected ?? this.instaPayTotalCollected,
       );
 }
 

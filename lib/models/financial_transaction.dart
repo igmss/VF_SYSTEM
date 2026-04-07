@@ -46,6 +46,18 @@ enum FlowType {
 
   /// Fee deducted for an internal Vodafone Cash transfer
   INTERNAL_VF_TRANSFER_FEE,
+
+  /// InstaPay cash sent to retailer; InstaPay debt increases
+  DISTRIBUTE_INSTAPAY,
+
+  /// Profit margin entry recorded alongside each distribution
+  INSTAPAY_DIST_PROFIT,
+
+  /// Cash collected from retailer against InstaPay debt
+  COLLECT_INSTAPAY_CASH,
+  
+  /// InstaPay transfer fee deducted from bank during distribution
+  EXPENSE_INSTAPAY_FEE,
 }
 
 extension FlowTypeExtension on FlowType {
@@ -66,12 +78,16 @@ extension FlowTypeExtension on FlowType {
       case FlowType.BANK_DEDUCTION:     return 'bank_deduction';
       case FlowType.INTERNAL_VF_TRANSFER: return 'internal_vf_transfer';
       case FlowType.INTERNAL_VF_TRANSFER_FEE: return 'internal_vf_transfer_fee';
+      case FlowType.DISTRIBUTE_INSTAPAY: return 'distribute_instapay';
+      case FlowType.INSTAPAY_DIST_PROFIT: return 'instapay_dist_profit';
+      case FlowType.COLLECT_INSTAPAY_CASH: return 'collect_instapay_cash';
+      case FlowType.EXPENSE_INSTAPAY_FEE: return 'expense_instapay_fee';
     }
   }
 
   static FlowType fromString(String s) {
     return FlowType.values.firstWhere(
-      (f) => f.toString().split('.').last == s,
+      (f) => f.toString().split('.').last == s || f.label == s,
       orElse: () => FlowType.FUND_BANK,
     );
   }

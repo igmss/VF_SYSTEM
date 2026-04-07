@@ -109,7 +109,7 @@ class _RetailerAssignmentRequestsScreenState extends State<RetailerAssignmentReq
             TextField(
               controller: ctrl,
               decoration: InputDecoration(
-                labelText: 'Enter 6-digit PIN',
+                labelText: 'enter_pin'.tr(),
                 filled: true,
                 fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
               ),
@@ -388,7 +388,7 @@ class _RetailerAssignmentRequestsScreenState extends State<RetailerAssignmentReq
                   const SizedBox(height: 12),
 
                   CheckboxListTile(
-                    title: Text('External Wallet (Charge Fees)', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
+                    title: Text('external_wallet_fees'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
                     value: isExternalWallet,
                     activeColor: AppTheme.accent,
                     contentPadding: EdgeInsets.zero,
@@ -412,7 +412,7 @@ class _RetailerAssignmentRequestsScreenState extends State<RetailerAssignmentReq
                     controller: feesCtrl,
                     keyboardType: const TextInputType.numberWithOptions(decimal: true),
                     decoration: InputDecoration(
-                      labelText: 'Vodafone Fees (Optional)'.tr(),
+                      labelText: 'vodafone_fees_optional'.tr(),
                       prefixIcon: const Icon(Icons.money_off, size: 20),
                       filled: true,
                       fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
@@ -465,7 +465,7 @@ class _RetailerAssignmentRequestsScreenState extends State<RetailerAssignmentReq
                                           sheetContext: ctx,
                                         ),
                                 icon: const Icon(Icons.bolt, color: Colors.orange),
-                                label: const Text('Auto-Process USSD', style: TextStyle(color: Colors.orange)),
+                                label: Text('auto_process_ussd'.tr(), style: const TextStyle(color: Colors.orange)),
                                 style: OutlinedButton.styleFrom(
                                   side: const BorderSide(color: Colors.orange),
                                   padding: const EdgeInsets.symmetric(vertical: 16),

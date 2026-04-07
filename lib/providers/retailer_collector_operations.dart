@@ -77,6 +77,47 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     }
   }
 
+  Future<void> distributeInstaPay({
+    required String retailerId,
+    required String bankAccountId,
+    required double amount,
+    double fees = 0.0,
+    bool applyCredit = false,
+    required String createdByUid,
+    String? notes,
+  }) async {
+    final dist = this as DistributionProvider;
+    if (dist._isDistributing) {
+      throw StateError('An assignment is already in progress.');
+    }
+    dist._isDistributing = true;
+    notifyListeners();
+    print('--- PROV: distributeInstaPay START ---');
+    print('    Retailer: $retailerId, Bank: $bankAccountId, Amt: $amount, Fees: $fees');
+    try {
+      final callable = dist._functions.httpsCallable('distributeInstaPay');
+      final result = await callable.call({
+        'retailerId': retailerId,
+        'bankAccountId': bankAccountId,
+        'amount': amount,
+        'fees': fees,
+        'applyCredit': applyCredit,
+        'createdByUid': createdByUid,
+        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      });
+      print('--- PROV: distributeInstaPay SUCCESS ---');
+      print('    Result: ${result.data}');
+      await dist.loadAll();
+    } catch (e) {
+      print('--- PROV: distributeInstaPay ERROR ---');
+      print('    Error: $e');
+      rethrow;
+    } finally {
+      dist._isDistributing = false;
+      notifyListeners();
+    }
+  }
+
   Future<void> processRetailerRequest({
     required String portalUserUid,
     required String requestId,
@@ -148,6 +189,8 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     required String retailerId,
     required double amount,
     required String createdByUid,
+    double vfAmount = 0.0,
+    double instaPayAmount = 0.0,
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
@@ -165,6 +208,8 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
         'collectorId': collectorId,
         'retailerId': retailerId,
         'amount': amount,
+        'vfAmount': vfAmount,
+        'instaPayAmount': instaPayAmount,
         'createdByUid': createdByUid,
         if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
       });

@@ -3,8 +3,12 @@ const admin = require('firebase-admin');
 const { v4: uuidv4 } = require('uuid');
 const REGION = 'asia-east1';
 
+const DB_URL = 'https://vodatracking-default-rtdb.firebaseio.com';
+
 if (admin.apps.length === 0) {
-  admin.initializeApp();
+  admin.initializeApp({
+    databaseURL: DB_URL
+  });
 }
 
 function asNumber(value) {
@@ -305,8 +309,10 @@ exports.deductBankBalance = onCall({ region: REGION }, async (request) => {
   if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
   const bank = bankSnap.val();
   const balanceResult = await bankRef.child('balance').transaction((current) => {
+    if (current === null) return current; // Signal Firebase to fetch data
+
     const next = asNumber(current) - amount;
-    if (next < 0) return;
+    if (next < 0) return; // Abort: truly insufficient
     return next;
   });
   if (!balanceResult.committed) {
@@ -330,7 +336,10 @@ exports.deductBankBalance = onCall({ region: REGION }, async (request) => {
       [`bank_accounts/${bankAccountId}/lastUpdatedAt`]: nowIso,
     });
   } catch (error) {
-    await bankRef.child('balance').transaction((current) => asNumber(current) + amount);
+    await bankRef.child('balance').transaction((current) => {
+      if (current === null) return current;
+      return asNumber(current) + amount;
+    }).catch(() => {});
     throw new HttpsError('internal', error.message || 'Unable to complete deduction.');
   }
 
@@ -522,6 +531,183 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
   }
 
   return { txId, creditUsed, actualDebtIncrease };
+});
+
+exports.distributeInstaPay = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const retailerId = request.data?.retailerId?.toString();
+  const bankAccountId = request.data?.bankAccountId?.toString();
+  const amount = asNumber(request.data?.amount);
+  const fees = asNumber(request.data?.fees);
+  const applyCredit = request.data?.applyCredit === true;
+  const createdByUid = uid;
+  const notes = request.data?.notes?.toString().trim() || null;
+
+  const db = admin.database();
+  const dbUrl = admin.app().options.databaseURL;
+  console.log(`--- [distributeInstaPay] Started by UID: ${uid} ---`);
+  console.log(`    DB_INSTANCE: ${dbUrl}`);
+  console.log(`    RETAILER_ID: "${retailerId}"`);
+  console.log(`    BANK_ID: "${bankAccountId}"`);
+  console.log(`    AMT: ${amount}, FEES: ${fees}, CREDIT: ${applyCredit}`);
+
+  if (!retailerId || !bankAccountId || amount <= 0) {
+    console.error(`    ABORT: Invalid arguments.`);
+    throw new HttpsError('invalid-argument', 'Invalid InstaPay distribution request.');
+  }
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const nowTs = now.getTime();
+
+  // ─── Phase 1: Fetching retailer and bank ────────────
+  console.log(`    Phase 1: Fetching paths...`);
+  const [retailerSnap, bankSnap] = await Promise.all([
+    db.ref(`retailers/${retailerId}`).once('value'),
+    db.ref(`bank_accounts/${bankAccountId}`).once('value')
+  ]);
+  
+  if (!retailerSnap.exists()) {
+    console.error(`    ABORT: Path "retailers/${retailerId}" NOT FOUND.`);
+    throw new HttpsError('not-found', 'Retailer not found.');
+  }
+  const retailer = retailerSnap.val();
+  console.log(`    RETAILER_NAME: "${retailer.name}"`);
+
+  if (!bankSnap.exists()) {
+    console.error(`    ABORT: Path "bank_accounts/${bankAccountId}" NOT FOUND.`);
+    throw new HttpsError('not-found', 'Bank account not found.');
+  }
+  const bank = bankSnap.val();
+  console.log(`    BANK_SNAP_VAL:`, JSON.stringify(bank));
+  console.log(`    BANK_BALANCE_KEY_VAL:`, bank.balance);
+
+  const profitPer1000 = asNumber(retailer.instaPayProfitPer1000);
+  const profitAmount = (amount / 1000.0) * profitPer1000;
+  let actualDebtIncrease = Math.ceil(amount + profitAmount);
+  let creditUsed = 0.0;
+
+  const currentCredit = asNumber(retailer.credit);
+  if (applyCredit && currentCredit > 0) {
+    creditUsed = Math.min(currentCredit, actualDebtIncrease);
+    actualDebtIncrease -= creditUsed;
+  }
+  
+  console.log(`    Calculated: Profit: ${profitAmount}, Debt Increase: ${actualDebtIncrease}, Credit Used: ${creditUsed}`);
+
+  // ─── Phase 2: Atomically deduct from bank balance ───
+  console.log(`    Phase 2: Transaction on Path: "bank_accounts/${bankAccountId}/balance"`);
+  const bankRef = db.ref(`bank_accounts/${bankAccountId}`);
+  const totalDeduction = amount + fees;
+  
+  const balanceResult = await bankRef.child('balance').transaction((current) => {
+    if (current === null) {
+        console.log(`    TX_RUN: current is null, retrying once firebase fetches data...`);
+        return current;
+    }
+
+    const balance = asNumber(current);
+    console.log(`    TX_RUN: current_parsed=${balance}, need=${totalDeduction}`);
+    
+    if ((totalDeduction - balance) > 0.01) {
+        console.log(`    TX_ABORT: balance (${balance}) < need (${totalDeduction})`);
+        return; // Abort
+    }
+    const next = Math.max(0, balance - totalDeduction);
+    console.log(`    TX_COMMIT: next_val=${next}`);
+    return next;
+  });
+
+  if (!balanceResult.committed) {
+    console.error(`    ABORT: Transaction failed. Snapshot value:`, balanceResult.snapshot.val());
+    throw new HttpsError(
+      'failed-precondition',
+      `Insufficient bank balance. Available: ${asNumber(balanceResult.snapshot.val()).toFixed(2)} EGP.`
+    );
+  }
+  console.log(`    Bank balance deducted successfully. New: ${balanceResult.snapshot.val()}`);
+
+  // ─── Phase 3: Commited multi-path write ─────────────
+  console.log(`    Phase 3: Building updates...`);
+  const txId = uuidv4();
+  const profitTxId = uuidv4();
+  const feeTxId = uuidv4();
+  const bankLabel = bank.bankName || 'Bank Account';
+  const retailerName = retailer.name || 'Retailer';
+
+  const creditNotes = creditUsed > 0 ? `, -${creditUsed} Credit Used` : '';
+  const feesLabel = fees > 0 ? `, Fee: ${fees} EGP` : '';
+  const appliedNotes = notes && notes.length > 0
+    ? `${notes} (Rate: ${profitPer1000}/1K${feesLabel}, Debt +${actualDebtIncrease} EGP${creditNotes})`
+    : `Rate: ${profitPer1000}/1K${feesLabel}, Debt +${actualDebtIncrease} EGP${creditNotes}`;
+
+  const updates = {
+    [`financial_ledger/${txId}`]: {
+      id: txId,
+      type: 'DISTRIBUTE_INSTAPAY',
+      amount,
+      fromId: bankAccountId,
+      fromLabel: bankLabel,
+      toId: retailerId,
+      toLabel: retailerName,
+      createdByUid,
+      notes: appliedNotes,
+      timestamp: nowTs,
+    },
+    [`retailers/${retailerId}/instaPayTotalAssigned`]: admin.database.ServerValue.increment(actualDebtIncrease),
+    [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
+    [`bank_accounts/${bankAccountId}/lastUpdatedAt`]: nowIso,
+  };
+
+  if (creditUsed > 0) {
+    updates[`retailers/${retailerId}/credit`] = admin.database.ServerValue.increment(-creditUsed);
+  }
+
+  if (profitAmount > 0) {
+    updates[`financial_ledger/${profitTxId}`] = {
+      id: profitTxId,
+      type: 'INSTAPAY_DIST_PROFIT',
+      amount: profitAmount,
+      toId: retailerId,
+      toLabel: retailerName,
+      createdByUid,
+      relatedLedgerId: txId,
+      notes: `InstaPay Profit for distribution of ${amount} EGP to ${retailerName}`,
+      timestamp: nowTs,
+    };
+  }
+
+  if (fees > 0) {
+    updates[`financial_ledger/${feeTxId}`] = {
+      id: feeTxId,
+      type: 'EXPENSE_INSTAPAY_FEE',
+      amount: fees,
+      fromId: bankAccountId,
+      fromLabel: bankLabel,
+      createdByUid,
+      relatedLedgerId: txId,
+      notes: `InstaPay transfer fee for distribution of ${amount} EGP to ${retailerName}`,
+      timestamp: nowTs,
+    };
+  }
+
+  try {
+    await db.ref().update(updates);
+    console.log(`--- [distributeInstaPay] SUCCESS committed. ---`);
+  } catch (error) {
+    console.error(`--- [distributeInstaPay] FINAL_ERROR:`, error);
+    // Roll back bank balance reservation
+    await bankRef.child('balance').transaction((current) => {
+      if (current === null) return current;
+      return asNumber(current) + totalDeduction;
+    }).catch(() => {});
+    throw new HttpsError('internal', error.message || 'Unable to complete InstaPay distribution.');
+  }
+
+  return { txId, actualDebtIncrease, profitAmount, fees };
 });
 
 exports.creditReturn = onCall({ region: REGION }, async (request) => {
@@ -1021,6 +1207,60 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
         });
       }
     }
+  } else if (type === 'DISTRIBUTE_INSTAPAY') {
+    const retailerId = tx.toId ? tx.toId.toString() : '';
+    const bankId = tx.fromId ? tx.fromId.toString() : '';
+    if (!retailerId) {
+      throw new HttpsError('failed-precondition', 'InstaPay distribution transaction is missing retailer.');
+    }
+
+    const [retailerSnap, bankSnap, relatedProfitEntries] = await Promise.all([
+      db.ref(`retailers/${retailerId}`).once('value'),
+      bankId ? db.ref(`bank_accounts/${bankId}`).once('value') : Promise.resolve(null),
+      getRelatedLedgerEntries(transactionId, ['INSTAPAY_DIST_PROFIT']),
+    ]);
+    if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
+    const debtIncrease = parseDistributionDebtIncrease(tx.notes, amount);
+    const creditUsed = parseDistributionCreditUsed(tx.notes);
+    if (asNumber(retailerSnap.val().instaPayTotalAssigned) < debtIncrease) {
+      throw new HttpsError('failed-precondition', 'Retailer InstaPay assigned total is too low to reverse this distribution.');
+    }
+    updates[`retailers/${retailerId}/instaPayTotalAssigned`] = admin.database.ServerValue.increment(-debtIncrease);
+    updates[`retailers/${retailerId}/lastUpdatedAt`] = nowIso;
+    if (creditUsed > 0) {
+      updates[`retailers/${retailerId}/credit`] = admin.database.ServerValue.increment(creditUsed);
+    }
+    Object.assign(updates, buildLedgerRemovals(relatedProfitEntries));
+    if (bankSnap && bankSnap.exists()) {
+      updates[`bank_accounts/${bankId}/balance`] = admin.database.ServerValue.increment(amount);
+      updates[`bank_accounts/${bankId}/lastUpdatedAt`] = nowIso;
+    }
+  } else if (type === 'INSTAPAY_DIST_PROFIT') {
+    // Handled as part of DISTRIBUTE_INSTAPAY reversal
+  } else if (type === 'COLLECT_INSTAPAY_CASH') {
+    const retailerId = tx.fromId ? tx.fromId.toString() : '';
+    const collectorId = tx.toId ? tx.toId.toString() : '';
+    if (!retailerId || !collectorId) {
+      throw new HttpsError('failed-precondition', 'InstaPay collection transaction is missing collector or retailer.');
+    }
+    const [collectorSnap, retailerSnap] = await Promise.all([
+      db.ref(`collectors/${collectorId}`).once('value'),
+      db.ref(`retailers/${retailerId}`).once('value'),
+    ]);
+    if (!collectorSnap.exists() || !retailerSnap.exists()) {
+      throw new HttpsError('not-found', 'Collector or retailer not found.');
+    }
+    if (asNumber(collectorSnap.val().cashOnHand) < amount || asNumber(collectorSnap.val().totalCollected) < amount) {
+      throw new HttpsError('failed-precondition', 'Collector balances are too low to reverse this transaction.');
+    }
+    if (asNumber(retailerSnap.val().instaPayTotalCollected) < amount) {
+      throw new HttpsError('failed-precondition', 'Retailer InstaPay balances are too low to reverse this transaction.');
+    }
+    updates[`collectors/${collectorId}/cashOnHand`] = admin.database.ServerValue.increment(-amount);
+    updates[`collectors/${collectorId}/totalCollected`] = admin.database.ServerValue.increment(-amount);
+    updates[`collectors/${collectorId}/lastUpdatedAt`] = nowIso;
+    updates[`retailers/${retailerId}/instaPayTotalCollected`] = admin.database.ServerValue.increment(-amount);
+    updates[`retailers/${retailerId}/lastUpdatedAt`] = nowIso;
   } else if (type === 'FUND_BANK') {
     const bankId = tx.toId ? tx.toId.toString() : '';
     if (!bankId) throw new HttpsError('failed-precondition', 'Fund bank transaction is missing bank account.');

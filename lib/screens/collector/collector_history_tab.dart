@@ -17,7 +17,8 @@ class _HistoryTab extends StatelessWidget {
 
     // Filter ledger for transactions where this collector was either the source or destination
     final history = dist.ledger.where((tx) {
-      final isMyCollect = tx.type == FlowType.COLLECT_CASH && tx.toId == collector!.id;
+      final isMyCollect = (tx.type == FlowType.COLLECT_CASH || tx.type == FlowType.COLLECT_INSTAPAY_CASH) && 
+                          tx.toId == collector!.id;
       final isMyBankDeposit = tx.type == FlowType.DEPOSIT_TO_BANK && tx.fromId == collector!.id;
       final isMyVfDeposit = tx.type == FlowType.DEPOSIT_TO_VFCASH && tx.fromId == collector!.id;
       return isMyCollect || isMyBankDeposit || isMyVfDeposit;
@@ -41,7 +42,7 @@ class _HistoryTab extends StatelessWidget {
       itemCount: history.length,
       itemBuilder: (context, index) {
         final tx = history[index];
-        final isInbound = tx.type == FlowType.COLLECT_CASH;
+        final isInbound = tx.type == FlowType.COLLECT_CASH || tx.type == FlowType.COLLECT_INSTAPAY_CASH;
         final color = isInbound ? AppTheme.positiveColor(context) : AppTheme.errorColor(context);
         final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(tx.timestamp);
 

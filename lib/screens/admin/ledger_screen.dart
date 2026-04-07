@@ -130,6 +130,12 @@ class _LedgerTile extends StatelessWidget {
       label = 'Internal Transfer (${tx.fromLabel} → ${tx.toLabel})';
     } else if (tx.type == FlowType.INTERNAL_VF_TRANSFER_FEE) {
       label = 'Internal Transfer Fee (${tx.fromLabel})';
+    } else if (tx.type == FlowType.DISTRIBUTE_INSTAPAY) {
+      label = 'InstaPay Distribution (${tx.toLabel})';
+    } else if (tx.type == FlowType.INSTAPAY_DIST_PROFIT) {
+      label = 'InstaPay Profit (${tx.toLabel})';
+    } else if (tx.type == FlowType.COLLECT_INSTAPAY_CASH) {
+      label = 'InstaPay Collection (${tx.fromLabel})';
     }
 
     // Clean label for display (strip the suffix — we'll show a badge instead)
@@ -193,7 +199,10 @@ class _LedgerTile extends StatelessWidget {
                     tx.type != FlowType.CREDIT_RETURN_FEE &&
                     tx.type != FlowType.VFCASH_RETAIL_PROFIT &&
                     tx.type != FlowType.INTERNAL_VF_TRANSFER &&
-                    tx.type != FlowType.INTERNAL_VF_TRANSFER_FEE) ...[
+                    tx.type != FlowType.INTERNAL_VF_TRANSFER_FEE &&
+                    tx.type != FlowType.DISTRIBUTE_INSTAPAY &&
+                    tx.type != FlowType.INSTAPAY_DIST_PROFIT &&
+                    tx.type != FlowType.COLLECT_INSTAPAY_CASH) ...[
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
@@ -476,6 +485,14 @@ class _LedgerTile extends StatelessWidget {
         return const Color(0xFF3861FB);
       case FlowType.INTERNAL_VF_TRANSFER_FEE:
         return AppTheme.warningColor(context);
+      case FlowType.DISTRIBUTE_INSTAPAY:
+        return const Color(0xFF1B5E20);
+      case FlowType.INSTAPAY_DIST_PROFIT:
+        return const Color(0xFF2E7D32);
+      case FlowType.COLLECT_INSTAPAY_CASH:
+        return const Color(0xFF43A047);
+      case FlowType.EXPENSE_INSTAPAY_FEE:
+        return AppTheme.warningColor(context);
     }
   }
 
@@ -510,6 +527,14 @@ class _LedgerTile extends StatelessWidget {
       case FlowType.INTERNAL_VF_TRANSFER:
         return Icons.sync_alt_rounded;
       case FlowType.INTERNAL_VF_TRANSFER_FEE:
+        return Icons.money_off;
+      case FlowType.DISTRIBUTE_INSTAPAY:
+        return Icons.payment;
+      case FlowType.INSTAPAY_DIST_PROFIT:
+        return Icons.trending_up;
+      case FlowType.COLLECT_INSTAPAY_CASH:
+        return Icons.check_circle_outline;
+      case FlowType.EXPENSE_INSTAPAY_FEE:
         return Icons.money_off;
     }
   }

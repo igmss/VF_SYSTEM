@@ -206,11 +206,13 @@ async function acquireSyncLock(db, ownerId) {
   const lockRef = db.ref(SYNC_LOCK_PATH);
   const now = Date.now();
   const result = await lockRef.transaction((current) => {
+    if (current === null) return current; // Signal Firebase to fetch data
+
     const expiresAt = Number(current && current.expiresAt ? current.expiresAt : 0);
-    if (!current || expiresAt <= now || current.ownerId === ownerId) {
+    if (expiresAt <= now || current.ownerId === ownerId) {
       return buildSyncLock(ownerId);
     }
-    return;
+    return; // Abort
   });
 
   if (result.committed) {

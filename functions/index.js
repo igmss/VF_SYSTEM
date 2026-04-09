@@ -3,6 +3,7 @@ const userManagement = require('./src/userManagement');
 const collectorOperations = require('./src/collectorOperations');
 const adminFinance = require('./src/adminFinance');
 const retailerRequests = require('./src/retailerRequests');
+const aggregates = require('./src/aggregates');
 
 exports.resetDailyLimits = bybitSync.resetDailyLimits;
 exports.syncBybitOrders = bybitSync.syncBybitOrders;
@@ -25,3 +26,10 @@ exports.deleteFinancialTransaction = adminFinance.deleteFinancialTransaction;
 exports.processRetailerRequest = adminFinance.processRetailerRequest;
 exports.transferInternalVfCash = adminFinance.transferInternalVfCash;
 exports.getRetailerPortalData = retailerRequests.getRetailerPortalData;
+
+exports.addExpense = adminFinance.addExpense;
+exports.issueLoan = adminFinance.issueLoan;
+exports.repayLoan = adminFinance.repayLoan;
+exports.calculateInvestmentWaterfall = adminFinance.calculateInvestmentWaterfall;
+
+exports.processDailyAggregates = aggregates.processDailyAggregates;

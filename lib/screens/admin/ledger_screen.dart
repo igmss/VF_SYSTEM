@@ -7,8 +7,38 @@ import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/financial_transaction.dart';
 
-class LedgerScreen extends StatelessWidget {
+class LedgerScreen extends StatefulWidget {
   const LedgerScreen({Key? key}) : super(key: key);
+
+  @override
+  State<LedgerScreen> createState() => _LedgerScreenState();
+}
+
+class _LedgerScreenState extends State<LedgerScreen> {
+  late ScrollController _scrollController;
+
+  @override
+  void initState() {
+    super.initState();
+    _scrollController = ScrollController();
+    _scrollController.addListener(_onScroll);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DistributionProvider>().loadInitialPage();
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.removeListener(_onScroll);
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  void _onScroll() {
+    if (_scrollController.position.pixels >= _scrollController.position.maxScrollExtent - 200) {
+      context.read<DistributionProvider>().loadNextPage();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -61,9 +91,20 @@ class LedgerScreen extends StatelessWidget {
                 ),
                 Expanded(
                   child: ListView.builder(
+                    controller: _scrollController,
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
-                    itemCount: dist.ledger.length,
-                    itemBuilder: (ctx, i) => _LedgerTile(tx: dist.ledger[i]),
+                    itemCount: dist.ledger.length + (dist.isPaginationLoading ? 1 : 0),
+                    itemBuilder: (ctx, i) {
+                      if (i == dist.ledger.length) {
+                        return const Center(
+                          child: Padding(
+                            padding: EdgeInsets.all(16.0),
+                            child: CircularProgressIndicator(),
+                          ),
+                        );
+                      }
+                      return _LedgerTile(tx: dist.ledger[i]);
+                    },
                   ),
                 ),
               ],

@@ -18,6 +18,9 @@ import 'user_management_screen.dart';
 import 'usd_exchange_screen.dart';
 import 'exchange_rate_screen.dart';
 import 'retailer_assignment_requests_screen.dart';
+import 'expense_screen.dart';
+import 'loan_screen.dart';
+import 'investor_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -81,6 +84,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
         roles: [UserRole.ADMIN, UserRole.FINANCE],
       ),
       _TabItem(
+        label: 'Investors',
+        icon: Icons.pie_chart_outline,
+        selectedIcon: Icons.pie_chart,
+        widget: const InvestorScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
+        label: 'Loans',
+        icon: Icons.handshake_outlined,
+        selectedIcon: Icons.handshake,
+        widget: const LoanScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
         label: 'banks'.tr(),
         icon: Icons.account_balance_outlined,
         selectedIcon: Icons.account_balance,
@@ -127,6 +144,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
         icon: Icons.receipt_long_outlined,
         selectedIcon: Icons.receipt_long,
         widget: const LedgerScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
+        label: 'Expenses',
+        icon: Icons.money_off_outlined,
+        selectedIcon: Icons.money_off,
+        widget: const ExpenseScreen(),
         roles: [UserRole.ADMIN, UserRole.FINANCE],
       ),
       _TabItem(

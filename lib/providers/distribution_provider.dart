@@ -1,3 +1,4 @@
+import 'package:firebase_auth/firebase_auth.dart';
 import 'dart:async';
 import 'package:cloud_functions/cloud_functions.dart';
 import 'package:flutter/foundation.dart';
@@ -7,12 +8,19 @@ import '../models/bank_account.dart';
 import '../models/retailer.dart';
 import '../models/collector.dart';
 import '../models/financial_transaction.dart';
+import '../models/expense.dart';
+import '../models/loan.dart';
+import '../models/investor.dart';
+import 'base_paginated_provider.dart';
 import 'auth_provider.dart';
 
 part 'bank_account_operations.dart';
 part 'retailer_collector_operations.dart';
+part 'expense_operations.dart';
+part 'loan_operations.dart';
+part 'investor_operations.dart';
 
-class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixin, RetailerCollectorOperationsMixin {
+class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixin, RetailerCollectorOperationsMixin, ExpenseOperationsMixin, LoanOperationsMixin, InvestorOperationsMixin, PaginatedProviderMixin<FinancialTransaction> {
   final FirebaseDatabase _db = FirebaseDatabase.instance;
   final FirebaseFunctions _functions =
       FirebaseFunctions.instanceFor(region: 'asia-east1');
@@ -20,7 +28,10 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   List<BankAccount> _bankAccounts = [];
   List<Retailer> _retailers = [];
   List<Collector> _collectors = [];
-  List<FinancialTransaction> _ledger = [];
+
+  List<Expense> _expenses = [];
+  List<Loan> _loans = [];
+  List<Investor> _investors = [];
   Map<String, String> _userNames = {}; // UID -> Name
   double _usdtBalance = 0.0;     // USDT quantity in the exchange
   double _usdtLastPrice = 0.0;  // Last known EGP/USDT price (for EGP equivalent)
@@ -49,14 +60,41 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   StreamSubscription<DatabaseEvent>? _banksSub;
   StreamSubscription<DatabaseEvent>? _retailersSub;
   StreamSubscription<DatabaseEvent>? _collectorsSub;
-  StreamSubscription<DatabaseEvent>? _ledgerSub;
+
+  StreamSubscription<DatabaseEvent>? _expensesSub;
+  StreamSubscription<DatabaseEvent>? _loansSub;
+  StreamSubscription<DatabaseEvent>? _investorsSub;
 
   List<BankAccount> get bankAccounts => _bankAccounts;
   List<Retailer> get retailers => _retailers;
   List<Collector> get collectors => _collectors;
-  List<FinancialTransaction> get ledger => _ledger;
+  List<FinancialTransaction> get ledger => paginatedItems;
+  List<Expense> get expenses => _expenses;
+  List<Loan> get loans => _loans;
+  List<Investor> get investors => _investors;
 
   /// USDT quantity held in USD Exchange
+  @override
+  String get _currentUserId => FirebaseAuth.instance.currentUser?.uid ?? 'system';
+
+  @override
+  List<dynamic> get _expensesRaw => _expenses;
+
+  @override
+  List<dynamic> get _loansRaw => _loans;
+
+  @override
+  List<dynamic> get _investorsRaw => _investors;
+
+    @override
+  FirebaseDatabase get db => _db;
+  @override
+  String get collectionPath => 'financial_ledger';
+  @override
+  String get orderByField => 'timestamp';
+  @override
+  FinancialTransaction Function(Map<String, dynamic>) get fromMap => FinancialTransaction.fromMap;
+
   double get usdtBalance => _usdtBalance;
 
   /// Last known EGP price per USDT
@@ -218,21 +256,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       notifyListeners();
     });
 
-    _ledgerSub?.cancel();
-    _ledgerSub = _db.ref('financial_ledger').orderByChild('timestamp').onValue.listen((event) {
-      final snap = event.snapshot;
-      if (!snap.exists || snap.value == null || snap.value is! Map) {
-        _ledger = [];
-      } else {
-        final map = snap.value as Map;
-        _ledger = map.values
-            .whereType<Map>()
-            .map((v) => FinancialTransaction.fromMap(Map<String, dynamic>.from(v)))
-            .toList();
-        _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      }
-      notifyListeners();
-    });
+
   }
 
   Future<void> _refreshOperationalData() async {
@@ -325,7 +349,10 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     _banksSub?.cancel();
     _retailersSub?.cancel();
     _collectorsSub?.cancel();
-    _ledgerSub?.cancel();
+
+    _expensesSub?.cancel();
+    _loansSub?.cancel();
+    _investorsSub?.cancel();
     super.dispose();
   }
 
@@ -365,7 +392,75 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     });
   }
 
-  // ——————————————————————————————————————————————————————————————————————————
+  Future<void> _listenToExpenses() async {
+    _expensesSub = _db.ref('expenses').onValue.listen((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) {
+        _expenses = [];
+        notifyListeners();
+        return;
+      }
+
+      try {
+        final map = Map<String, dynamic>.from(event.snapshot.value as Map);
+        final list = map.values
+            .map((e) => Expense.fromMap(Map<String, dynamic>.from(e as Map)))
+            .toList();
+
+        list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+        _expenses = list;
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Error parsing expenses: $e');
+      }
+    });
+  }
+
+  Future<void> _listenToLoans() async {
+    _loansSub = _db.ref('loans').onValue.listen((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) {
+        _loans = [];
+        notifyListeners();
+        return;
+      }
+
+      try {
+        final map = Map<String, dynamic>.from(event.snapshot.value as Map);
+        final list = map.values
+            .map((e) => Loan.fromMap(Map<String, dynamic>.from(e as Map)))
+            .toList();
+
+        list.sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
+        _loans = list;
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Error parsing loans: $e');
+      }
+    });
+  }
+
+  Future<void> _listenToInvestors() async {
+    _investorsSub = _db.ref('investors').onValue.listen((event) {
+      if (!event.snapshot.exists || event.snapshot.value == null) {
+        _investors = [];
+        notifyListeners();
+        return;
+      }
+
+      try {
+        final map = Map<String, dynamic>.from(event.snapshot.value as Map);
+        final list = map.values
+            .map((e) => Investor.fromMap(Map<String, dynamic>.from(e as Map)))
+            .toList();
+
+        list.sort((a, b) => a.priority.compareTo(b.priority));
+        _investors = list;
+        notifyListeners();
+      } catch (e) {
+        debugPrint('Error parsing investors: $e');
+      }
+    });
+  }
+// ——————————————————————————————————————————————————————————————————————————
   //  Load Stubs (Used by loadAll)
   // ——————————————————————————————————————————————————————————————————————————
 

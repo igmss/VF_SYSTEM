@@ -1501,6 +1501,362 @@ exports.processRetailerRequest = onCall({ region: REGION }, async (request) => {
   }
 });
 
+exports.addExpense = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { amount, category, source, sourceId, sourceLabel, notes } = request.data;
+  const numAmount = asNumber(amount);
+
+  if (numAmount <= 0 || !category || !source || !sourceId) {
+    throw new HttpsError('invalid-argument', 'Invalid expense parameters.');
+  }
+
+  const db = admin.database();
+  const now = new Date();
+  const nowTs = now.getTime();
+  const nowIso = now.toISOString();
+  const expenseId = uuidv4();
+  const txId = uuidv4();
+
+  let balanceRef;
+  let balanceKey;
+  let requireBalanceCheck = false;
+
+  if (source === 'BANK') {
+    balanceRef = db.ref(`bank_accounts/${sourceId}`);
+    balanceKey = 'balance';
+  } else if (source === 'VF_CASH') {
+    // For VF Cash, we must use the standard updateMobileNumberUsageTransaction
+    const vfReservation = await updateMobileNumberUsageTransaction({
+      numberId: sourceId,
+      amountDelta: numAmount,
+      direction: 'outgoing',
+      timestampMs: nowTs,
+      nowIso,
+      requireSufficientBalance: false, // Expenses might push it negative, but generally allowed
+    });
+
+    if (!vfReservation.committed) {
+      throw new HttpsError('failed-precondition', 'Failed to update Vodafone balance.');
+    }
+  } else if (source === 'COLLECTOR_CASH') {
+    balanceRef = db.ref(`collectors/${sourceId}`);
+    balanceKey = 'cashOnHand';
+  } else {
+    throw new HttpsError('invalid-argument', 'Invalid expense source.');
+  }
+
+  // Use a transaction for Bank or Collector
+  if (source === 'BANK' || source === 'COLLECTOR_CASH') {
+    const txResult = await balanceRef.transaction((currentData) => {
+      if (currentData === null) {
+        return undefined; // Abort
+      }
+      let currentBal = asNumber(currentData[balanceKey]);
+      currentData[balanceKey] = currentBal - numAmount;
+      return currentData;
+    });
+
+    if (!txResult.committed) {
+      throw new HttpsError('failed-precondition', 'Failed to update balance (transaction aborted).');
+    }
+  }
+
+  // Write the ledger and expense records
+  const updates = {
+    [`expenses/${expenseId}`]: {
+      id: expenseId,
+      amount: numAmount,
+      category,
+      source,
+      sourceId,
+      sourceLabel,
+      notes: notes || null,
+      timestamp: nowTs,
+      createdByUid: uid,
+    },
+    [`financial_ledger/${txId}`]: {
+      id: txId,
+      type: 'GENERAL_EXPENSE',
+      amount: numAmount,
+      fromId: sourceId,
+      fromLabel: sourceLabel,
+      notes: `Expense: ${category}${notes ? ' - ' + notes : ''}`,
+      createdByUid: uid,
+      timestamp: nowTs,
+    }
+  };
+
+  await db.ref().update(updates);
+  return { success: true, expenseId, txId };
+});
+
+exports.issueLoan = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { borrowerName, principal, sourceBankId, notes } = request.data;
+  const numPrincipal = asNumber(principal);
+
+  if (!borrowerName || numPrincipal <= 0 || !sourceBankId) {
+    throw new HttpsError('invalid-argument', 'Invalid loan parameters.');
+  }
+
+  const db = admin.database();
+  const now = new Date();
+  const nowTs = now.getTime();
+  const loanId = uuidv4();
+  const txId = uuidv4();
+
+  const bankRef = db.ref(`bank_accounts/${sourceBankId}`);
+
+  // Transaction for Bank Deduction
+  const txResult = await bankRef.transaction((currentData) => {
+    if (currentData === null) {
+      return undefined;
+    }
+    let currentBal = asNumber(currentData.balance);
+    currentData.balance = currentBal - numPrincipal;
+    return currentData;
+  });
+
+  if (!txResult.committed) {
+    throw new HttpsError('failed-precondition', 'Failed to update bank balance.');
+  }
+
+  const updates = {
+    [`loans/${loanId}`]: {
+      id: loanId,
+      borrowerName,
+      principal: numPrincipal,
+      repaidAmount: 0,
+      status: 'ACTIVE',
+      notes: notes || null,
+      issuedAt: nowTs,
+      createdByUid: uid,
+    },
+    [`financial_ledger/${txId}`]: {
+      id: txId,
+      type: 'LOAN_GIVEN',
+      amount: numPrincipal,
+      fromId: sourceBankId,
+      toId: loanId,
+      toLabel: borrowerName,
+      notes: notes || `Loan issued to ${borrowerName}`,
+      createdByUid: uid,
+      timestamp: nowTs,
+    }
+  };
+
+  await db.ref().update(updates);
+  return { success: true, loanId, txId };
+});
+
+exports.repayLoan = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { loanId, amount, destBankId, notes } = request.data;
+  const numAmount = asNumber(amount);
+
+  if (!loanId || numAmount <= 0 || !destBankId) {
+    throw new HttpsError('invalid-argument', 'Invalid repayment parameters.');
+  }
+
+  const db = admin.database();
+  const now = new Date();
+  const nowTs = now.getTime();
+  const txId = uuidv4();
+
+  const loanRef = db.ref(`loans/${loanId}`);
+  const bankRef = db.ref(`bank_accounts/${destBankId}`);
+
+  // Transaction for Loan Repayment
+  const loanTxResult = await loanRef.transaction((currentData) => {
+    if (currentData === null) {
+      return undefined;
+    }
+    let currentRepaid = asNumber(currentData.repaidAmount);
+    let newRepaid = currentRepaid + numAmount;
+
+    currentData.repaidAmount = newRepaid;
+    if (newRepaid >= asNumber(currentData.principal)) {
+      currentData.status = 'COMPLETED';
+    }
+    return currentData;
+  });
+
+  if (!loanTxResult.committed || !loanTxResult.snapshot.exists()) {
+    throw new HttpsError('failed-precondition', 'Failed to update loan record.');
+  }
+
+  const updatedLoan = loanTxResult.snapshot.val();
+
+  // Transaction for Bank Addition
+  const bankTxResult = await bankRef.transaction((currentData) => {
+    if (currentData === null) {
+      return undefined;
+    }
+    let currentBal = asNumber(currentData.balance);
+    currentData.balance = currentBal + numAmount;
+    return currentData;
+  });
+
+  if (!bankTxResult.committed) {
+    // Note: In a true distributed system, we'd compensate the loan if the bank failed.
+    // Given RTDB's single-node transaction limits, this is a known edge case.
+    // Ideally, we'd log the failure or use Firestore for multi-document txs.
+    throw new HttpsError('failed-precondition', 'Failed to update bank balance during repayment.');
+  }
+
+  const updates = {
+    [`financial_ledger/${txId}`]: {
+      id: txId,
+      type: 'LOAN_REPAYMENT',
+      amount: numAmount,
+      fromId: loanId,
+      fromLabel: updatedLoan.borrowerName || 'Unknown Borrower',
+      toId: destBankId,
+      notes: notes || `Repayment for loan ${loanId}`,
+      createdByUid: uid,
+      timestamp: nowTs,
+    }
+  };
+
+  await db.ref().update(updates);
+  return { success: true, txId };
+});
+
+exports.calculateInvestmentWaterfall = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { avgBuy, avgSell } = request.data;
+  const numAvgBuy = asNumber(avgBuy);
+  const numAvgSell = asNumber(avgSell);
+
+  if (numAvgBuy <= 0 || numAvgSell <= 0) {
+    throw new HttpsError('invalid-argument', 'Invalid average prices.');
+  }
+
+  const db = admin.database();
+  const nowTs = Date.now();
+
+  // 1. Concurrency Lock
+  const lockRef = db.ref('locks/distribution');
+  const lockResult = await lockRef.transaction((currentData) => {
+    if (currentData && (nowTs - currentData.lockedAt < 60000)) {
+      return undefined; // Already locked recently
+    }
+    return { lockedAt: nowTs, lockedBy: uid };
+  });
+
+  if (!lockResult.committed) {
+    throw new HttpsError('resource-exhausted', 'A distribution calculation is already in progress.');
+  }
+
+  try {
+    // 2. Fetch all required state
+    const [invSnap, bankSnap, exchSnap, retSnap, colSnap] = await Promise.all([
+      db.ref('investors').once('value'),
+      db.ref('bank_accounts').once('value'),
+      db.ref('usd_exchange').once('value'),
+      db.ref('retailers').once('value'),
+      db.ref('collectors').once('value'),
+    ]);
+
+    const investorsRaw = invSnap.val() || {};
+    const banks = bankSnap.val() || {};
+    const exchange = exchSnap.val() || {};
+    const retailers = retSnap.val() || {};
+    const collectors = colSnap.val() || {};
+
+    // Build models
+    const investors = Object.values(investorsRaw).map(i => ({
+      ...i,
+      investmentAmount: asNumber(i.investmentAmount),
+      priority: asNumber(i.priority) || 1,
+      profitSharePercentage: i.profitSharePercentage != null ? asNumber(i.profitSharePercentage) : 100.0
+    }));
+
+    // Sort ascending by priority
+    investors.sort((a, b) => a.priority - b.priority);
+
+    const totalBankBalance = Object.values(banks).reduce((sum, b) => sum + asNumber(b.balance), 0);
+
+    const usdtBal = asNumber(exchange.usdtBalance || exchange.balance || exchange.usdt);
+    const usdtPrice = asNumber(exchange.lastPrice || exchange.price || exchange.egpPrice || 1);
+    const totalUsdExchangeBalance = usdtBal * usdtPrice;
+
+    const totalRetailersDebt = Object.values(retailers).reduce((sum, r) => {
+        const debt = asNumber(r.totalAssigned) - asNumber(r.totalCollected);
+        return sum + (debt > 0 ? debt : 0);
+    }, 0);
+
+    const totalCollectorsHand = Object.values(collectors).reduce((sum, c) => sum + asNumber(c.cashOnHand), 0);
+
+    // 3. Logic Execution
+    const totalInvestment = investors.reduce((sum, i) => sum + i.investmentAmount, 0);
+    const mainCapitalHalf = totalInvestment / 2;
+
+    let profitPer1000 = Math.floor((1000 / numAvgBuy) * numAvgSell - 1000) - 1;
+    if (profitPer1000 < 0) profitPer1000 = 0;
+
+    let dailyFlow = totalInvestment - totalBankBalance - totalUsdExchangeBalance - totalRetailersDebt - totalCollectorsHand;
+    if (dailyFlow < 0) dailyFlow = 0;
+
+    const allocations = {};
+    const profits = {};
+
+    if (dailyFlow > mainCapitalHalf) {
+      let remainingFlow = dailyFlow;
+
+      for (const inv of investors) {
+        if (remainingFlow <= 0) break;
+
+        const baseCalculation = inv.investmentAmount / 2;
+        let allocated = 0;
+        if (remainingFlow >= baseCalculation) {
+          allocated = baseCalculation;
+          remainingFlow -= baseCalculation;
+        } else {
+          allocated = remainingFlow;
+          remainingFlow = 0;
+        }
+
+        allocations[inv.id] = allocated;
+
+        const grossProfit = (allocated / 1000) * profitPer1000;
+        const netProfit = grossProfit * (inv.profitSharePercentage / 100.0);
+        profits[inv.id] = netProfit;
+      }
+    }
+
+    // 4. Save results (Optional: snapshot the calculation)
+    const reportId = `report-${nowTs}`;
+    await db.ref(`investor_profits/${reportId}`).set({
+      timestamp: nowTs,
+      dailyFlow,
+      profitPer1000,
+      allocations,
+      profits,
+      parameters: { avgBuy: numAvgBuy, avgSell: numAvgSell },
+      calculatedByUid: uid
+    });
+
+    return { success: true, dailyFlow, profitPer1000, allocations, profits, reportId };
+
+  } finally {
+    // 5. Release Lock
+    await lockRef.remove();
+  }
+});
+
 exports.transferInternalVfCash = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');

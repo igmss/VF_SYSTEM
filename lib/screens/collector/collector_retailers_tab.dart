@@ -39,6 +39,17 @@ class _RetailersTab extends StatelessWidget {
           retailer: r,
           collector: collector,
           bankAccounts: bankAccounts,
+          onTap: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(
+                builder: (_) => RetailerFocusScreen(
+                  retailers: retailers,
+                  initialIndex: i,
+                ),
+              ),
+            );
+          },
         );
       },
     );
@@ -49,11 +60,13 @@ class _RetailerCard extends StatelessWidget {
   final Retailer retailer;
   final Collector? collector;
   final List<BankAccount> bankAccounts;
+  final VoidCallback onTap;
 
   const _RetailerCard({
     required this.retailer,
     required this.collector,
     required this.bankAccounts,
+    required this.onTap,
   });
 
   @override
@@ -67,12 +80,7 @@ class _RetailerCard extends StatelessWidget {
     final isLight = !AppTheme.isDark(context);
 
     return InkWell(
-      onTap: () => Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => RetailerDetailsScreen(retailer: retailer),
-        ),
-      ),
+      onTap: onTap,
       borderRadius: BorderRadius.circular(16),
       child: Container(
         margin: const EdgeInsets.only(bottom: 16),

@@ -58,6 +58,15 @@ enum FlowType {
   
   /// InstaPay transfer fee deducted from bank during distribution
   EXPENSE_INSTAPAY_FEE,
+
+  /// General business expense deducted from Bank, VF Cash, or Collector Cash
+  GENERAL_EXPENSE,
+
+  /// Cash given as an interest-free loan (deducted from bank)
+  LOAN_GIVEN,
+
+  /// Cash repaid for an interest-free loan (deposited to bank)
+  LOAN_REPAYMENT,
 }
 
 extension FlowTypeExtension on FlowType {
@@ -82,6 +91,9 @@ extension FlowTypeExtension on FlowType {
       case FlowType.INSTAPAY_DIST_PROFIT: return 'instapay_dist_profit';
       case FlowType.COLLECT_INSTAPAY_CASH: return 'collect_instapay_cash';
       case FlowType.EXPENSE_INSTAPAY_FEE: return 'expense_instapay_fee';
+      case FlowType.GENERAL_EXPENSE: return 'general_expense';
+      case FlowType.LOAN_GIVEN: return 'loan_given';
+      case FlowType.LOAN_REPAYMENT: return 'loan_repayment';
     }
   }
 

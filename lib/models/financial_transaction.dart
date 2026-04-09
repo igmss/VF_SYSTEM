@@ -58,6 +58,21 @@ enum FlowType {
   
   /// InstaPay transfer fee deducted from bank during distribution
   EXPENSE_INSTAPAY_FEE,
+
+  /// Loan issued from bank or collector to a borrower
+  LOAN_ISSUED,
+
+  /// Loan repayment received from a borrower
+  LOAN_REPAYMENT,
+
+  /// General expense paid from a bank account
+  EXPENSE_BANK,
+
+  /// General expense paid from a VF number balance
+  EXPENSE_VFNUMBER,
+
+  /// General expense paid from collector cash
+  EXPENSE_COLLECTOR,
 }
 
 extension FlowTypeExtension on FlowType {
@@ -82,6 +97,11 @@ extension FlowTypeExtension on FlowType {
       case FlowType.INSTAPAY_DIST_PROFIT: return 'instapay_dist_profit';
       case FlowType.COLLECT_INSTAPAY_CASH: return 'collect_instapay_cash';
       case FlowType.EXPENSE_INSTAPAY_FEE: return 'expense_instapay_fee';
+      case FlowType.LOAN_ISSUED:        return 'loan_issued';
+      case FlowType.LOAN_REPAYMENT:     return 'loan_repayment';
+      case FlowType.EXPENSE_BANK:       return 'expense_bank';
+      case FlowType.EXPENSE_VFNUMBER:   return 'expense_vfnumber';
+      case FlowType.EXPENSE_COLLECTOR:  return 'expense_collector';
     }
   }
 
@@ -121,6 +141,7 @@ class FinancialTransaction {
   final String? paymentMethod;
 
   final String? notes;
+  final String? category;
   final String createdByUid;
   final DateTime timestamp;
 
@@ -137,6 +158,7 @@ class FinancialTransaction {
     this.bybitOrderId,
     this.paymentMethod,
     this.notes,
+    this.category,
     required this.createdByUid,
     DateTime? timestamp,
   })  : id = id ?? const Uuid().v4(),
@@ -155,6 +177,7 @@ class FinancialTransaction {
         if (bybitOrderId != null) 'bybitOrderId': bybitOrderId,
         if (paymentMethod != null) 'paymentMethod': paymentMethod,
         if (notes != null) 'notes': notes,
+        if (category != null) 'category': category,
         'createdByUid': createdByUid,
         'timestamp': timestamp.millisecondsSinceEpoch,
       };
@@ -187,6 +210,7 @@ class FinancialTransaction {
       bybitOrderId: map['bybitOrderId']?.toString(),
       paymentMethod: map['paymentMethod']?.toString(),
       notes: map['notes']?.toString(),
+      category: map['category']?.toString(),
       createdByUid: map['createdByUid']?.toString() ?? 'system',
       timestamp: time,
     );

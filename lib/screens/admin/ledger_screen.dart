@@ -136,6 +136,16 @@ class _LedgerTile extends StatelessWidget {
       label = 'InstaPay Profit (${tx.toLabel})';
     } else if (tx.type == FlowType.COLLECT_INSTAPAY_CASH) {
       label = 'InstaPay Collection (${tx.fromLabel})';
+    } else if (tx.type == FlowType.LOAN_ISSUED) {
+      label = 'Loan Issued (${tx.toLabel})';
+    } else if (tx.type == FlowType.LOAN_REPAYMENT) {
+      label = 'Loan Repayment (${tx.fromLabel})';
+    } else if (tx.type == FlowType.EXPENSE_BANK) {
+      label = 'Bank Expense (${tx.fromLabel})${tx.category != null ? ' — ${tx.category}' : ''}';
+    } else if (tx.type == FlowType.EXPENSE_VFNUMBER) {
+      label = 'VF Expense (${tx.fromLabel})${tx.category != null ? ' — ${tx.category}' : ''}';
+    } else if (tx.type == FlowType.EXPENSE_COLLECTOR) {
+      label = 'Collector Expense (${tx.fromLabel})${tx.category != null ? ' — ${tx.category}' : ''}';
     }
 
     // Clean label for display (strip the suffix — we'll show a badge instead)
@@ -202,7 +212,12 @@ class _LedgerTile extends StatelessWidget {
                     tx.type != FlowType.INTERNAL_VF_TRANSFER_FEE &&
                     tx.type != FlowType.DISTRIBUTE_INSTAPAY &&
                     tx.type != FlowType.INSTAPAY_DIST_PROFIT &&
-                    tx.type != FlowType.COLLECT_INSTAPAY_CASH) ...[
+                    tx.type != FlowType.COLLECT_INSTAPAY_CASH &&
+                    tx.type != FlowType.LOAN_ISSUED &&
+                    tx.type != FlowType.LOAN_REPAYMENT &&
+                    tx.type != FlowType.EXPENSE_BANK &&
+                    tx.type != FlowType.EXPENSE_VFNUMBER &&
+                    tx.type != FlowType.EXPENSE_COLLECTOR) ...[
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
@@ -493,6 +508,14 @@ class _LedgerTile extends StatelessWidget {
         return const Color(0xFF43A047);
       case FlowType.EXPENSE_INSTAPAY_FEE:
         return AppTheme.warningColor(context);
+      case FlowType.LOAN_ISSUED:
+        return const Color(0xFFF4A261);
+      case FlowType.LOAN_REPAYMENT:
+        return AppTheme.positiveColor(context);
+      case FlowType.EXPENSE_BANK:
+      case FlowType.EXPENSE_VFNUMBER:
+      case FlowType.EXPENSE_COLLECTOR:
+        return const Color(0xFFE63946);
     }
   }
 
@@ -536,6 +559,16 @@ class _LedgerTile extends StatelessWidget {
         return Icons.check_circle_outline;
       case FlowType.EXPENSE_INSTAPAY_FEE:
         return Icons.money_off;
+      case FlowType.LOAN_ISSUED:
+        return Icons.volunteer_activism_outlined;
+      case FlowType.LOAN_REPAYMENT:
+        return Icons.payments_outlined;
+      case FlowType.EXPENSE_BANK:
+        return Icons.money_off;
+      case FlowType.EXPENSE_VFNUMBER:
+        return Icons.phone_disabled;
+      case FlowType.EXPENSE_COLLECTOR:
+        return Icons.person_off;
     }
   }
 }

@@ -18,6 +18,8 @@ import 'user_management_screen.dart';
 import 'usd_exchange_screen.dart';
 import 'exchange_rate_screen.dart';
 import 'retailer_assignment_requests_screen.dart';
+import 'loans_screen.dart';
+import 'expenses_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -68,6 +70,8 @@ class _AdminDashboardState extends State<AdminDashboard> {
           collectorCash: dist.totalCollectorCash,
           usdtBalance: dist.usdtBalance,
           transferFees: dist.totalTransferFees,
+          outstandingLoans: dist.totalOutstandingLoans,
+          totalExpenses: dist.totalExpenses,
           userName: auth.currentUser?.name ?? 'Admin',
           canViewUsdExchange: canViewUsdExchange,
         ),
@@ -127,6 +131,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
         icon: Icons.receipt_long_outlined,
         selectedIcon: Icons.receipt_long,
         widget: const LedgerScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
+        label: 'loans'.tr(),
+        icon: Icons.volunteer_activism_outlined,
+        selectedIcon: Icons.volunteer_activism,
+        widget: const LoansScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
+        label: 'expenses'.tr(),
+        icon: Icons.money_off_outlined,
+        selectedIcon: Icons.money_off,
+        widget: const ExpensesScreen(),
         roles: [UserRole.ADMIN, UserRole.FINANCE],
       ),
       _TabItem(
@@ -289,6 +307,8 @@ class _Overview extends StatelessWidget {
   final double collectorCash;
   final double usdtBalance;
   final double transferFees;
+  final double outstandingLoans;
+  final double totalExpenses;
   final String userName;
   final bool canViewUsdExchange;
 
@@ -303,6 +323,8 @@ class _Overview extends StatelessWidget {
     required this.collectorCash,
     required this.usdtBalance,
     required this.transferFees,
+    required this.outstandingLoans,
+    required this.totalExpenses,
     required this.userName,
     required this.canViewUsdExchange,
   });
@@ -417,12 +439,23 @@ class _Overview extends StatelessWidget {
                 if (instaPayProfit > 0)
                   _AssetCard(icon: Icons.payment, label: 'InstaPay Dist Profit', amount: instaPayProfit, color: const Color(0xFF1B5E20), muted: true),
                 
-                // ── Section 3: Expenses ───────────────────────────────────────────
-                if (transferFees > 0) ...[
+                // ── Section 3: Outside Loop Assets ────────────────────────────────
+                if (outstandingLoans > 0) ...[
+                  const SizedBox(height: 12),
+                  const _SectionHeader(label: 'Pending / Outside Loop', icon: Icons.hourglass_bottom, muted: true),
+                  const SizedBox(height: 8),
+                  _AssetCard(icon: Icons.volunteer_activism_outlined, label: 'outstanding_loans'.tr(), amount: outstandingLoans, color: const Color(0xFFF4A261), muted: true),
+                ],
+
+                // ── Section 4: Expenses ───────────────────────────────────────────
+                if (transferFees > 0 || totalExpenses > 0) ...[
                   const SizedBox(height: 12),
                   const _SectionHeader(label: 'Expenses', icon: Icons.money_off_outlined, muted: true),
                   const SizedBox(height: 8),
-                  _AssetCard(icon: Icons.money_off, label: 'VF Fees Paid', amount: transferFees, color: AppTheme.accent, muted: true),
+                  if (transferFees > 0)
+                    _AssetCard(icon: Icons.money_off, label: 'VF Fees Paid', amount: transferFees, color: AppTheme.accent, muted: true),
+                  if (totalExpenses > 0)
+                    _AssetCard(icon: Icons.receipt_long, label: 'total_expenses'.tr(), amount: totalExpenses, color: const Color(0xFFE63946), muted: true),
                 ],
               ]),
             ),

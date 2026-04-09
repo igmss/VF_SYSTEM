@@ -376,6 +376,8 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
     final isOut = type == FlowType.BUY_USDT ||
                   type == FlowType.DISTRIBUTE_INSTAPAY ||
                   type == FlowType.EXPENSE_INSTAPAY_FEE ||
+                  type == FlowType.LOAN_ISSUED ||
+                  type == FlowType.EXPENSE_BANK ||
                   type == FlowType.BANK_DEDUCTION;
 
     final color = isOut ? _kRed : _kGreen;

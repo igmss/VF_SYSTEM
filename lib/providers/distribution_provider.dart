@@ -7,6 +7,7 @@ import '../models/bank_account.dart';
 import '../models/retailer.dart';
 import '../models/collector.dart';
 import '../models/financial_transaction.dart';
+import '../models/loan.dart';
 import 'auth_provider.dart';
 
 part 'bank_account_operations.dart';
@@ -21,6 +22,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   List<Retailer> _retailers = [];
   List<Collector> _collectors = [];
   List<FinancialTransaction> _ledger = [];
+  List<Loan> _loans = [];
   Map<String, String> _userNames = {}; // UID -> Name
   double _usdtBalance = 0.0;     // USDT quantity in the exchange
   double _usdtLastPrice = 0.0;  // Last known EGP/USDT price (for EGP equivalent)
@@ -43,6 +45,12 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   bool get isDepositing      => _isDepositing;
   bool get isCreditReturning => _isCreditReturning;
   bool get isInternalTransferring => _isInternalTransferring;
+  bool _isIssuingLoan = false;
+  bool _isRepayingLoan = false;
+
+  bool get isIssuingLoan => _isIssuingLoan;
+  bool get isRepayingLoan => _isRepayingLoan;
+
   String? _error;
 
   StreamSubscription<DatabaseEvent>? _usdExchangeSub;
@@ -50,11 +58,13 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   StreamSubscription<DatabaseEvent>? _retailersSub;
   StreamSubscription<DatabaseEvent>? _collectorsSub;
   StreamSubscription<DatabaseEvent>? _ledgerSub;
+  StreamSubscription<DatabaseEvent>? _loansSub;
 
   List<BankAccount> get bankAccounts => _bankAccounts;
   List<Retailer> get retailers => _retailers;
   List<Collector> get collectors => _collectors;
   List<FinancialTransaction> get ledger => _ledger;
+  List<Loan> get loans => _loans;
 
   /// USDT quantity held in USD Exchange
   double get usdtBalance => _usdtBalance;
@@ -104,6 +114,23 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   double get totalInstaPayProfit => _ledger
       .where((tx) => tx.type == FlowType.INSTAPAY_DIST_PROFIT)
       .fold(0.0, (sum, tx) => sum + tx.amount);
+
+  double get totalOutstandingLoans =>
+      _loans.fold(0.0, (sum, l) => sum + l.outstandingBalance);
+
+  double get totalExpenses => _ledger
+      .where((tx) =>
+          tx.type == FlowType.EXPENSE_BANK ||
+          tx.type == FlowType.EXPENSE_VFNUMBER ||
+          tx.type == FlowType.EXPENSE_COLLECTOR)
+      .fold(0.0, (sum, tx) => sum + tx.amount);
+
+  List<FinancialTransaction> get expenseLedger => _ledger
+      .where((tx) =>
+          tx.type == FlowType.EXPENSE_BANK ||
+          tx.type == FlowType.EXPENSE_VFNUMBER ||
+          tx.type == FlowType.EXPENSE_COLLECTOR)
+      .toList();
 
 
   // ——————————————————————————————————————————————————————————————————————————
@@ -233,6 +260,22 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       }
       notifyListeners();
     });
+
+    _loansSub?.cancel();
+    _loansSub = _db.ref('loans').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _loans = [];
+      } else {
+        final map = snap.value as Map;
+        _loans = map.values
+            .whereType<Map>()
+            .map((v) => Loan.fromMap(Map<String, dynamic>.from(v)))
+            .toList();
+        _loans.sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
+      }
+      notifyListeners();
+    });
   }
 
   Future<void> _refreshOperationalData() async {
@@ -241,6 +284,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       _db.ref('retailers').get(),
       _db.ref('collectors').get(),
       _db.ref('financial_ledger').get(),
+      _db.ref('loans').get(),
     ]);
 
     final banksSnap = results[0];
@@ -301,6 +345,19 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
           .toList();
       _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     }
+
+    final loansSnap = results[4];
+    if (!loansSnap.exists || loansSnap.value == null || loansSnap.value is! Map) {
+      _loans = [];
+    } else {
+      final map = loansSnap.value as Map;
+      _loans = map.values
+          .whereType<Map>()
+          .map((v) => Loan.fromMap(Map<String, dynamic>.from(v)))
+          .toList();
+      _loans.sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
+    }
+
     notifyListeners();
   }
 
@@ -326,6 +383,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     _retailersSub?.cancel();
     _collectorsSub?.cancel();
     _ledgerSub?.cancel();
+    _loansSub?.cancel();
     super.dispose();
   }
 
@@ -474,5 +532,108 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     _collectors.add(Collector.fromMap(collectorData));
     _collectors.sort((a, b) => a.name.compareTo(b.name));
     notifyListeners();
+  }
+
+  // ——————————————————————————————————————————————————————————————————————————
+  //  Loan Operations
+  // ——————————————————————————————————————————————————————————————————————————
+
+  Future<void> issueLoan({
+    required LoanSourceType sourceType,
+    required String sourceId,
+    required String borrowerName,
+    String? borrowerPhone,
+    required double amount,
+    String? notes,
+    required String createdByUid,
+  }) async {
+    if (_isIssuingLoan) return;
+    _isIssuingLoan = true;
+    notifyListeners();
+
+    try {
+      final callable = _functions.httpsCallable('issueLoan');
+      await callable.call({
+        'sourceType': sourceType.name,
+        'sourceId': sourceId,
+        'borrowerName': borrowerName,
+        'borrowerPhone': borrowerPhone,
+        'amount': amount,
+        'notes': notes,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Issue loan error: $e');
+      rethrow;
+    } finally {
+      _isIssuingLoan = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> recordLoanRepayment({
+    required String loanId,
+    required double amount,
+    required String createdByUid,
+  }) async {
+    if (_isRepayingLoan) return;
+    _isRepayingLoan = true;
+    notifyListeners();
+
+    try {
+      final callable = _functions.httpsCallable('recordLoanRepayment');
+      await callable.call({
+        'loanId': loanId,
+        'amount': amount,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Record loan repayment error: $e');
+      rethrow;
+    } finally {
+      _isRepayingLoan = false;
+      notifyListeners();
+    }
+  }
+
+  // ──────────────────────────────────────────────────────────────────────────
+  //  Expense Operations
+  // ──────────────────────────────────────────────────────────────────────────
+
+  bool _isRecordingExpense = false;
+  bool get isRecordingExpense => _isRecordingExpense;
+
+  Future<void> recordExpense({
+    required String sourceType,
+    required String sourceId,
+    required double amount,
+    String? category,
+    String? notes,
+    required String createdByUid,
+  }) async {
+    if (_isRecordingExpense) return;
+    _isRecordingExpense = true;
+    notifyListeners();
+
+    try {
+      final callable = _functions.httpsCallable('recordExpense');
+      await callable.call({
+        'sourceType': sourceType,
+        'sourceId': sourceId,
+        'amount': amount,
+        'category': category,
+        'notes': notes,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Record expense error: $e');
+      rethrow;
+    } finally {
+      _isRecordingExpense = false;
+      notifyListeners();
+    }
   }
 }

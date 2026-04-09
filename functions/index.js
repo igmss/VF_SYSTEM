@@ -24,4 +24,7 @@ exports.correctFinancialTransaction = adminFinance.correctFinancialTransaction;
 exports.deleteFinancialTransaction = adminFinance.deleteFinancialTransaction;
 exports.processRetailerRequest = adminFinance.processRetailerRequest;
 exports.transferInternalVfCash = adminFinance.transferInternalVfCash;
+exports.issueLoan = adminFinance.issueLoan;
+exports.recordLoanRepayment = adminFinance.recordLoanRepayment;
+exports.recordExpense = adminFinance.recordExpense;
 exports.getRetailerPortalData = retailerRequests.getRetailerPortalData;

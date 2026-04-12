@@ -8,6 +8,11 @@ import '../models/retailer.dart';
 import '../models/collector.dart';
 import '../models/financial_transaction.dart';
 import '../models/loan.dart';
+import '../models/investor.dart';
+import '../models/investor_profit_snapshot.dart';
+import '../models/partner.dart';
+import '../models/partner_profit_snapshot.dart';
+import '../models/system_profit_snapshot.dart';
 import 'auth_provider.dart';
 
 part 'bank_account_operations.dart';
@@ -23,6 +28,11 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   List<Collector> _collectors = [];
   List<FinancialTransaction> _ledger = [];
   List<Loan> _loans = [];
+  List<Investor> _investors = [];
+  Map<String, List<InvestorProfitSnapshot>> _investorSnapshots = {};
+  List<Partner> _partners = [];
+  Map<String, List<PartnerProfitSnapshot>> _partnerSnapshots = {};
+  Map<String, SystemProfitSnapshot> _systemProfitSnapshots = {};
   Map<String, String> _userNames = {}; // UID -> Name
   double _usdtBalance = 0.0;     // USDT quantity in the exchange
   double _usdtLastPrice = 0.0;  // Last known EGP/USDT price (for EGP equivalent)
@@ -51,6 +61,11 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   bool get isIssuingLoan => _isIssuingLoan;
   bool get isRepayingLoan => _isRepayingLoan;
 
+  bool _isInvestorLoading = false;
+  bool _isPartnerLoading = false;
+  bool get isInvestorLoading => _isInvestorLoading;
+  bool get isPartnerLoading => _isPartnerLoading;
+
   String? _error;
 
   StreamSubscription<DatabaseEvent>? _usdExchangeSub;
@@ -59,8 +74,18 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   StreamSubscription<DatabaseEvent>? _collectorsSub;
   StreamSubscription<DatabaseEvent>? _ledgerSub;
   StreamSubscription<DatabaseEvent>? _loansSub;
+  StreamSubscription<DatabaseEvent>? _investorsSub;
+  StreamSubscription<DatabaseEvent>? _investorSnapshotsSub;
+  StreamSubscription<DatabaseEvent>? _partnersSub;
+  StreamSubscription<DatabaseEvent>? _partnerSnapshotsSub;
+  StreamSubscription<DatabaseEvent>? _systemProfitSnapshotsSub;
 
   List<BankAccount> get bankAccounts => _bankAccounts;
+  List<Investor> get investors => _investors;
+  Map<String, List<InvestorProfitSnapshot>> get investorSnapshots => _investorSnapshots;
+  List<Partner> get partners => _partners;
+  Map<String, List<PartnerProfitSnapshot>> get partnerSnapshots => _partnerSnapshots;
+  Map<String, SystemProfitSnapshot> get systemProfitSnapshots => _systemProfitSnapshots;
   List<Retailer> get retailers => _retailers;
   List<Collector> get collectors => _collectors;
   List<FinancialTransaction> get ledger => _ledger;
@@ -78,6 +103,34 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   bool get isLoading => _isLoading;
   String? get error => _error;
   Map<String, String> get userNames => _userNames;
+
+  // ——————————————————————————————————————————————————————————————————————————
+  //  Daily Retailer Totals  (computed from today's ledger entries)
+  // ——————————————————————————————————————————————————————————————————————————
+
+  /// Returns today's assigned VF cash amount for [retailerId].
+  double retailerDailyVf(String retailerId) {
+    final today = DateTime.now();
+    final todayStart = DateTime(today.year, today.month, today.day);
+    return _ledger
+        .where((t) =>
+            t.type == FlowType.DISTRIBUTE_VFCASH &&
+            t.toId == retailerId &&
+            !t.timestamp.isBefore(todayStart))
+        .fold(0.0, (sum, t) => sum + t.amount);
+  }
+
+  /// Returns today's assigned InstaPay amount for [retailerId].
+  double retailerDailyInstaPay(String retailerId) {
+    final today = DateTime.now();
+    final todayStart = DateTime(today.year, today.month, today.day);
+    return _ledger
+        .where((t) =>
+            t.type == FlowType.DISTRIBUTE_INSTAPAY &&
+            t.toId == retailerId &&
+            !t.timestamp.isBefore(todayStart))
+        .fold(0.0, (sum, t) => sum + t.amount);
+  }
 
   // ——————————————————————————————————————————————————————————————————————————
   //  Aggregate Totals
@@ -131,6 +184,38 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
           tx.type == FlowType.EXPENSE_VFNUMBER ||
           tx.type == FlowType.EXPENSE_COLLECTOR)
       .toList();
+
+  double get totalInvestorCapital =>
+      _investors.where((i) => i.status == 'active').fold(0.0, (s, i) => s + i.investedAmount);
+
+  double get totalInvestorProfitOwed => _investorSnapshots.values
+      .expand((snapshots) => snapshots)
+      .where((s) => s.isCurrentVersion && !s.isPaid)
+      .fold(0.0, (sum, s) => sum + s.investorProfit);
+
+  double get totalPartnerProfitOwed => _partnerSnapshots.values
+      .expand((snapshots) => snapshots)
+      .where((s) => s.isCurrentVersion && !s.isPaid)
+      .fold(0.0, (sum, s) => sum + s.partnerProfit);
+
+  List<InvestorProfitSnapshot> validInvestorSnapshotsFor(String investorId) {
+    final investor = _investors.cast<Investor?>().firstWhere(
+          (i) => i?.id == investorId,
+          orElse: () => null,
+        );
+    final startDate = investor?.investmentDate;
+    return (_investorSnapshots[investorId] ?? [])
+        .where((s) => s.isCurrentVersion)
+        .where((s) => startDate == null || startDate.isEmpty || s.date.compareTo(startDate) >= 0)
+        .toList()
+      ..sort((a, b) => b.date.compareTo(a.date));
+  }
+
+  double partnerUnpaidTotalFor(String partnerId) {
+    return (_partnerSnapshots[partnerId] ?? [])
+        .where((s) => s.isCurrentVersion && !s.isPaid)
+        .fold(0.0, (sum, s) => sum + s.partnerProfit);
+  }
 
 
   // ——————————————————————————————————————————————————————————————————————————
@@ -252,9 +337,12 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
         _ledger = [];
       } else {
         final map = snap.value as Map;
-        _ledger = map.values
-            .whereType<Map>()
-            .map((v) => FinancialTransaction.fromMap(Map<String, dynamic>.from(v)))
+        _ledger = map.entries
+            .where((entry) => entry.value is Map)
+            .map((entry) {
+              final data = Map<String, dynamic>.from(entry.value as Map);
+              return FinancialTransaction.fromMap(data, entry.key.toString());
+            })
             .toList();
         _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp));
       }
@@ -276,6 +364,107 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       }
       notifyListeners();
     });
+
+    _investorsSub?.cancel();
+    _investorsSub = _db.ref('investors').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _investors = [];
+      } else {
+        final map = snap.value as Map;
+        _investors = map.values
+            .whereType<Map>()
+            .map((v) => Investor.fromMap(Map<String, dynamic>.from(v)))
+            .toList();
+        _investors.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      }
+      notifyListeners();
+    });
+
+    _investorSnapshotsSub?.cancel();
+    _investorSnapshotsSub = _db.ref('investor_profit_snapshots').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _investorSnapshots = {};
+      } else {
+        final Map<String, List<InvestorProfitSnapshot>> newSnapshots = {};
+        final map = snap.value as Map;
+        map.forEach((investorId, datesMap) {
+          if (datesMap is Map) {
+            final List<InvestorProfitSnapshot> snaps = datesMap.values
+                .whereType<Map>()
+                .map((v) => InvestorProfitSnapshot.fromMap(Map<String, dynamic>.from(v)))
+                .toList();
+            snaps.sort((a, b) => b.date.compareTo(a.date));
+            newSnapshots[investorId.toString()] = snaps;
+          }
+        });
+        _investorSnapshots = newSnapshots;
+      }
+      notifyListeners();
+    });
+
+    _partnersSub?.cancel();
+    _partnersSub = _db.ref('system_config/partners').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _partners = [];
+      } else {
+        final map = snap.value as Map;
+        _partners = map.values
+            .whereType<Map>()
+            .map((v) => Partner.fromMap(Map<String, dynamic>.from(v)))
+            .toList();
+        _partners.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      }
+      notifyListeners();
+    });
+
+    _partnerSnapshotsSub?.cancel();
+    _partnerSnapshotsSub =
+        _db.ref('partner_profit_snapshots').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _partnerSnapshots = {};
+      } else {
+        final Map<String, List<PartnerProfitSnapshot>> newSnapshots = {};
+        final map = snap.value as Map;
+        map.forEach((partnerId, datesMap) {
+          if (datesMap is Map) {
+            final List<PartnerProfitSnapshot> snaps = datesMap.values
+                .whereType<Map>()
+                .map((v) => PartnerProfitSnapshot.fromMap(
+                    Map<String, dynamic>.from(v)))
+                .toList();
+            snaps.sort((a, b) => b.date.compareTo(a.date));
+            newSnapshots[partnerId.toString()] = snaps;
+          }
+        });
+        _partnerSnapshots = newSnapshots;
+        debugPrint('[DEBUG] Provider: Loaded ${_partnerSnapshots.length} partners with snapshots.');
+      }
+      notifyListeners();
+    });
+
+    _systemProfitSnapshotsSub?.cancel();
+    _systemProfitSnapshotsSub =
+        _db.ref('system_profit_snapshots').onValue.listen((event) {
+      final snap = event.snapshot;
+      if (!snap.exists || snap.value == null || snap.value is! Map) {
+        _systemProfitSnapshots = {};
+      } else {
+        final map = snap.value as Map;
+        final Map<String, SystemProfitSnapshot> newSnapshots = {};
+        map.forEach((dateKey, value) {
+          if (value is Map) {
+            newSnapshots[dateKey.toString()] =
+                SystemProfitSnapshot.fromMap(Map<String, dynamic>.from(value));
+          }
+        });
+        _systemProfitSnapshots = newSnapshots;
+      }
+      notifyListeners();
+    });
   }
 
   Future<void> _refreshOperationalData() async {
@@ -285,6 +474,11 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       _db.ref('collectors').get(),
       _db.ref('financial_ledger').get(),
       _db.ref('loans').get(),
+      _db.ref('investors').get(),
+      _db.ref('investor_profit_snapshots').get(),
+      _db.ref('system_config/partners').get(),
+      _db.ref('partner_profit_snapshots').get(),
+      _db.ref('system_profit_snapshots').get(),
     ]);
 
     final banksSnap = results[0];
@@ -339,9 +533,12 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       _ledger = [];
     } else {
       final map = ledgerSnap.value as Map;
-      _ledger = map.values
-          .whereType<Map>()
-          .map((v) => FinancialTransaction.fromMap(Map<String, dynamic>.from(v)))
+      _ledger = map.entries
+          .where((entry) => entry.value is Map)
+          .map((entry) {
+            final data = Map<String, dynamic>.from(entry.value as Map);
+            return FinancialTransaction.fromMap(data, entry.key.toString());
+          })
           .toList();
       _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp));
     }
@@ -358,6 +555,175 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       _loans.sort((a, b) => b.issuedAt.compareTo(a.issuedAt));
     }
 
+    final investorsSnap = results[5];
+    if (!investorsSnap.exists || investorsSnap.value == null || investorsSnap.value is! Map) {
+      _investors = [];
+    } else {
+      final map = investorsSnap.value as Map;
+      _investors = map.values
+          .whereType<Map>()
+          .map((v) => Investor.fromMap(Map<String, dynamic>.from(v)))
+          .toList();
+      _investors.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+
+    final investorSnapshotsSnap = results[6];
+    if (!investorSnapshotsSnap.exists || investorSnapshotsSnap.value == null || investorSnapshotsSnap.value is! Map) {
+      _investorSnapshots = {};
+    } else {
+      final Map<String, List<InvestorProfitSnapshot>> newSnapshots = {};
+      final map = investorSnapshotsSnap.value as Map;
+      map.forEach((investorId, datesMap) {
+        if (datesMap is Map) {
+          final List<InvestorProfitSnapshot> snaps = datesMap.values
+              .whereType<Map>()
+              .map((v) => InvestorProfitSnapshot.fromMap(Map<String, dynamic>.from(v)))
+              .toList();
+          snaps.sort((a, b) => b.date.compareTo(a.date));
+          newSnapshots[investorId.toString()] = snaps;
+        }
+      });
+      _investorSnapshots = newSnapshots;
+    }
+
+    final partnersSnap = results[7];
+    if (!partnersSnap.exists || partnersSnap.value == null || partnersSnap.value is! Map) {
+      _partners = [];
+    } else {
+      final map = partnersSnap.value as Map;
+      _partners = map.values
+          .whereType<Map>()
+          .map((v) => Partner.fromMap(Map<String, dynamic>.from(v)))
+          .toList();
+      _partners.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+    }
+
+    final partnerSnapshotsSnap = results[8];
+    if (!partnerSnapshotsSnap.exists || partnerSnapshotsSnap.value == null || partnerSnapshotsSnap.value is! Map) {
+      _partnerSnapshots = {};
+    } else {
+      final Map<String, List<PartnerProfitSnapshot>> newSnapshots = {};
+      final map = partnerSnapshotsSnap.value as Map;
+      map.forEach((partnerId, datesMap) {
+        if (datesMap is Map) {
+          final List<PartnerProfitSnapshot> snaps = datesMap.values
+              .whereType<Map>()
+              .map((v) => PartnerProfitSnapshot.fromMap(Map<String, dynamic>.from(v)))
+              .toList();
+          snaps.sort((a, b) => b.date.compareTo(a.date));
+          newSnapshots[partnerId.toString()] = snaps;
+        }
+      });
+      _partnerSnapshots = newSnapshots;
+    }
+
+    final systemProfitSnapshotsSnap = results[9];
+    if (!systemProfitSnapshotsSnap.exists || systemProfitSnapshotsSnap.value == null || systemProfitSnapshotsSnap.value is! Map) {
+      _systemProfitSnapshots = {};
+    } else {
+      final map = systemProfitSnapshotsSnap.value as Map;
+      final Map<String, SystemProfitSnapshot> newSnapshots = {};
+      map.forEach((dateKey, value) {
+        if (value is Map) {
+          newSnapshots[dateKey.toString()] =
+              SystemProfitSnapshot.fromMap(Map<String, dynamic>.from(value));
+        }
+      });
+      _systemProfitSnapshots = newSnapshots;
+    }
+
+    notifyListeners();
+  }
+
+  // Used by mixins for targeted refreshes
+  Future<void> _loadBankAccounts() async {
+    final snap = await _db.ref('bank_accounts').get();
+    if (snap.exists && snap.value is Map) {
+      final map = snap.value as Map;
+      _bankAccounts = map.values
+          .whereType<Map>()
+          .map((v) => BankAccount.fromMap(Map<String, dynamic>.from(v)))
+          .toList();
+      _bankAccounts.sort((a, b) {
+        if (a.isDefaultForBuy == b.isDefaultForBuy) return a.bankName.compareTo(b.bankName);
+        return a.isDefaultForBuy ? -1 : 1;
+      });
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadLedger() async {
+    final snap = await _db.ref('financial_ledger').get();
+    if (snap.exists && snap.value is Map) {
+      final map = snap.value as Map;
+      _ledger = map.entries
+          .where((entry) => entry.value is Map)
+          .map((entry) => FinancialTransaction.fromMap(Map<String, dynamic>.from(entry.value as Map), entry.key.toString()))
+          .toList();
+      _ledger.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadRetailers() async {
+    final snap = await _db.ref('retailers').get();
+    if (snap.exists && snap.value is Map) {
+      final map = snap.value as Map;
+      _retailers = map.values
+          .whereType<Map>()
+          .map((v) => Retailer.fromMap(Map<String, dynamic>.from(v)))
+          .where((r) => r.isActive)
+          .toList();
+      _retailers.sort((a, b) => a.name.compareTo(b.name));
+      notifyListeners();
+    }
+  }
+
+  Future<void> _loadCollectors() async {
+    final snap = await _db.ref('collectors').get();
+    if (snap.exists && snap.value is Map) {
+      final map = snap.value as Map;
+      _collectors = map.entries
+          .where((entry) => entry.value is Map)
+          .map((entry) {
+            final data = Map<String, dynamic>.from(entry.value as Map);
+            data['id'] = entry.key.toString();
+            return Collector.fromMap(data);
+          })
+          .where((c) => c.isActive)
+          .toList();
+      _collectors.sort((a, b) => a.name.compareTo(b.name));
+      notifyListeners();
+    }
+  }
+
+  double _asDouble(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString()) ?? 0.0;
+  }
+
+  Future<void> _addUsdtBalance(double usdtQty, double price) async {
+    _usdtBalance += usdtQty;
+    if (price > 0) _usdtLastPrice = price;
+    await _db.ref('usd_exchange').update({
+      'usdtBalance': _usdtBalance,
+      'balance': _usdtBalance,
+      'lastPrice': _usdtLastPrice,
+      'lastUpdatedAt': DateTime.now().toIso8601String(),
+    });
+    notifyListeners();
+  }
+
+  Future<void> _subtractUsdtBalance(double usdtQty, double price) async {
+    _usdtBalance = (_usdtBalance - usdtQty).clamp(0.0, double.infinity);
+    if (price > 0) _usdtLastPrice = price;
+    await _db.ref('usd_exchange').update({
+      'usdtBalance': _usdtBalance,
+      'balance': _usdtBalance,
+      'lastPrice': _usdtLastPrice,
+      'lastUpdatedAt': DateTime.now().toIso8601String(),
+    });
     notifyListeners();
   }
 
@@ -384,13 +750,12 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     _collectorsSub?.cancel();
     _ledgerSub?.cancel();
     _loansSub?.cancel();
+    _investorsSub?.cancel();
+    _investorSnapshotsSub?.cancel();
+    _partnersSub?.cancel();
+    _partnerSnapshotsSub?.cancel();
+    _systemProfitSnapshotsSub?.cancel();
     super.dispose();
-  }
-
-  double _asDouble(dynamic v) {
-    if (v == null) return 0.0;
-    if (v is num) return v.toDouble();
-    return double.tryParse(v.toString()) ?? 0.0;
   }
 
   Future<void> setUsdExchangeBalance(double usdtAmount) async {
@@ -401,36 +766,11 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     notifyListeners();
   }
 
-  Future<void> _addUsdtBalance(double usdtQty, double price) async {
-    _usdtBalance += usdtQty;
-    if (price > 0) _usdtLastPrice = price;
-    await _db.ref('usd_exchange').update({
-      'usdtBalance': _usdtBalance,
-      'balance': _usdtBalance,
-      if (price > 0) 'lastPrice': price,
-      'lastUpdatedAt': DateTime.now().toIso8601String(),
-    });
-  }
-
-  Future<void> _subtractUsdtBalance(double usdtQty, double price) async {
-    _usdtBalance = (_usdtBalance - usdtQty).clamp(0.0, double.infinity);
-    if (price > 0) _usdtLastPrice = price;
-    await _db.ref('usd_exchange').update({
-      'usdtBalance': _usdtBalance,
-      'balance': _usdtBalance,
-      if (price > 0) 'lastPrice': price,
-      'lastUpdatedAt': DateTime.now().toIso8601String(),
-    });
-  }
 
   // ——————————————————————————————————————————————————————————————————————————
   //  Load Stubs (Used by loadAll)
   // ——————————————————————————————————————————————————————————————————————————
 
-  Future<void> _loadBankAccounts() async {}
-  Future<void> _loadRetailers() async {}
-  Future<void> _loadCollectors() async {}
-  Future<void> _loadLedger() async {}
 
   // ——————————————————————————————————————————————————————————————————————————
   //  Collector-role helpers
@@ -606,7 +946,6 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   bool get isRecordingExpense => _isRecordingExpense;
 
   Future<void> recordExpense({
-    required String sourceType,
     required String sourceId,
     required double amount,
     String? category,
@@ -620,7 +959,6 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     try {
       final callable = _functions.httpsCallable('recordExpense');
       await callable.call({
-        'sourceType': sourceType,
         'sourceId': sourceId,
         'amount': amount,
         'category': category,
@@ -633,6 +971,295 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       rethrow;
     } finally {
       _isRecordingExpense = false;
+      notifyListeners();
+    }
+  }
+
+  // ——————————————————————————————————————————————————————————————————————————
+  //  Investors & Profit Sharing Data
+  // ——————————————————————————————————————————————————————————————————————————
+
+
+  Future<void> recordInvestorCapital({
+    required String name,
+    required String phone,
+    required double investedAmount,
+    required double initialBusinessCapital,
+    required double profitSharePercent,
+    required String investmentDate,
+    required int periodDays,
+    required String bankAccountId,
+    String? notes,
+    required String createdByUid,
+  }) async {
+    _isInvestorLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('recordInvestorCapital');
+      await callable.call({
+        'name': name,
+        'phone': phone,
+        'investedAmount': investedAmount,
+        'initialBusinessCapital': initialBusinessCapital,
+        'profitSharePercent': profitSharePercent,
+        'investmentDate': investmentDate,
+        'periodDays': periodDays,
+        'bankAccountId': bankAccountId,
+        'notes': notes,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Record investor capital error: $e');
+      rethrow;
+    } finally {
+      _isInvestorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<InvestorProfitSnapshot> calculateInvestorDailyProfit({
+    required String investorId,
+    required String date,
+    required int workingDays,
+  }) async {
+    _isInvestorLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('calculateInvestorDailyProfit');
+      final result = await callable.call({
+        'investorId': investorId,
+        'date': date,
+        'workingDays': workingDays,
+      });
+      await loadAll();
+      return InvestorProfitSnapshot.fromMap(Map<String, dynamic>.from(result.data));
+    } catch (e) {
+      debugPrint('Calculate daily profit error: $e');
+      rethrow;
+    } finally {
+      _isInvestorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> payInvestorProfit({
+    required String investorId,
+    required List<String> dates,
+    required String bankAccountId,
+    required String createdByUid,
+  }) async {
+    _isInvestorLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('payInvestorProfit');
+      await callable.call({
+        'investorId': investorId,
+        'dates': dates,
+        'bankAccountId': bankAccountId,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Pay investor profit error: $e');
+      rethrow;
+    } finally {
+      _isInvestorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> withdrawInvestorCapital({
+    required String investorId,
+    required double amount,
+    required String bankAccountId,
+    required String createdByUid,
+    String? notes,
+  }) async {
+    _isInvestorLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('withdrawInvestorCapital');
+      await callable.call({
+        'investorId': investorId,
+        'amount': amount,
+        'bankAccountId': bankAccountId,
+        'notes': notes,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Withdraw investor capital error: $e');
+      rethrow;
+    } finally {
+      _isInvestorLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setOpeningCapital(double value) async {
+    try {
+      await _db.ref('system_config/openingCapital').set(value);
+    } catch (e) {
+      debugPrint('Set opening capital error: $e');
+      rethrow;
+    }
+  }
+
+  Future<Map<String, dynamic>> calculateSystemProfitSnapshot({
+    required String date,
+    required int workingDays,
+  }) async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('calculateSystemProfitSnapshot');
+      final result = await callable.call({
+        'date': date,
+        'workingDays': workingDays,
+      });
+      await loadAll();
+      return Map<String, dynamic>.from(result.data);
+    } catch (e) {
+      debugPrint('Calculate system profit snapshot error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Map<String, dynamic>> rebuildProfitSnapshots({
+    required String startDate,
+    required String endDate,
+    bool resetPaidFlags = false,
+  }) async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('rebuildProfitSnapshots');
+      final result = await callable.call({
+        'startDate': startDate,
+        'endDate': endDate,
+        'resetPaidFlags': resetPaidFlags,
+      });
+      await loadAll();
+      return Map<String, dynamic>.from(result.data);
+    } catch (e) {
+      debugPrint('Rebuild profit snapshots error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  // ——————————————————————————————————————————————————————————————————————————
+  //  Partner Profit Sharing Operations
+  // ——————————————————————————————————————————————————————————————————————————
+
+
+  Future<Map<String, dynamic>> calculatePartnerDailyProfit({
+    required String date,
+    required int workingDays,
+  }) async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('calculatePartnerDailyProfit');
+      final result = await callable.call({
+        'date': date,
+        'workingDays': workingDays,
+      });
+      debugPrint('[DEBUG] Provider Calc Result: ${result.data}');
+      await loadAll();
+      return Map<String, dynamic>.from(result.data);
+    } catch (e) {
+      debugPrint('Calculate partner daily profit error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> payPartnerProfit({
+    required String partnerId,
+    required List<String> dates,
+    required String paymentSourceType,
+    required String paymentSourceId,
+    required String createdByUid,
+  }) async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('payPartnerProfit');
+      await callable.call({
+        'partnerId': partnerId,
+        'dates': dates,
+        'paymentSourceType': paymentSourceType,
+        'paymentSourceId': paymentSourceId,
+        'createdByUid': createdByUid,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Pay partner profit error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> seedPartners() async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('seedPartners');
+      await callable.call();
+      await loadAll();
+    } catch (e) {
+      debugPrint('Seed partners error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> savePartner(Partner partner) async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('savePartner');
+      await callable.call({
+        'partner': partner.toMap(),
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Save partner error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> setPartnerStatus(String partnerId, String status) async {
+    _isPartnerLoading = true;
+    notifyListeners();
+    try {
+      final callable = _functions.httpsCallable('setPartnerStatus');
+      await callable.call({
+        'partnerId': partnerId,
+        'status': status,
+      });
+      await loadAll();
+    } catch (e) {
+      debugPrint('Set partner status error: $e');
+      rethrow;
+    } finally {
+      _isPartnerLoading = false;
       notifyListeners();
     }
   }

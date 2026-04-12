@@ -87,6 +87,8 @@ class Retailer {
         'instaPayProfitPer1000': instaPayProfitPer1000,
         'instaPayTotalAssigned': instaPayTotalAssigned,
         'instaPayTotalCollected': instaPayTotalCollected,
+        'pendingDebt': pendingDebt,
+        'instaPayPendingDebt': instaPayPendingDebt,
       };
 
   factory Retailer.fromMap(Map<String, dynamic> map) {

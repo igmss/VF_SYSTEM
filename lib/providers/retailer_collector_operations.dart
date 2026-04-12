@@ -339,6 +339,7 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     }
 
     final tx = FinancialTransaction(
+      id: 'buy_${bybitOrderId}',
       type: FlowType.BUY_USDT,
       amount: egpAmount,
       usdtPrice: usdtPrice,
@@ -349,6 +350,7 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
       bybitOrderId: bybitOrderId,
       paymentMethod: paymentMethod,
       createdByUid: createdByUid,
+      timestamp: DateTime.now(),
     );
 
     if (matchedBankAccountId != null) {
@@ -403,6 +405,7 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
 
     try {
       final tx = FinancialTransaction(
+        id: 'sell_${bybitOrderId}',
         type: FlowType.SELL_USDT,
         amount: egpAmount,
         usdtPrice: usdtPrice,

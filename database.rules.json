@@ -75,7 +75,9 @@
         "mobile_numbers": {
             ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
             ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
-            ".indexOn": ["phoneNumber"]
+            ".indexOn": [
+                "phoneNumber"
+            ]
         },
         "transactions": {
             ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
@@ -110,6 +112,43 @@
                 ".read": "auth != null",
                 ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
             }
+        },
+        "investors": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".indexOn": ["status"]
+        },
+        "expenses": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
+        },
+        "loans": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".indexOn": ["status"]
+        },
+        "investor_profit_snapshots": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
+        },
+        "partner_profit_snapshots": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
+        },
+        "system_profit_snapshots": {
+            ".read": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')",
+            ".write": "auth != null && (root.child('users').child(auth.uid).child('role').val() == 'ADMIN' || root.child('users').child(auth.uid).child('role').val() == 'FINANCE')"
+        },
+        "system_config": {
+            ".read": "auth != null",
+            ".write": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'ADMIN'"
+        },
+        "audit_log": {
+            ".read": "auth != null && root.child('users').child(auth.uid).child('role').val() == 'ADMIN'",
+            ".write": "auth != null",
+            ".indexOn": [
+                "timestamp"
+            ]
         }
     }
 }

@@ -19,20 +19,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
   final _apiKeyCtrl = TextEditingController();
   final _apiSecretCtrl = TextEditingController();
   final _collectorVfFeeCtrl = TextEditingController();
+  final _vfStartCtrl = TextEditingController();
+  final _instaStartCtrl = TextEditingController();
 
   bool _showSecret = false;
   bool _isSaving = false;
   bool _isSyncing = false;
   bool _isSavingCollectorVfFee = false;
   bool _isSyncingPublic = false;
+  bool _isSavingModuleDates = false;
   DateTime? _selectedDate;
   double? _lastLoadedCollectorVfFee;
+  String? _lastVfStart;
+  String? _lastInstaStart;
 
   @override
   void dispose() {
     _apiKeyCtrl.dispose();
     _apiSecretCtrl.dispose();
     _collectorVfFeeCtrl.dispose();
+    _vfStartCtrl.dispose();
+    _instaStartCtrl.dispose();
     super.dispose();
   }
 
@@ -76,6 +83,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
       _showSnack('${'error'.tr()}: $e');
     } finally {
       if (mounted) setState(() => _isSavingCollectorVfFee = false);
+    }
+  }
+
+  Future<void> _saveModuleDates() async {
+    setState(() => _isSavingModuleDates = true);
+    try {
+      await context.read<AppProvider>().saveModuleStartDates(
+        _vfStartCtrl.text.trim(),
+        _instaStartCtrl.text.trim(),
+      );
+      _showSnack('Reconciliation start dates updated.', isError: false);
+    } catch (e) {
+      _showSnack('Failed to save dates: $e');
+    } finally {
+      if (mounted) setState(() => _isSavingModuleDates = false);
     }
   }
 
@@ -163,6 +185,15 @@ class _SettingsScreenState extends State<SettingsScreen> {
         !_isSavingCollectorVfFee) {
       _collectorVfFeeCtrl.text = collectorVfFee.toStringAsFixed(2);
       _lastLoadedCollectorVfFee = collectorVfFee;
+    }
+
+    if (_lastVfStart != provider.vfStartDate) {
+      _vfStartCtrl.text = provider.vfStartDate;
+      _lastVfStart = provider.vfStartDate;
+    }
+    if (_lastInstaStart != provider.instaPayStartDate) {
+      _instaStartCtrl.text = provider.instaPayStartDate;
+      _lastInstaStart = provider.instaPayStartDate;
     }
 
     final bodyContent = SingleChildScrollView(
@@ -266,6 +297,74 @@ class _SettingsScreenState extends State<SettingsScreen> {
                             ),
                           ),
                         ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            const SizedBox(height: 24),
+            const SizedBox(height: 24),
+            _sectionHeader('Module Reconciliation'),
+            _panel(
+              context,
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Operational Start Dates',
+                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 15, color: textPrimary),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      'Set the earliest dates when each module began operations. These control the "Daily Flow" calculation.',
+                      style: TextStyle(fontSize: 12, color: textMuted),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextFormField(
+                            controller: _vfStartCtrl,
+                            style: TextStyle(color: textPrimary),
+                            decoration: const InputDecoration(
+                              labelText: 'VF Cash Start',
+                              hintText: 'YYYY-MM-DD',
+                              prefixIcon: Icon(Icons.calendar_month),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: TextFormField(
+                            controller: _instaStartCtrl,
+                            style: TextStyle(color: textPrimary),
+                            decoration: const InputDecoration(
+                              labelText: 'InstaPay Start',
+                              hintText: 'YYYY-MM-DD',
+                              prefixIcon: Icon(Icons.calendar_month),
+                              border: OutlineInputBorder(),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton.icon(
+                        onPressed: _isSavingModuleDates ? null : _saveModuleDates,
+                        icon: _isSavingModuleDates
+                            ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2))
+                            : const Icon(Icons.save_outlined),
+                        label: const Text('Save Reconciliation Dates'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.accent,
+                          foregroundColor: Colors.white,
+                        ),
                       ),
                     ),
                   ],

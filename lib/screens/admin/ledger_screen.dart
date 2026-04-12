@@ -146,6 +146,16 @@ class _LedgerTile extends StatelessWidget {
       label = 'VF Expense (${tx.fromLabel})${tx.category != null ? ' — ${tx.category}' : ''}';
     } else if (tx.type == FlowType.EXPENSE_COLLECTOR) {
       label = 'Collector Expense (${tx.fromLabel})${tx.category != null ? ' — ${tx.category}' : ''}';
+    } else if (tx.type == FlowType.INVESTOR_CAPITAL_IN) {
+      label = 'Investor Capital (${tx.fromLabel})';
+    } else if (tx.type == FlowType.INVESTOR_PROFIT_PAID) {
+      label = 'Profit Paid (${tx.toLabel} from ${tx.fromLabel})';
+    } else if (tx.type == FlowType.INVESTOR_CAPITAL_OUT) {
+      label = 'Capital Withdrawal (${tx.toLabel} from ${tx.fromLabel})';
+    } else if (tx.type == FlowType.PARTNER_PROFIT_PAID_BANK) {
+      label = 'Partner Profit (${tx.toLabel} from ${tx.fromLabel})';
+    } else if (tx.type == FlowType.PARTNER_PROFIT_PAID_VF) {
+      label = 'Partner Profit (${tx.toLabel} from ${tx.fromLabel})';
     }
 
     // Clean label for display (strip the suffix — we'll show a badge instead)
@@ -217,7 +227,12 @@ class _LedgerTile extends StatelessWidget {
                     tx.type != FlowType.LOAN_REPAYMENT &&
                     tx.type != FlowType.EXPENSE_BANK &&
                     tx.type != FlowType.EXPENSE_VFNUMBER &&
-                    tx.type != FlowType.EXPENSE_COLLECTOR) ...[
+                    tx.type != FlowType.EXPENSE_COLLECTOR &&
+                    tx.type != FlowType.INVESTOR_CAPITAL_IN &&
+                    tx.type != FlowType.INVESTOR_PROFIT_PAID &&
+                    tx.type != FlowType.INVESTOR_CAPITAL_OUT &&
+                    tx.type != FlowType.PARTNER_PROFIT_PAID_BANK &&
+                    tx.type != FlowType.PARTNER_PROFIT_PAID_VF) ...[
                   const SizedBox(height: 4),
                   Wrap(
                     spacing: 6,
@@ -516,6 +531,15 @@ class _LedgerTile extends StatelessWidget {
       case FlowType.EXPENSE_VFNUMBER:
       case FlowType.EXPENSE_COLLECTOR:
         return const Color(0xFFE63946);
+      case FlowType.INVESTOR_CAPITAL_IN:
+        return const Color(0xFFC8A96E);
+      case FlowType.INVESTOR_PROFIT_PAID:
+        return const Color(0xFFE63946);
+      case FlowType.INVESTOR_CAPITAL_OUT:
+        return const Color(0xFFC8A96E);
+      case FlowType.PARTNER_PROFIT_PAID_BANK:
+      case FlowType.PARTNER_PROFIT_PAID_VF:
+        return const Color(0xFFE63946);
     }
   }
 
@@ -569,6 +593,16 @@ class _LedgerTile extends StatelessWidget {
         return Icons.phone_disabled;
       case FlowType.EXPENSE_COLLECTOR:
         return Icons.person_off;
+      case FlowType.INVESTOR_CAPITAL_IN:
+        return Icons.account_balance_wallet;
+      case FlowType.INVESTOR_PROFIT_PAID:
+        return Icons.monetization_on;
+      case FlowType.INVESTOR_CAPITAL_OUT:
+        return Icons.money_off;
+      case FlowType.PARTNER_PROFIT_PAID_BANK:
+        return Icons.account_balance;
+      case FlowType.PARTNER_PROFIT_PAID_VF:
+        return Icons.phone_android;
     }
   }
 }

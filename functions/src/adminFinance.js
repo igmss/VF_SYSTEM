@@ -2,6 +2,7 @@ const { onCall, HttpsError } = require('firebase-functions/v2/https');
 const admin = require('firebase-admin');
 const { v4: uuidv4 } = require('uuid');
 const REGION = 'asia-east1';
+const PROFIT_CALCULATION_VERSION = 2;
 
 const DB_URL = 'https://vodatracking-default-rtdb.firebaseio.com';
 
@@ -27,11 +28,22 @@ function getRetailerOutstandingDebt(retailer) {
   return outstanding > 0 ? outstanding : 0;
 }
 
+function getRetailerInstaPayOutstandingDebt(retailer) {
+  const outstanding = asNumber(retailer.instaPayTotalAssigned) - asNumber(retailer.instaPayTotalCollected);
+  return outstanding > 0 ? outstanding : 0;
+}
+
+
 function getTransactionTimestampMs(tx) {
   if (!tx) return Date.now();
   if (typeof tx.timestamp === 'number') return tx.timestamp;
   const parsed = Date.parse(tx.timestamp || '');
   return Number.isFinite(parsed) ? parsed : Date.now();
+}
+
+function safeDate(val, fallback) {
+  const d = new Date(val);
+  return isNaN(d.getTime()) ? new Date(fallback) : d;
 }
 
 function applyMobileNumberUsageDelta(updates, { numberId, amountDelta, direction, timestampMs, nowIso }) {
@@ -696,9 +708,9 @@ exports.distributeInstaPay = onCall({ region: REGION }, async (request) => {
 
   try {
     await db.ref().update(updates);
-    console.log(`--- [distributeInstaPay] SUCCESS committed. ---`);
+    console.log(`--- [distributeInstapay] SUCCESS committed. ---`);
   } catch (error) {
-    console.error(`--- [distributeInstaPay] FINAL_ERROR:`, error);
+    console.error(`--- [distributeInstapay] FINAL_ERROR:`, error);
     // Roll back bank balance reservation
     await bankRef.child('balance').transaction((current) => {
       if (current === null) return current;
@@ -1172,7 +1184,6 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
       getRelatedLedgerEntries(transactionId, ['EXPENSE_VFCASH_FEE']),
     ]);
     if (!retailerSnap.exists()) throw new HttpsError('not-found', 'Retailer not found.');
-    const retailer = retailerSnap.val();
     const debtIncrease = parseDistributionDebtIncrease(tx.notes, amount);
     const creditUsed = parseDistributionCreditUsed(tx.notes);
     if (asNumber(retailer.totalAssigned) < debtIncrease) {
@@ -1324,8 +1335,6 @@ exports.deleteFinancialTransaction = onCall({ region: REGION }, async (request) 
     if (!bankId) throw new HttpsError('failed-precondition', 'Bank deduction transaction is missing bank account.');
     updates[`bank_accounts/${bankId}/balance`] = admin.database.ServerValue.increment(amount);
     updates[`bank_accounts/${bankId}/lastUpdatedAt`] = nowIso;
-  } else {
-    throw new HttpsError('failed-precondition', 'This transaction type cannot be deleted here.');
   }
 
   await db.ref().update(updates);
@@ -1818,104 +1827,1538 @@ exports.recordExpense = onCall({ region: REGION }, async (request) => {
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
   await requireFinanceRole(uid);
 
-  const { sourceType, sourceId, amount, category, notes, createdByUid } = request.data;
+  const { sourceId, amount, category, notes, createdByUid } = request.data;
   const numAmount = asNumber(amount);
 
-  if (!sourceType || !sourceId || numAmount <= 0) {
-    throw new HttpsError('invalid-argument', 'sourceType, sourceId, and a positive amount are required.');
+  if (!sourceId || numAmount <= 0) {
+    throw new HttpsError('invalid-argument', 'sourceId and a positive amount are required.');
   }
 
   const db = admin.database();
   const now = new Date();
-  const nowIso = now.toISOString();
   const nowTs = now.getTime();
   const txId = uuidv4();
 
-  let sourceLabel = 'Source';
-  let flowType = 'EXPENSE_BANK';
+  // ── Validate bank account and atomically deduct balance ───────────────────
+  const bankRef = db.ref(`bank_accounts/${sourceId}`);
+  const bankSnap = await bankRef.once('value');
+  if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
+  const sourceLabel = bankSnap.val().bankName || 'Bank Account';
 
-  // ── Determine source type, validate balance, and atomically deduct ────────
-  if (sourceType === 'bank') {
-    flowType = 'EXPENSE_BANK';
-    const bankRef = db.ref(`bank_accounts/${sourceId}`);
-    const bankSnap = await bankRef.once('value');
-    if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
-    const bank = bankSnap.val();
-    sourceLabel = bank.bankName || 'Bank Account';
+  const result = await bankRef.child('balance').transaction((current) => {
+    if (current === null) return current;
+    const balance = asNumber(current);
+    if (balance < numAmount) return; // Abort — insufficient funds
+    return balance - numAmount;
+  });
 
-    const result = await bankRef.child('balance').transaction((current) => {
-      if (current === null) return current;
-      const balance = asNumber(current);
-      if (balance < numAmount) return; // Abort — insufficient funds
-      return balance - numAmount;
-    });
-
-    if (!result.committed) {
-      throw new HttpsError('failed-precondition', 'Insufficient bank balance to record expense.');
-    }
-
-  } else if (sourceType === 'vfnumber') {
-    flowType = 'EXPENSE_VFNUMBER';
-    const vfRef = db.ref(`mobile_numbers/${sourceId}`);
-    const vfSnap = await vfRef.once('value');
-    if (!vfSnap.exists()) throw new HttpsError('not-found', 'VF number not found.');
-    const vf = vfSnap.val();
-    sourceLabel = vf.phoneNumber || sourceId;
-
-    const currentBalance = getMobileNumberBalance(vf);
-    if (currentBalance < numAmount) {
-      throw new HttpsError('failed-precondition', `Insufficient VF balance (${currentBalance.toFixed(2)} EGP available).`);
-    }
-
-    // Deduct by incrementing outTotalUsed
-    const vfUpdates = {};
-    applyMobileNumberUsageDelta(vfUpdates, {
-      numberId: sourceId,
-      amountDelta: numAmount,
-      direction: 'outgoing',
-      timestampMs: nowTs,
-      nowIso,
-    });
-    await db.ref().update(vfUpdates);
-
-  } else if (sourceType === 'collector') {
-    flowType = 'EXPENSE_COLLECTOR';
-    const colRef = db.ref(`collectors/${sourceId}`);
-    const colSnap = await colRef.once('value');
-    if (!colSnap.exists()) throw new HttpsError('not-found', 'Collector not found.');
-    const col = colSnap.val();
-    sourceLabel = col.name || 'Collector';
-
-    const result = await colRef.child('cashOnHand').transaction((current) => {
-      if (current === null) return current;
-      const balance = asNumber(current);
-      if (balance < numAmount) return; // Abort
-      return balance - numAmount;
-    });
-
-    if (!result.committed) {
-      throw new HttpsError('failed-precondition', 'Insufficient collector cash to record expense.');
-    }
-
-  } else {
-    throw new HttpsError('invalid-argument', 'Invalid sourceType. Must be bank, vfnumber, or collector.');
+  if (!result.committed) {
+    throw new HttpsError('failed-precondition', 'Insufficient bank balance to record expense.');
   }
 
   // ── Write the ledger entry ─────────────────────────────────────────────────
-  try {
-    await db.ref(`financial_ledger/${txId}`).set({
+  await db.ref(`financial_ledger/${txId}`).set({
+    id: txId,
+    type: 'EXPENSE_BANK',
+    amount: numAmount,
+    fromId: sourceId,
+    fromLabel: sourceLabel,
+    notes: notes || (category ? `Category: ${category}` : null),
+    category: category || null,
+    createdByUid: createdByUid || uid,
+    timestamp: nowTs,
+  });
+
+  return { success: true, txId };
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Investor Capital & Profit Sharing
+// ─────────────────────────────────────────────────────────────────────────────
+
+exports.recordInvestorCapital = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Only admins can record investor capital.');
+
+  const { name, phone, investedAmount, initialBusinessCapital, profitSharePercent, investmentDate, periodDays, bankAccountId, notes, createdByUid } = request.data;
+  const numAmount = asNumber(investedAmount);
+  const numShare = asNumber(profitSharePercent);
+  
+  if (numAmount <= 0) throw new HttpsError('invalid-argument', 'Invested amount must be > 0.');
+  if (numShare < 1 || numShare > 100) throw new HttpsError('invalid-argument', 'Profit share percent must be between 1 and 100.');
+
+  const db = admin.database();
+  
+  const investorsSnap = await db.ref('investors').orderByChild('status').equalTo('active').once('value');
+  let priorInvestorsCapital = 0;
+  if (investorsSnap.exists()) {
+    investorsSnap.forEach((child) => {
+      priorInvestorsCapital += asNumber(child.val().investedAmount);
+    });
+  }
+
+  const numInitialBusinessCapital = asNumber(initialBusinessCapital);
+  const halfInvestedAmount = numAmount / 2;
+  const cumulativeCapitalBefore = numInitialBusinessCapital + priorInvestorsCapital;
+  const halfCumulativeCapital = cumulativeCapitalBefore / 2;
+
+  const bankRef = db.ref(`bank_accounts/${bankAccountId}`);
+  const bankSnap = await bankRef.once('value');
+  if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
+  const bankName = bankSnap.val().bankName || 'Bank Account';
+
+  const balanceResult = await bankRef.child('balance').transaction((current) => {
+    if (current === null) return current;
+    return asNumber(current) + numAmount;
+  });
+
+  if (!balanceResult.committed) {
+    throw new HttpsError('internal', 'Failed to update bank balance.');
+  }
+
+  const investorId = uuidv4();
+  const txId = uuidv4();
+  const nowTs = Date.now();
+
+  const investorRecord = {
+    id: investorId,
+    name: name || 'Investor',
+    phone: phone || '',
+    investedAmount: numAmount,
+    halfInvestedAmount: halfInvestedAmount,
+    initialBusinessCapital: numInitialBusinessCapital,
+    cumulativeCapitalBefore: cumulativeCapitalBefore,
+    halfCumulativeCapital: halfCumulativeCapital,
+    profitSharePercent: numShare,
+    investmentDate: investmentDate,
+    periodDays: asNumber(periodDays) || 30,
+    status: 'active',
+    totalProfitPaid: 0,
+    notes: notes || null,
+    createdByUid: createdByUid || uid,
+    createdAt: nowTs,
+  };
+
+  const updates = {};
+  updates[`investors/${investorId}`] = investorRecord;
+  updates[`financial_ledger/${txId}`] = {
+    id: txId,
+    type: 'INVESTOR_CAPITAL_IN',
+    amount: numAmount,
+    toId: bankAccountId,
+    toLabel: bankName,
+    fromLabel: investorRecord.name,
+    notes: `Investor capital deposit from ${investorRecord.name}`,
+    createdByUid: createdByUid || uid,
+    timestamp: nowTs,
+  };
+
+  await db.ref().update(updates);
+
+  return { success: true, investorId, halfCumulativeCapital };
+});
+
+function formatDateKey(dateInput) {
+  const parsed = safeDate(dateInput, new Date().toISOString());
+  const normalized = new Date(Date.UTC(
+    parsed.getUTCFullYear(),
+    parsed.getUTCMonth(),
+    parsed.getUTCDate()
+  ));
+  return normalized.toISOString().split('T')[0];
+}
+
+function getDateKeysForRange(dateStr, workingDays = 1) {
+  const targetDate = safeDate(dateStr, new Date().toISOString());
+  const normalizedTarget = new Date(Date.UTC(
+    targetDate.getUTCFullYear(),
+    targetDate.getUTCMonth(),
+    targetDate.getUTCDate()
+  ));
+  const numDays = Math.max(1, asNumber(workingDays) || 1);
+  const dates = [];
+
+  for (let i = 0; i < numDays; i++) {
+    const d = new Date(normalizedTarget);
+    d.setUTCDate(normalizedTarget.getUTCDate() - i);
+    dates.push(d.toISOString().split('T')[0]);
+  }
+
+  return dates;
+}
+
+function isInvestorEligibleForDate(investor, dayKey) {
+  const startDateValue = investor?.investmentDate;
+  if (!startDateValue) return true;
+  const investorStart = formatDateKey(startDateValue);
+  return dayKey >= investorStart;
+}
+
+function _sumActiveInvestorCapital(investorsSnap) {
+  let total = 0;
+  if (investorsSnap && investorsSnap.exists()) {
+    investorsSnap.forEach((child) => {
+      if (child.val()?.status === 'active') {
+        total += asNumber(child.val().investedAmount);
+      }
+    });
+  }
+  return total;
+}
+
+function _sumOutstandingLoans(loansSnap) {
+  let total = 0;
+  if (loansSnap && loansSnap.exists()) {
+    loansSnap.forEach((child) => {
+      const ln = child.val();
+      total += Math.max(0, asNumber(ln.principalAmount) - asNumber(ln.amountRepaid));
+    });
+  }
+  return total;
+}
+
+function _computeCurrentAssetTotal(dbData) {
+  const { banksSnap, retailersSnap, collectorsSnap, mobileNumbersSnap, usdSnap } = dbData;
+  let bankBalance = 0;
+  let vfNumberBalance = 0;
+  let retailerDebt = 0;
+  let retailerInstaDebt = 0;
+  let collectorCash = 0;
+  let usdExchangeEgp = 0;
+
+  if (banksSnap && banksSnap.exists()) {
+    banksSnap.forEach((child) => {
+      bankBalance += asNumber(child.val().balance);
+    });
+  }
+
+  if (mobileNumbersSnap && mobileNumbersSnap.exists()) {
+    mobileNumbersSnap.forEach((child) => {
+      vfNumberBalance += getMobileNumberBalance(child.val());
+    });
+  }
+
+  if (retailersSnap && retailersSnap.exists()) {
+    retailersSnap.forEach((child) => {
+      const retailer = child.val();
+      retailerDebt += getRetailerOutstandingDebt(retailer);
+      retailerInstaDebt += getRetailerInstaPayOutstandingDebt(retailer);
+    });
+  }
+
+  if (collectorsSnap && collectorsSnap.exists()) {
+    collectorsSnap.forEach((child) => {
+      collectorCash += asNumber(child.val().cashOnHand);
+    });
+  }
+
+  // Include USDT held in exchange at last known price — this is real capital in the loop
+  if (usdSnap && usdSnap.exists() && usdSnap.val()) {
+    const usdData = usdSnap.val();
+    const usdtBalance = asNumber(usdData.usdtBalance ?? usdData.balance ?? usdData.usdt);
+    const lastPrice = asNumber(usdData.lastPrice ?? usdData.price ?? usdData.egpPrice);
+    if (usdtBalance > 0 && lastPrice > 0) {
+      usdExchangeEgp = usdtBalance * lastPrice;
+    }
+  }
+
+  return {
+    bankBalance,
+    vfNumberBalance,
+    retailerDebt,
+    retailerInstaDebt,
+    collectorCash,
+    usdExchangeEgp,
+    currentTotalAssets: bankBalance + vfNumberBalance + retailerDebt + retailerInstaDebt + collectorCash + usdExchangeEgp
+  };
+}
+
+function _computeReconciledProfit(dbData) {
+  const openingCapital = asNumber(dbData.openingCapital);
+  const totalActiveInvestorCapital = _sumActiveInvestorCapital(dbData.investorsSnap);
+  const totalOutstandingLoans = _sumOutstandingLoans(dbData.loansSnap);
+  const currentAssets = _computeCurrentAssetTotal(dbData);
+  const effectiveStartingCapital = openingCapital + totalActiveInvestorCapital - totalOutstandingLoans;
+  const reconciledProfit = currentAssets.currentTotalAssets - effectiveStartingCapital;
+
+  return {
+    openingCapital,
+    totalActiveInvestorCapital,
+    totalOutstandingLoans,
+    effectiveStartingCapital,
+    ...currentAssets,
+    reconciledProfit
+  };
+}
+
+function _getGlobalAvgBuyPrice(ledgerSnap) {
+  let totalBuyEgp = 0;
+  let totalBuyUsdt = 0;
+  if (ledgerSnap && ledgerSnap.exists()) {
+    ledgerSnap.forEach((child) => {
+      const tx = child.val();
+      if (tx.type === 'BUY_USDT') {
+        totalBuyEgp += asNumber(tx.amount);
+        totalBuyUsdt += asNumber(tx.usdtQuantity);
+      }
+    });
+  }
+  return totalBuyUsdt > 0 ? totalBuyEgp / totalBuyUsdt : 0;
+}
+
+function _getGlobalAvgSellPrice(ledgerSnap) {
+  let totalSellEgp = 0;
+  let totalSellUsdt = 0;
+  if (ledgerSnap && ledgerSnap.exists()) {
+    ledgerSnap.forEach((child) => {
+      const tx = child.val();
+      if (tx.type === 'SELL_USDT') {
+        totalSellEgp += asNumber(tx.amount);
+        totalSellUsdt += asNumber(tx.usdtQuantity);
+      }
+    });
+  }
+  return totalSellUsdt > 0 ? totalSellEgp / totalSellUsdt : 0;
+}
+
+function _getPerformanceForDateRange(dbData, dateStr, workingDays = 1) {
+  const { ledgerSnap, retailersSnap } = dbData;
+
+  // DISTRIBUTE_VFCASH is the true daily VF business volume metric.
+  // SELL_USDT / BUY_USDT are kept only for computing avgBuy / avgSell (spread calc).
+  let totalDistVf = 0;      // face value of VF cash distributed to retailers
+  let totalDistVfDebt = 0;  // actual debt created (after retailer discounts in notes)
+
+  let totalBuyEgp = 0;
+  let totalBuyUsdt = 0;
+  let totalSellEgp = 0;
+  let totalSellUsdt = 0;
+  let buyEntriesCount = 0;
+  let sellEntriesCount = 0;
+
+  let totalInstaFlow = 0;
+  let totalInstaProfit = 0;
+  let totalInstaFees = 0;
+  let totalInternalVfFees = 0;
+  let totalExternalVfFees = 0;
+  let totalExpenses = 0;
+
+  const targetDate = safeDate(dateStr, new Date().toISOString());
+  const startDate = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate()));
+  startDate.setUTCDate(startDate.getUTCDate() - (asNumber(workingDays) - 1));
+  startDate.setUTCHours(0, 0, 0, 0);
+
+  const endThreshold = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate()));
+  endThreshold.setUTCHours(23, 59, 59, 999);
+
+  const startTs = startDate.getTime();
+  const endTs = endThreshold.getTime();
+
+  if (ledgerSnap && ledgerSnap.exists()) {
+    ledgerSnap.forEach((child) => {
+      const tx = child.val();
+      const txTs = getTransactionTimestampMs(tx);
+      if (txTs < startTs || txTs > endTs) return;
+
+      if (tx.type === 'BUY_USDT') {
+        totalBuyEgp += asNumber(tx.amount);
+        totalBuyUsdt += asNumber(tx.usdtQuantity);
+        buyEntriesCount += 1;
+      } else if (tx.type === 'SELL_USDT') {
+        totalSellEgp += asNumber(tx.amount);
+        totalSellUsdt += asNumber(tx.usdtQuantity);
+        sellEntriesCount += 1;
+      } else if (tx.type === 'DISTRIBUTE_VFCASH') {
+        totalDistVf += asNumber(tx.amount);
+        // Actual debt is embedded in notes e.g. "Debt +2498 EGP" — parse it for discount calc
+        const debtMatch = (tx.notes || '').match(/Debt \+([0-9.]+)/);
+        totalDistVfDebt += debtMatch ? parseFloat(debtMatch[1]) : asNumber(tx.amount);
+      } else if (tx.type === 'DISTRIBUTE_INSTAPAY') {
+        totalInstaFlow += asNumber(tx.amount);
+      } else if (tx.type === 'INSTAPAY_DIST_PROFIT') {
+        totalInstaProfit += asNumber(tx.amount);
+      } else if (tx.type === 'INTERNAL_VF_TRANSFER_FEE') {
+        totalInternalVfFees += asNumber(tx.amount);
+      } else if (tx.type === 'EXPENSE_VFCASH_FEE') {
+        totalExternalVfFees += asNumber(tx.amount);
+      } else if (tx.type === 'EXPENSE_INSTAPAY_FEE') {
+        totalInstaFees += asNumber(tx.amount);
+      } else if (
+        tx.type === 'EXPENSE_BANK' ||
+        tx.type === 'EXPENSE_VFNUMBER' ||
+        tx.type === 'EXPENSE_COLLECTOR'
+      ) {
+        totalExpenses += asNumber(tx.amount);
+      }
+    });
+  }
+
+  // Outstanding retailer VF debt: money distributed but not yet collected back.
+  // Profit is only recognized on effectively collected distributions.
+  let outstandingRetailerVfDebt = 0;
+  if (retailersSnap && retailersSnap.exists()) {
+    retailersSnap.forEach((child) => {
+      const r = child.val();
+      outstandingRetailerVfDebt += Math.max(0, asNumber(r.totalAssigned) - asNumber(r.totalCollected));
+    });
+  }
+
+  // avgBuy / avgSell from USDT trades in this window; fall back to global if none today.
+  const avgBuy = totalBuyUsdt > 0 ? totalBuyEgp / totalBuyUsdt : _getGlobalAvgBuyPrice(ledgerSnap);
+  const avgSell = totalSellUsdt > 0 ? totalSellEgp / totalSellUsdt : _getGlobalAvgSellPrice(ledgerSnap);
+
+  // Spread from USDT trading, net of the discount given to retailers on distributions.
+  const rawSpread = avgBuy > 0 && avgSell > 0 ? ((avgSell - avgBuy) / avgBuy) * 1000 : 0;
+  const totalVfDiscount = Math.max(0, totalDistVf - totalDistVfDebt);
+  const retailerDiscountPer1000 = totalDistVf > 0 ? (totalVfDiscount / totalDistVf) * 1000 : 0;
+  const spread = Math.max(0, rawSpread - retailerDiscountPer1000);
+
+  // VF daily flow = DISTRIBUTE_VFCASH (actual business volume, not SELL_USDT timing).
+  const days = asNumber(workingDays) || 1;
+  const vfDailyFlow = totalDistVf / days;
+  const instaDailyFlow = totalInstaFlow / days;
+
+  // VF profit = distributions × net spread.
+  // The outstanding deduction is handled at the period level via the reconciliation cap in
+  // _buildProfitDistributionContext, which ensures total distributable profit never exceeds
+  // the true balance-sheet profit (which already reflects uncollected retailer debt).
+  const effectiveVfDist = Math.max(0, totalDistVf - outstandingRetailerVfDebt);
+  const vfProfit = totalDistVf > 0 ? Math.max(0, totalDistVf * spread / 1000) / days : 0;
+
+  const systemInstaProfitPer1000 = totalInstaFlow > 0 ? (totalInstaProfit / totalInstaFlow) * 1000 : 0;
+  const businessGrossProfit = vfProfit + totalInstaProfit;
+
+  // ALL expense types are deducted before any profit is distributed to investors or partners.
+  const totalFees = totalInternalVfFees + totalExternalVfFees + totalInstaFees + totalExpenses;
+  const businessNetProfit = businessGrossProfit - totalFees;
+
+  return {
+    date: formatDateKey(dateStr),
+    workingDays: days,
+    totalSellAmount: totalDistVf,
+    vfDailyFlow,
+    totalInstaAmount: totalInstaFlow,
+    instaDailyFlow,
+    totalDailyFlow: vfDailyFlow + instaDailyFlow,
+    totalBuyEgp,
+    totalBuyUsdt,
+    totalSellEgp,
+    totalSellUsdt,
+    totalDistVf,
+    totalDistVfDebt,
+    outstandingRetailerVfDebt,
+    effectiveVfDist,
+    avgBuy,
+    avgSell,
+    spread,
+    rawSpread,
+    retailerDiscountAmount: totalVfDiscount,
+    retailerDiscountPer1000,
+    buyEntriesCount,
+    sellEntriesCount,
+    vfProfit,
+    instaProfit: totalInstaProfit,
+    internalVfFees: totalInternalVfFees,
+    externalVfFees: totalExternalVfFees,
+    instaFees: totalInstaFees,
+    expenses: totalExpenses,
+    totalFees,
+    systemInstaProfitPer1000,
+    businessGrossProfit,
+    businessNetProfit
+  };
+}
+
+function _buildSystemProfitSnapshotForDate(dbData, dateStr) {
+  const performance = _getPerformanceForDateRange(dbData, dateStr, 1);
+  const reconciliation = _computeReconciledProfit(dbData);
+
+  return {
+    ...performance,
+    calculationVersion: PROFIT_CALCULATION_VERSION,
+    openingCapital: asNumber(dbData.openingCapital),
+    effectiveStartingCapital: reconciliation.effectiveStartingCapital,
+    currentTotalAssets: reconciliation.currentTotalAssets,
+    reconciledProfit: reconciliation.reconciledProfit,
+    calculatedAt: Date.now()
+  };
+}
+
+async function _ensureSystemProfitSnapshots(db, dateStr, workingDays, dbData) {
+  const dates = getDateKeysForRange(dateStr, workingDays);
+  const updates = {};
+  const snapshots = {};
+
+  dates.forEach((dayKey) => {
+    const snapshot = _buildSystemProfitSnapshotForDate(dbData, dayKey);
+    snapshots[dayKey] = snapshot;
+    updates[`system_profit_snapshots/${dayKey}`] = snapshot;
+  });
+
+  if (Object.keys(updates).length > 0) {
+    await db.ref().update(updates);
+  }
+
+  return snapshots;
+}
+
+function _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData) {
+  const reconciliation = _computeReconciledProfit(dbData);
+  let operationalProfit = 0;
+  let positiveOperationalProfit = 0;
+  const distributableProfitByDate = {};
+
+  dateKeys.forEach((dayKey) => {
+    const rawNet = asNumber(systemSnapshots[dayKey]?.businessNetProfit);
+    operationalProfit += rawNet;
+    positiveOperationalProfit += Math.max(0, rawNet);
+  });
+
+  const cappedProfit = Math.min(
+    Math.max(0, operationalProfit),
+    Math.max(0, reconciliation.reconciledProfit)
+  );
+  const allocationRatio = positiveOperationalProfit > 0 ? (cappedProfit / positiveOperationalProfit) : 0;
+
+  dateKeys.forEach((dayKey) => {
+    const rawNet = asNumber(systemSnapshots[dayKey]?.businessNetProfit);
+    distributableProfitByDate[dayKey] = Math.max(0, rawNet) * allocationRatio;
+  });
+
+  return {
+    ...reconciliation,
+    operationalProfit,
+    positiveOperationalProfit,
+    finalDistributableProfit: cappedProfit,
+    allocationRatio,
+    distributableProfitByDate
+  };
+}
+
+function _buildInvestorSnapshotForDate(investor, systemSnapshot, distributableNetProfit, existingSnapshot = null) {
+  // Paid snapshots are frozen — recalculating would change the recorded profit amount
+  if (existingSnapshot?.isPaid === true &&
+      existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION) {
+    return existingSnapshot;
+  }
+
+  const openingCapital = asNumber(investor.halfCumulativeCapital) > 0
+    ? asNumber(investor.halfCumulativeCapital) * 2
+    : asNumber(systemSnapshot.openingCapital);
+  const vfDailyFlow = asNumber(systemSnapshot.vfDailyFlow);
+  const instaDailyFlow = asNumber(systemSnapshot.instaDailyFlow);
+  const totalDailyFlow = asNumber(systemSnapshot.totalDailyFlow);
+  const hurdle = asNumber(investor.halfCumulativeCapital) > 0
+    ? asNumber(investor.halfCumulativeCapital)
+    : openingCapital / 2;
+  const investorCap = asNumber(investor.investedAmount) / 2;
+  const excessFlow = Math.max(0, totalDailyFlow - hurdle);
+  const eligibleTotal = Math.min(excessFlow, investorCap);
+  const shareFactor = asNumber(investor.profitSharePercent) / 100;
+  const flowRatio = totalDailyFlow > 0 ? (eligibleTotal / totalDailyFlow) : 0;
+  const investorProfit = Math.max(0, asNumber(distributableNetProfit) * flowRatio * shareFactor);
+
+  const vfFlowRatio = totalDailyFlow > 0 ? (vfDailyFlow / totalDailyFlow) : 0;
+  const instaFlowRatio = totalDailyFlow > 0 ? (instaDailyFlow / totalDailyFlow) : 0;
+  const vfShare = eligibleTotal * vfFlowRatio;
+  const instaShare = eligibleTotal * instaFlowRatio;
+  const vfProfit = investorProfit * vfFlowRatio;
+  const instaProfit = investorProfit * instaFlowRatio;
+
+  return {
+    calculationVersion: PROFIT_CALCULATION_VERSION,
+    date: systemSnapshot.date,
+    workingDays: 1,
+    openingCapital,
+    totalLoansOutstanding: 0,
+    currentTotalCapital: 0,
+    capitalShortfall: Math.max(0, hurdle - totalDailyFlow),
+    totalVfCollected: 0,
+    totalInstaCollected: 0,
+    currentBankBalance: 0,
+    usdExchangeEGP: 0,
+    retailerVfDebt: 0,
+    collectorCash: 0,
+    retailerInstaDebt: 0,
+    vfRawFlow: asNumber(systemSnapshot.totalSellAmount),
+    instaRawFlow: asNumber(systemSnapshot.totalInstaAmount),
+    vfDailyFlow: asNumber(systemSnapshot.vfDailyFlow),
+    instaDailyFlow: asNumber(systemSnapshot.instaDailyFlow),
+    totalDailyFlow,
+    halfCumulativeCapital: asNumber(investor.halfCumulativeCapital),
+    eligibleTotal,
+    vfShare,
+    instaShare,
+    avgBuyPrice: asNumber(systemSnapshot.avgBuy),
+    avgSellPrice: asNumber(systemSnapshot.avgSell),
+    buyEntriesCount: asNumber(systemSnapshot.buyEntriesCount),
+    sellEntriesCount: asNumber(systemSnapshot.sellEntriesCount),
+    vfProfitPer1000: asNumber(systemSnapshot.spread),
+    instaProfitPer1000: asNumber(systemSnapshot.systemInstaProfitPer1000),
+    totalInstaPayProfit: asNumber(systemSnapshot.instaProfit),
+    totalInstaPayVolume: asNumber(systemSnapshot.totalInstaAmount),
+    vfProfit,
+    instaProfit,
+    totalGrossProfit: asNumber(distributableNetProfit),
+    investorProfit,
+    isPaid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION && existingSnapshot?.isPaid === true,
+    paidAt: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidAt ?? null) : null,
+    paidByUid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidByUid ?? null) : null,
+    calculatedAt: Date.now()
+  };
+}
+
+function _buildPartnerSnapshotForDate(partner, systemSnapshot, distributableNetProfit, totalInvestorProfitDeducted, existingSnapshot = null) {
+  // Paid snapshots are frozen — recalculating would change the recorded profit amount
+  if (existingSnapshot?.isPaid === true &&
+      existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION) {
+    return existingSnapshot;
+  }
+
+  const businessNetProfitBeforeInvestors = asNumber(distributableNetProfit);
+  const businessNetProfitAfterInvestors = Math.max(0, businessNetProfitBeforeInvestors - asNumber(totalInvestorProfitDeducted));
+  const partnerProfit = businessNetProfitAfterInvestors * (asNumber(partner.sharePercent) / 100);
+
+  return {
+    calculationVersion: PROFIT_CALCULATION_VERSION,
+    date: systemSnapshot.date,
+    workingDays: 1,
+    vfDailyFlow: asNumber(systemSnapshot.vfDailyFlow),
+    instaDailyFlow: asNumber(systemSnapshot.instaDailyFlow),
+    totalDistVf: asNumber(systemSnapshot.totalDistVf),
+    outstandingRetailerVfDebt: asNumber(systemSnapshot.outstandingRetailerVfDebt),
+    effectiveVfDist: asNumber(systemSnapshot.effectiveVfDist),
+    systemAvgBuyPrice: asNumber(systemSnapshot.avgBuy),
+    systemAvgSellPrice: asNumber(systemSnapshot.avgSell),
+    systemVfProfitPer1000: asNumber(systemSnapshot.spread),
+    systemInstaProfitPer1000: asNumber(systemSnapshot.systemInstaProfitPer1000),
+    businessGrossProfit: asNumber(systemSnapshot.businessGrossProfit),
+    totalFees: asNumber(systemSnapshot.totalFees),
+    internalVfFees: asNumber(systemSnapshot.internalVfFees),
+    externalVfFees: asNumber(systemSnapshot.externalVfFees),
+    instaFees: asNumber(systemSnapshot.instaFees),
+    totalInvestorProfitDeducted: asNumber(totalInvestorProfitDeducted),
+    businessNetProfitBeforeInvestors,
+    businessNetProfitAfterInvestors,
+    businessNetProfit: businessNetProfitAfterInvestors,
+    sharePercent: asNumber(partner.sharePercent),
+    partnerProfit,
+    isPaid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION && existingSnapshot?.isPaid === true,
+    paidAt: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidAt ?? null) : null,
+    paidByUid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidByUid ?? null) : null,
+    paidFromType: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidFromType ?? null) : null,
+    paidFromId: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidFromId ?? null) : null,
+    calculatedAt: Date.now()
+  };
+}
+
+exports.calculateSystemProfitSnapshot = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { date, workingDays } = request.data || {};
+  const numWorkingDays = Math.max(1, asNumber(workingDays) || 1);
+  if (!date) throw new HttpsError('invalid-argument', 'date is required.');
+
+  const db = admin.database();
+  const results = await Promise.all([
+    db.ref('system_config/openingCapital').once('value'),
+    db.ref('financial_ledger').once('value'),
+    db.ref('bank_accounts').once('value'),
+    db.ref('usd_exchange').once('value'),
+    db.ref('retailers').once('value'),
+    db.ref('collectors').once('value'),
+    db.ref('loans').orderByChild('status').equalTo('active').once('value'),
+    db.ref('system_config/module_start_dates').once('value'),
+    db.ref('investors').orderByChild('status').equalTo('active').once('value'),
+    db.ref('mobile_numbers').once('value')
+  ]);
+
+  const dbData = {
+    openingCapital: asNumber(results[0].val()),
+    ledgerSnap: results[1],
+    banksSnap: results[2],
+    usdSnap: results[3],
+    retailersSnap: results[4],
+    collectorsSnap: results[5],
+    loansSnap: results[6],
+    moduleDatesSnap: results[7],
+    investorsSnap: results[8],
+    mobileNumbersSnap: results[9]
+  };
+
+  const snapshots = await _ensureSystemProfitSnapshots(db, date, numWorkingDays, dbData);
+  const orderedDates = getDateKeysForRange(date, numWorkingDays);
+  const distributionContext = _buildProfitDistributionContext(orderedDates, snapshots, dbData);
+
+  let totalBusinessGrossProfit = 0;
+  let totalBusinessNetProfit = 0;
+  let totalDistributableProfit = 0;
+  let totalVfDailyFlow = 0;
+  let totalInstaDailyFlow = 0;
+  let totalDailyFlow = 0;
+  let totalVfProfit = 0;
+  let totalInstaProfit = 0;
+  let totalInternalVfFees = 0;
+  let totalInstaFees = 0;
+  let totalExpenses = 0;
+  let totalAvgBuy = 0;
+  let totalAvgSell = 0;
+  let totalSpread = 0;
+
+  orderedDates.forEach((dayKey) => {
+    const snapshot = snapshots[dayKey];
+    totalBusinessGrossProfit += asNumber(snapshot.businessGrossProfit);
+    totalBusinessNetProfit += asNumber(snapshot.businessNetProfit);
+    totalDistributableProfit += asNumber(distributionContext.distributableProfitByDate[dayKey]);
+    totalVfDailyFlow += asNumber(snapshot.vfDailyFlow);
+    totalInstaDailyFlow += asNumber(snapshot.instaDailyFlow);
+    totalDailyFlow += asNumber(snapshot.totalDailyFlow);
+    totalVfProfit += asNumber(snapshot.vfProfit);
+    totalInstaProfit += asNumber(snapshot.instaProfit);
+    totalInternalVfFees += asNumber(snapshot.internalVfFees);
+    totalInstaFees += asNumber(snapshot.instaFees);
+    totalExpenses += asNumber(snapshot.expenses);
+    totalAvgBuy += asNumber(snapshot.avgBuy);
+    totalAvgSell += asNumber(snapshot.avgSell);
+    totalSpread += asNumber(snapshot.spread);
+  });
+
+  return {
+    success: true,
+    date: formatDateKey(date),
+    workingDays: orderedDates.length,
+    dailySnapshots: snapshots,
+    businessGrossProfit: totalBusinessGrossProfit,
+    businessNetProfit: totalBusinessNetProfit,
+    finalDistributableProfit: totalDistributableProfit,
+    operationalProfit: distributionContext.operationalProfit,
+    reconciledProfit: distributionContext.reconciledProfit,
+    effectiveStartingCapital: distributionContext.effectiveStartingCapital,
+    currentTotalAssets: distributionContext.currentTotalAssets,
+    vfDailyFlow: totalVfDailyFlow / orderedDates.length,
+    instaDailyFlow: totalInstaDailyFlow / orderedDates.length,
+    totalDailyFlow: totalDailyFlow / orderedDates.length,
+    vfProfit: totalVfProfit,
+    instaProfit: totalInstaProfit,
+    internalVfFees: totalInternalVfFees,
+    instaFees: totalInstaFees,
+    expenses: totalExpenses,
+    avgBuy: totalAvgBuy / orderedDates.length,
+    avgSell: totalAvgSell / orderedDates.length,
+    systemVfProfitPer1000: totalSpread / orderedDates.length
+  };
+});
+
+exports.calculateInvestorDailyProfit = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { investorId, date, workingDays } = request.data;
+  const numWorkingDays = asNumber(workingDays);
+  if (numWorkingDays <= 0) throw new HttpsError('invalid-argument', 'workingDays must be > 0.');
+
+  const db = admin.database();
+  const investorSnap = await db.ref(`investors/${investorId}`).once('value');
+  if (!investorSnap.exists()) throw new HttpsError('not-found', 'Investor not found.');
+  const investor = investorSnap.val();
+  if (investor.status !== 'active') throw new HttpsError('failed-precondition', 'Investor is not active.');
+
+  const results = await Promise.all([
+    db.ref('system_config/openingCapital').once('value'),
+    db.ref('financial_ledger').once('value'),
+    db.ref('bank_accounts').once('value'),
+    db.ref('usd_exchange').once('value'),
+    db.ref('retailers').once('value'),
+    db.ref('collectors').once('value'),
+    db.ref('loans').orderByChild('status').equalTo('active').once('value'),
+    db.ref('system_config/module_start_dates').once('value'),
+    db.ref('investors').orderByChild('status').equalTo('active').once('value'),
+    db.ref('mobile_numbers').once('value')
+  ]);
+
+  const dbData = {
+    openingCapital: asNumber(results[0].val()),
+    ledgerSnap: results[1],
+    banksSnap: results[2],
+    usdSnap: results[3],
+    retailersSnap: results[4],
+    collectorsSnap: results[5],
+    loansSnap: results[6],
+    moduleDatesSnap: results[7],
+    investorsSnap: results[8],
+    mobileNumbersSnap: results[9]
+  };
+
+  const systemSnapshots = await _ensureSystemProfitSnapshots(db, date, numWorkingDays, dbData);
+  const dateKeys = getDateKeysForRange(date, numWorkingDays)
+    .filter((dayKey) => isInvestorEligibleForDate(investor, dayKey));
+  const updates = {};
+
+  if (dateKeys.length === 0) {
+    throw new HttpsError(
+      'failed-precondition',
+      `Selected range is before investor start date ${investor.investmentDate}.`
+    );
+  }
+  const distributionContext = _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData);
+
+  let aggregateInvestorProfit = 0;
+  let aggregateEligibleTotal = 0;
+  let aggregateVfShare = 0;
+  let aggregateInstaShare = 0;
+  let aggregateVfProfit = 0;
+  let aggregateInstaProfit = 0;
+  let aggregateGrossProfit = 0;
+  let aggregateVfDailyFlow = 0;
+  let aggregateInstaDailyFlow = 0;
+  let aggregateTotalDailyFlow = 0;
+  let aggregateVfRawFlow = 0;
+  let aggregateInstaRawFlow = 0;
+  let aggregateInstaPayProfit = 0;
+  let aggregateInstaPayVolume = 0;
+  let aggregateCapitalShortfall = 0;
+  let aggregateBuyEntries = 0;
+  let aggregateSellEntries = 0;
+  let aggregateAvgBuyWeighted = 0;
+  let aggregateAvgSellWeighted = 0;
+  let aggregateVfProfitPer1000Weighted = 0;
+  let aggregateInstaProfitPer1000Weighted = 0;
+  let firstDailySnapshot = null;
+
+  for (const dayKey of dateKeys) {
+    const systemSnapshot = systemSnapshots[dayKey];
+    const existingSnap = await db.ref(`investor_profit_snapshots/${investorId}/${dayKey}`).once('value');
+    const dailyInvestorSnapshot = _buildInvestorSnapshotForDate(
+      investor,
+      systemSnapshot,
+      distributionContext.distributableProfitByDate[dayKey] || 0,
+      existingSnap.exists() ? existingSnap.val() : null
+    );
+
+    updates[`investor_profit_snapshots/${investorId}/${dayKey}`] = dailyInvestorSnapshot;
+
+    if (!firstDailySnapshot) firstDailySnapshot = dailyInvestorSnapshot;
+
+    aggregateInvestorProfit += asNumber(dailyInvestorSnapshot.investorProfit);
+    aggregateEligibleTotal += asNumber(dailyInvestorSnapshot.eligibleTotal);
+    aggregateVfShare += asNumber(dailyInvestorSnapshot.vfShare);
+    aggregateInstaShare += asNumber(dailyInvestorSnapshot.instaShare);
+    aggregateVfProfit += asNumber(dailyInvestorSnapshot.vfProfit);
+    aggregateInstaProfit += asNumber(dailyInvestorSnapshot.instaProfit);
+    aggregateGrossProfit += asNumber(dailyInvestorSnapshot.totalGrossProfit);
+    aggregateVfDailyFlow += asNumber(dailyInvestorSnapshot.vfDailyFlow);
+    aggregateInstaDailyFlow += asNumber(dailyInvestorSnapshot.instaDailyFlow);
+    aggregateTotalDailyFlow += asNumber(dailyInvestorSnapshot.totalDailyFlow);
+    aggregateVfRawFlow += asNumber(dailyInvestorSnapshot.vfRawFlow);
+    aggregateInstaRawFlow += asNumber(dailyInvestorSnapshot.instaRawFlow);
+    aggregateInstaPayProfit += asNumber(dailyInvestorSnapshot.totalInstaPayProfit);
+    aggregateInstaPayVolume += asNumber(dailyInvestorSnapshot.totalInstaPayVolume);
+    aggregateCapitalShortfall += asNumber(dailyInvestorSnapshot.capitalShortfall);
+    aggregateBuyEntries += asNumber(dailyInvestorSnapshot.buyEntriesCount);
+    aggregateSellEntries += asNumber(dailyInvestorSnapshot.sellEntriesCount);
+    aggregateAvgBuyWeighted += asNumber(dailyInvestorSnapshot.avgBuyPrice);
+    aggregateAvgSellWeighted += asNumber(dailyInvestorSnapshot.avgSellPrice);
+    aggregateVfProfitPer1000Weighted += asNumber(dailyInvestorSnapshot.vfProfitPer1000);
+    aggregateInstaProfitPer1000Weighted += asNumber(dailyInvestorSnapshot.instaProfitPer1000);
+  }
+
+  await db.ref().update(updates);
+
+  const divisor = Math.max(1, dateKeys.length);
+  return {
+    ...(firstDailySnapshot || {}),
+    date: formatDateKey(date),
+    workingDays: divisor,
+    vfRawFlow: aggregateVfRawFlow,
+    instaRawFlow: aggregateInstaRawFlow,
+    vfDailyFlow: aggregateVfDailyFlow / divisor,
+    instaDailyFlow: aggregateInstaDailyFlow / divisor,
+    totalDailyFlow: aggregateTotalDailyFlow / divisor,
+    capitalShortfall: aggregateCapitalShortfall / divisor,
+    eligibleTotal: aggregateEligibleTotal,
+    vfShare: aggregateVfShare,
+    instaShare: aggregateInstaShare,
+    avgBuyPrice: aggregateAvgBuyWeighted / divisor,
+    avgSellPrice: aggregateAvgSellWeighted / divisor,
+    buyEntriesCount: aggregateBuyEntries,
+    sellEntriesCount: aggregateSellEntries,
+    vfProfitPer1000: aggregateVfProfitPer1000Weighted / divisor,
+    instaProfitPer1000: aggregateInstaProfitPer1000Weighted / divisor,
+    totalInstaPayProfit: aggregateInstaPayProfit,
+    totalInstaPayVolume: aggregateInstaPayVolume,
+    vfProfit: aggregateVfProfit,
+    instaProfit: aggregateInstaProfit,
+    totalGrossProfit: aggregateGrossProfit,
+    investorProfit: aggregateInvestorProfit,
+    operationalProfit: distributionContext.operationalProfit,
+    reconciledProfit: distributionContext.reconciledProfit,
+    finalDistributableProfit: distributionContext.finalDistributableProfit,
+    calculatedAt: Date.now()
+  };
+});
+
+exports.payInvestorProfit = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Only admins can pay profit.');
+
+  const { investorId, dates, bankAccountId, createdByUid } = request.data;
+  if (!investorId || !dates || !Array.isArray(dates) || dates.length === 0 || !bankAccountId) {
+    throw new HttpsError('invalid-argument', 'Invalid pay profit request.');
+  }
+
+  const db = admin.database();
+
+  // Read all investor snapshots in one fetch rather than one per date
+  const allInvSnapsSnap = await db.ref(`investor_profit_snapshots/${investorId}`).once('value');
+  const allInvSnaps = allInvSnapsSnap.exists() ? allInvSnapsSnap.val() : {};
+
+  let totalPayout = 0;
+  const snapshotsToUpdate = [];
+
+  for (const date of dates) {
+    const snap = allInvSnaps[date];
+    if (snap && !snap.isPaid) {
+      totalPayout += asNumber(snap.investorProfit);
+      snapshotsToUpdate.push(date);
+    }
+  }
+
+  if (snapshotsToUpdate.length === 0) {
+    throw new HttpsError('failed-precondition', 'No unpaid snapshots found for the given dates.');
+  }
+
+  const bankRef = db.ref(`bank_accounts/${bankAccountId}`);
+  const bankSnap = await bankRef.once('value');
+  if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
+  const bankName = bankSnap.val().bankName || 'Bank Account';
+
+  const balanceResult = await bankRef.child('balance').transaction((current) => {
+    if (current === null) return current;
+    const balance = asNumber(current);
+    if (balance < totalPayout) return; 
+    return balance - totalPayout;
+  });
+
+  if (!balanceResult.committed) {
+    throw new HttpsError('failed-precondition', 'Insufficient bank balance.');
+  }
+
+  const investorSnap = await db.ref(`investors/${investorId}`).once('value');
+  const investorName = investorSnap.exists() ? investorSnap.val().name : 'Investor';
+
+  const nowTs = Date.now();
+  const txId = uuidv4();
+  const updates = {};
+  
+  for (const date of snapshotsToUpdate) {
+    updates[`investor_profit_snapshots/${investorId}/${date}/isPaid`] = true;
+    updates[`investor_profit_snapshots/${investorId}/${date}/paidAt`] = nowTs;
+    updates[`investor_profit_snapshots/${investorId}/${date}/paidByUid`] = createdByUid || uid;
+  }
+
+  updates[`investors/${investorId}/totalProfitPaid`] = admin.database.ServerValue.increment(totalPayout);
+  
+  updates[`financial_ledger/${txId}`] = {
+    id: txId,
+    type: 'INVESTOR_PROFIT_PAID',
+    amount: totalPayout,
+    fromId: bankAccountId,
+    fromLabel: bankName,
+    toLabel: investorName,
+    notes: `Profit for dates: ${dates.join(', ')}`,
+    createdByUid: createdByUid || uid,
+    timestamp: nowTs,
+  };
+
+  await db.ref().update(updates);
+  return { success: true, totalPayout, datesCount: snapshotsToUpdate.length };
+});
+
+exports.withdrawInvestorCapital = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Only admins can withdraw capital.');
+
+  const { investorId, amount, bankAccountId, createdByUid, notes } = request.data;
+  const numAmount = asNumber(amount);
+  if (!investorId || numAmount <= 0 || !bankAccountId) {
+    throw new HttpsError('invalid-argument', 'Invalid withdrawal request.');
+  }
+
+  const db = admin.database();
+  const investorSnap = await db.ref(`investors/${investorId}`).once('value');
+  if (!investorSnap.exists()) throw new HttpsError('not-found', 'Investor not found.');
+  const investor = investorSnap.val();
+  
+  if (numAmount > asNumber(investor.investedAmount)) {
+    throw new HttpsError('invalid-argument', 'Withdrawal amount exceeds invested amount.');
+  }
+
+  const bankRef = db.ref(`bank_accounts/${bankAccountId}`);
+  const bankSnap = await bankRef.once('value');
+  if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
+  const bankName = bankSnap.val().bankName || 'Bank Account';
+
+  const balanceResult = await bankRef.child('balance').transaction((current) => {
+    if (current === null) return current;
+    const balance = asNumber(current);
+    if (balance < numAmount) return; 
+    return balance - numAmount;
+  });
+
+  if (!balanceResult.committed) {
+    throw new HttpsError('failed-precondition', 'Insufficient bank balance for withdrawal.');
+  }
+
+  const newInvestedAmount = asNumber(investor.investedAmount) - numAmount;
+  const newHalfInvestedAmount = newInvestedAmount / 2;
+  const newStatus = newInvestedAmount <= 0 ? 'withdrawn' : 'active';
+
+  const nowTs = Date.now();
+  const txId = uuidv4();
+  const updates = {};
+  
+  updates[`investors/${investorId}/investedAmount`] = newInvestedAmount;
+  updates[`investors/${investorId}/halfInvestedAmount`] = newHalfInvestedAmount;
+  updates[`investors/${investorId}/status`] = newStatus;
+
+  updates[`financial_ledger/${txId}`] = {
+    id: txId,
+    type: 'INVESTOR_CAPITAL_OUT',
+    amount: numAmount,
+    fromId: bankAccountId,
+    fromLabel: bankName,
+    toLabel: investor.name || 'Investor',
+    notes: notes || 'Capital Withdrawal',
+    createdByUid: createdByUid || uid,
+    timestamp: nowTs,
+  };
+
+  await db.ref().update(updates);
+  return { success: true, newInvestedAmount, newStatus };
+});
+
+exports.calculatePartnerDailyProfit = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  await requireFinanceRole(uid);
+
+  const { date, workingDays } = request.data;
+  const numWorkingDays = asNumber(workingDays);
+  if (numWorkingDays <= 0) throw new HttpsError('invalid-argument', 'workingDays must be > 0.');
+
+  const db = admin.database();
+
+  const [
+    configSnap,
+    partnersSnap,
+    investorsSnap,
+    ledgerSnap,
+    banksSnap,
+    usdSnap,
+    retailersSnap,
+    collectorsSnap,
+    loansSnap,
+    moduleDatesSnap,
+    mobileNumbersSnap
+  ] = await Promise.all([
+    db.ref('system_config/openingCapital').once('value'),
+    db.ref('system_config/partners').once('value'),
+    db.ref('investors').orderByChild('status').equalTo('active').once('value'),
+    db.ref('financial_ledger').once('value'),
+    db.ref('bank_accounts').once('value'),
+    db.ref('usd_exchange').once('value'),
+    db.ref('retailers').once('value'),
+    db.ref('collectors').once('value'),
+    db.ref('loans').orderByChild('status').equalTo('active').once('value'),
+    db.ref('system_config/module_start_dates').once('value'),
+    db.ref('mobile_numbers').once('value')
+  ]);
+
+  if (!configSnap.exists()) {
+    throw new HttpsError('failed-precondition', 'system_config/openingCapital is not set.');
+  }
+  const openingCapital = asNumber(configSnap.val());
+
+  const dbData = { openingCapital, ledgerSnap, banksSnap, usdSnap, retailersSnap, collectorsSnap, loansSnap, moduleDatesSnap, investorsSnap, mobileNumbersSnap };
+  const dateKeys = getDateKeysForRange(date, numWorkingDays);
+
+  // Build ALL system snapshots in memory first — no intermediate DB writes
+  const systemSnapshots = {};
+  const allUpdates = {};
+  dateKeys.forEach((dayKey) => {
+    systemSnapshots[dayKey] = _buildSystemProfitSnapshotForDate(dbData, dayKey);
+    allUpdates[`system_profit_snapshots/${dayKey}`] = systemSnapshots[dayKey];
+  });
+
+  // Distribution context uses the freshly-built in-memory snapshots
+  const distributionContext = _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData);
+
+  // Read existing snapshots once to check which are already paid (must be preserved)
+  const [existingInvestorSnapshotsSnap, existingPartnerSnapshotsSnap] = await Promise.all([
+    db.ref('investor_profit_snapshots').once('value'),
+    db.ref('partner_profit_snapshots').once('value'),
+  ]);
+  const existingInvestorSnapshots = existingInvestorSnapshotsSnap.exists() ? existingInvestorSnapshotsSnap.val() : {};
+  const existingPartnerSnapshots = existingPartnerSnapshotsSnap.exists() ? existingPartnerSnapshotsSnap.val() : {};
+
+  // Build investor snapshots (paid ones are returned unchanged by _buildInvestorSnapshotForDate)
+  const investorProfitByDate = {};
+  dateKeys.forEach(k => { investorProfitByDate[k] = 0; });
+
+  if (investorsSnap.exists()) {
+    investorsSnap.forEach((child) => {
+      const investorId = child.key;
+      const investor = child.val();
+      dateKeys.forEach((dayKey) => {
+        if (!isInvestorEligibleForDate(investor, dayKey)) return;
+        const existingInvSnap = existingInvestorSnapshots[investorId]?.[dayKey] || null;
+        const rebuiltSnapshot = _buildInvestorSnapshotForDate(
+          investor,
+          systemSnapshots[dayKey],
+          distributionContext.distributableProfitByDate[dayKey] || 0,
+          existingInvSnap
+        );
+        allUpdates[`investor_profit_snapshots/${investorId}/${dayKey}`] = rebuiltSnapshot;
+        investorProfitByDate[dayKey] += asNumber(rebuiltSnapshot.investorProfit);
+      });
+    });
+  }
+
+  let totalInvestorProfitDeducted = 0;
+  dateKeys.forEach(k => { totalInvestorProfitDeducted += asNumber(investorProfitByDate[k]); });
+
+  let overallBusinessNetProfitBeforeInvestors = 0;
+  dateKeys.forEach((dayKey) => {
+    overallBusinessNetProfitBeforeInvestors += asNumber(distributionContext.distributableProfitByDate[dayKey]);
+  });
+  const overallBusinessNetProfitAfterInvestors = Math.max(
+    0,
+    overallBusinessNetProfitBeforeInvestors - totalInvestorProfitDeducted
+  );
+
+  const partnersBreakdown = {};
+
+  if (partnersSnap.exists()) {
+    partnersSnap.forEach((child) => {
+      const partnerId = child.key;
+      const p = child.val();
+      if (p.status !== 'active' && p.status !== undefined) return;
+
+      let businessGrossProfit = 0;
+      let businessNetProfitBeforeInvestors = 0;
+      let totalVfFlowAgg = 0;
+      let totalInstaFlowAgg = 0;
+      let totalAvgBuy = 0;
+      let totalAvgSell = 0;
+      let totalInstaProfitPer1000 = 0;
+      let totalVfProfitPer1000 = 0;
+      let finalNetAfterInvestors = 0;
+      let partnerProfitTotal = 0;
+
+      dateKeys.forEach((dayKey) => {
+        const daySnapshot = systemSnapshots[dayKey];
+        const dayDistributableProfit = asNumber(distributionContext.distributableProfitByDate[dayKey] || 0);
+        const dailyInvestorDeduction = asNumber(investorProfitByDate[dayKey] || 0);
+        const existingPartnerSnapshot = existingPartnerSnapshots[partnerId]?.[dayKey] || null;
+        const partnerDaySnapshot = _buildPartnerSnapshotForDate(
+          p,
+          daySnapshot,
+          dayDistributableProfit,
+          dailyInvestorDeduction,
+          existingPartnerSnapshot
+        );
+
+        allUpdates[`partner_profit_snapshots/${partnerId}/${dayKey}`] = partnerDaySnapshot;
+        partnerProfitTotal += asNumber(partnerDaySnapshot.partnerProfit);
+
+        businessGrossProfit += asNumber(daySnapshot.businessGrossProfit);
+        businessNetProfitBeforeInvestors += dayDistributableProfit;
+        totalVfFlowAgg += asNumber(daySnapshot.vfDailyFlow);
+        totalInstaFlowAgg += asNumber(daySnapshot.instaDailyFlow);
+        totalAvgBuy += asNumber(daySnapshot.avgBuy);
+        totalAvgSell += asNumber(daySnapshot.avgSell);
+        totalInstaProfitPer1000 += asNumber(daySnapshot.systemInstaProfitPer1000);
+        totalVfProfitPer1000 += asNumber(daySnapshot.spread);
+        finalNetAfterInvestors += asNumber(partnerDaySnapshot.businessNetProfitAfterInvestors);
+      });
+
+      partnersBreakdown[partnerId] = {
+        calculationVersion: PROFIT_CALCULATION_VERSION,
+        date: formatDateKey(date),
+        workingDays: numWorkingDays,
+        systemAvgBuyPrice: totalAvgBuy / Math.max(1, numWorkingDays),
+        systemAvgSellPrice: totalAvgSell / Math.max(1, numWorkingDays),
+        systemInstaProfitPer1000: totalInstaProfitPer1000 / Math.max(1, numWorkingDays),
+        businessGrossProfit,
+        totalInvestorProfitDeducted,
+        businessNetProfit: finalNetAfterInvestors,
+        businessNetProfitBeforeInvestors,
+        businessNetProfitAfterInvestors: finalNetAfterInvestors,
+        sharePercent: asNumber(p.sharePercent),
+        partnerProfit: partnerProfitTotal,
+        vfDailyFlow: totalVfFlowAgg / Math.max(1, numWorkingDays),
+        instaDailyFlow: totalInstaFlowAgg / Math.max(1, numWorkingDays),
+        systemVfProfitPer1000: totalVfProfitPer1000 / Math.max(1, numWorkingDays),
+        isPaid: false,
+        calculatedAt: Date.now()
+      };
+    });
+  }
+
+  // Single atomic write — all system/investor/partner snapshots go out together
+  if (Object.keys(allUpdates).length > 0) {
+    await db.ref().update(allUpdates);
+  }
+
+  return {
+    success: true,
+    partnersBreakdown,
+    businessNetProfitBeforeInvestors: overallBusinessNetProfitBeforeInvestors,
+    businessNetProfitAfterInvestors: overallBusinessNetProfitAfterInvestors,
+    operationalProfit: distributionContext.operationalProfit,
+    reconciledProfit: distributionContext.reconciledProfit,
+    finalDistributableProfit: distributionContext.finalDistributableProfit,
+    totalInvestorProfitDeducted,
+    workingDays: numWorkingDays
+  };
+});
+
+exports.payPartnerProfit = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Admin access required.');
+
+  const { partnerId, dates, paymentSourceType, paymentSourceId, createdByUid } = request.data;
+  if (!partnerId || !dates || !Array.isArray(dates) || dates.length === 0 || !paymentSourceType || !paymentSourceId) {
+    throw new HttpsError('invalid-argument', 'Missing payment parameters.');
+  }
+
+  const db = admin.database();
+  const partnerRef = db.ref(`system_config/partners/${partnerId}`);
+  const [partnerSnap, snapshotsSnap] = await Promise.all([
+    partnerRef.once('value'),
+    db.ref(`partner_profit_snapshots/${partnerId}`).once('value'),
+  ]);
+
+  if (!partnerSnap.exists()) throw new HttpsError('not-found', 'Partner not found.');
+  const partner = partnerSnap.val();
+
+  let totalPayout = 0;
+  const unpaidSnapsToUpdate = [];
+
+  const snaps = snapshotsSnap.val() || {};
+  for (const date of dates) {
+    const snap = snaps[date];
+    if (snap && !snap.isPaid) {
+      totalPayout += asNumber(snap.partnerProfit);
+      unpaidSnapsToUpdate.push(date);
+    }
+  }
+
+  if (unpaidSnapsToUpdate.length === 0) {
+    throw new HttpsError('failed-precondition', 'No unpaid snapshots found for selected dates.');
+  }
+
+  const nowTs = Date.now();
+  const txId = uuidv4();
+  const updates = {};
+
+  if (paymentSourceType === 'bank') {
+    const sourceRef = db.ref(`bank_accounts/${paymentSourceId}`);
+    const sourceSnap = await sourceRef.once('value');
+    if (!sourceSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
+    
+    const balanceResult = await sourceRef.child('balance').transaction((current) => {
+      if (current === null) return current;
+      if (asNumber(current) < totalPayout) return undefined;
+      return asNumber(current) - totalPayout;
+    });
+
+    if (!balanceResult.committed) {
+      throw new HttpsError('failed-precondition', 'Bank balance insufficient.');
+    }
+
+    updates[`financial_ledger/${txId}`] = {
       id: txId,
-      type: flowType,
-      amount: numAmount,
-      fromId: sourceId,
-      fromLabel: sourceLabel,
-      notes: notes || (category ? `Category: ${category}` : null),
-      category: category || null,
+      type: 'PARTNER_PROFIT_PAID_BANK',
+      amount: totalPayout,
+      fromId: paymentSourceId,
+      fromLabel: sourceSnap.val().bankName || 'Bank',
+      toLabel: partner.name,
+      notes: `Partner profit paid for ${unpaidSnapsToUpdate.length} days`,
       createdByUid: createdByUid || uid,
       timestamp: nowTs,
-    });
-    return { success: true, txId };
-  } catch (error) {
-    throw new HttpsError('internal', error.message || 'Expense deducted but ledger write failed.');
+    };
+    updates[`bank_accounts/${paymentSourceId}/lastUpdatedAt`] = new Date(nowTs).toISOString();
+  } else if (paymentSourceType === 'vf') {
+    const sourceRef = db.ref(`mobile_numbers/${paymentSourceId}`);
+    const sourceSnap = await sourceRef.once('value');
+    if (!sourceSnap.exists()) throw new HttpsError('not-found', 'VF number not found.');
+    
+    const inTotalUsed = asNumber(sourceSnap.val().inTotalUsed);
+    const outTotalUsed = asNumber(sourceSnap.val().outTotalUsed);
+    if ((inTotalUsed - outTotalUsed) < totalPayout) {
+      throw new HttpsError('failed-precondition', 'VF number balance insufficient.');
+    }
+
+    updates[`mobile_numbers/${paymentSourceId}/outTotalUsed`] = admin.database.ServerValue.increment(totalPayout);
+    updates[`mobile_numbers/${paymentSourceId}/outDailyUsed`] = admin.database.ServerValue.increment(totalPayout);
+    updates[`mobile_numbers/${paymentSourceId}/outMonthlyUsed`] = admin.database.ServerValue.increment(totalPayout);
+    updates[`mobile_numbers/${paymentSourceId}/lastUpdatedAt`] = new Date(nowTs).toISOString();
+
+    updates[`financial_ledger/${txId}`] = {
+      id: txId,
+      type: 'PARTNER_PROFIT_PAID_VF',
+      amount: totalPayout,
+      fromId: paymentSourceId,
+      fromLabel: sourceSnap.val().phoneNumber || 'VF Number',
+      toLabel: partner.name,
+      notes: `Partner profit paid for ${unpaidSnapsToUpdate.length} days`,
+      createdByUid: createdByUid || uid,
+      timestamp: nowTs,
+    };
+  } else {
+    throw new HttpsError('invalid-argument', 'Invalid payment source type.');
   }
+
+  unpaidSnapsToUpdate.forEach(date => {
+    updates[`partner_profit_snapshots/${partnerId}/${date}/isPaid`] = true;
+    updates[`partner_profit_snapshots/${partnerId}/${date}/paidAt`] = nowTs;
+    updates[`partner_profit_snapshots/${partnerId}/${date}/paidByUid`] = createdByUid || uid;
+    updates[`partner_profit_snapshots/${partnerId}/${date}/paidFromType`] = paymentSourceType;
+    updates[`partner_profit_snapshots/${partnerId}/${date}/paidFromId`] = paymentSourceId;
+  });
+
+  updates[`system_config/partners/${partnerId}/totalProfitPaid`] = admin.database.ServerValue.increment(totalPayout);
+
+  await db.ref().update(updates);
+
+  return { success: true, totalPayout, datesCount: unpaidSnapsToUpdate.length };
+});
+
+exports.rebuildProfitSnapshots = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Admin access required.');
+
+  const { startDate, endDate, resetPaidFlags = false } = request.data || {};
+  if (!startDate || !endDate) {
+    throw new HttpsError('invalid-argument', 'startDate and endDate are required.');
+  }
+
+  const db = admin.database();
+  const results = await Promise.all([
+    db.ref('system_config/openingCapital').once('value'),
+    db.ref('system_config/partners').once('value'),
+    db.ref('investors').orderByChild('status').equalTo('active').once('value'),
+    db.ref('financial_ledger').once('value'),
+    db.ref('bank_accounts').once('value'),
+    db.ref('usd_exchange').once('value'),
+    db.ref('retailers').once('value'),
+    db.ref('collectors').once('value'),
+    db.ref('loans').orderByChild('status').equalTo('active').once('value'),
+    db.ref('system_config/module_start_dates').once('value'),
+    db.ref('mobile_numbers').once('value')
+  ]);
+
+  const dbData = {
+    openingCapital: asNumber(results[0].val()),
+    ledgerSnap: results[3],
+    banksSnap: results[4],
+    usdSnap: results[5],
+    retailersSnap: results[6],
+    collectorsSnap: results[7],
+    loansSnap: results[8],
+    moduleDatesSnap: results[9],
+    investorsSnap: results[2],
+    mobileNumbersSnap: results[10]
+  };
+
+  const partnersSnap = results[1];
+  const investorsSnap = results[2];
+  const start = safeDate(startDate, startDate);
+  const end = safeDate(endDate, endDate);
+
+  const normalizedStart = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), start.getUTCDate()));
+  const normalizedEnd = new Date(Date.UTC(end.getUTCFullYear(), end.getUTCMonth(), end.getUTCDate()));
+  if (normalizedStart.getTime() > normalizedEnd.getTime()) {
+    throw new HttpsError('invalid-argument', 'startDate must be <= endDate.');
+  }
+
+  let existingInvestorSnapshots = {};
+  let existingPartnerSnapshots = {};
+  if (!resetPaidFlags) {
+    const [existingInvSnap, existingPartSnap] = await Promise.all([
+      db.ref('investor_profit_snapshots').once('value'),
+      db.ref('partner_profit_snapshots').once('value'),
+    ]);
+    existingInvestorSnapshots = existingInvSnap.exists() ? existingInvSnap.val() : {};
+    existingPartnerSnapshots = existingPartSnap.exists() ? existingPartSnap.val() : {};
+  }
+
+  const updates = {};
+  const rebuiltDates = [];
+  const dateKeys = [];
+
+  for (
+    let cursor = new Date(normalizedStart);
+    cursor.getTime() <= normalizedEnd.getTime();
+    cursor.setUTCDate(cursor.getUTCDate() + 1)
+  ) {
+    dateKeys.push(cursor.toISOString().split('T')[0]);
+  }
+
+  const systemSnapshots = {};
+  dateKeys.forEach((dayKey) => {
+    systemSnapshots[dayKey] = _buildSystemProfitSnapshotForDate(dbData, dayKey);
+    updates[`system_profit_snapshots/${dayKey}`] = systemSnapshots[dayKey];
+  });
+  const distributionContext = _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData);
+
+  for (const dayKey of dateKeys) {
+    const systemSnapshot = systemSnapshots[dayKey];
+    const investorProfitByDate = {};
+    if (investorsSnap.exists()) {
+      investorsSnap.forEach((child) => {
+        const investorId = child.key;
+        const investor = child.val();
+        if (investor.status !== 'active') return;
+        if (!isInvestorEligibleForDate(investor, dayKey)) return;
+
+        const existingInvSnap = resetPaidFlags ? null : (existingInvestorSnapshots[investorId]?.[dayKey] || null);
+        const dailyInvestorSnapshot = _buildInvestorSnapshotForDate(
+          investor,
+          systemSnapshot,
+          distributionContext.distributableProfitByDate[dayKey] || 0,
+          existingInvSnap
+        );
+        investorProfitByDate[dayKey] = (investorProfitByDate[dayKey] || 0) + asNumber(dailyInvestorSnapshot.investorProfit);
+        updates[`investor_profit_snapshots/${investorId}/${dayKey}`] = dailyInvestorSnapshot;
+      });
+    }
+
+    if (partnersSnap.exists()) {
+      partnersSnap.forEach((child) => {
+        const partnerId = child.key;
+        const partner = child.val();
+        if (partner.status !== 'active' && partner.status !== undefined) return;
+
+        const existingPartSnap = resetPaidFlags ? null : (existingPartnerSnapshots[partnerId]?.[dayKey] || null);
+        const partnerSnapshot = _buildPartnerSnapshotForDate(
+          partner,
+          systemSnapshot,
+          distributionContext.distributableProfitByDate[dayKey] || 0,
+          asNumber(investorProfitByDate[dayKey] || 0),
+          existingPartSnap
+        );
+        updates[`partner_profit_snapshots/${partnerId}/${dayKey}`] = partnerSnapshot;
+      });
+    }
+
+    rebuiltDates.push(dayKey);
+  }
+
+  await db.ref().update(updates);
+  return { success: true, rebuiltDates, count: rebuiltDates.length, calculationVersion: PROFIT_CALCULATION_VERSION };
+});
+
+exports.seedPartners = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Admin access required.');
+
+  const db = admin.database();
+  const partnersSnap = await db.ref('system_config/partners').once('value');
+  
+  if (partnersSnap.exists() && Object.keys(partnersSnap.val() || {}).length > 0) {
+    return { alreadySeeded: true };
+  }
+
+  const partners = [
+    { id: uuidv4(), name: 'Mostafa Abbas', sharePercent: 40, status: 'active' },
+    { id: uuidv4(), name: 'Ibrahim', sharePercent: 35, status: 'active' },
+    { id: uuidv4(), name: 'Mostafa Galhom', sharePercent: 25, status: 'active' },
+  ];
+
+  const updates = {};
+  const now = Date.now();
+  partners.forEach(p => {
+    updates[`system_config/partners/${p.id}`] = {
+      ...p,
+      totalProfitPaid: 0,
+      createdAt: now
+    };
+  });
+
+  await db.ref().update(updates);
+  return { success: true, seeded: true };
+});
+
+exports.savePartner = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Admin access required.');
+
+  const { partner } = request.data;
+  if (!partner || !partner.name) throw new HttpsError('invalid-argument', 'Partner name is required.');
+  const newShare = asNumber(partner.sharePercent);
+  if (newShare <= 0 || newShare > 100) throw new HttpsError('invalid-argument', 'Share percent must be between 0 and 100.');
+
+  const db = admin.database();
+  const partnerId = partner.id || uuidv4();
+
+  const existingPartnersSnap = await db.ref('system_config/partners').once('value');
+  let otherShareTotal = 0;
+  if (existingPartnersSnap.exists()) {
+    existingPartnersSnap.forEach((child) => {
+      const p = child.val();
+      if (child.key === partnerId) return;
+      if (p.status === 'inactive') return;
+      otherShareTotal += asNumber(p.sharePercent);
+    });
+  }
+  if (otherShareTotal + newShare > 100) {
+    throw new HttpsError(
+      'invalid-argument',
+      `Total share would be ${otherShareTotal + newShare}%. Cannot exceed 100%. Other active partners use ${otherShareTotal}%.`
+    );
+  }
+
+  const partnerData = {
+    ...partner,
+    id: partnerId,
+    status: partner.status || 'active',
+    updatedAt: Date.now(),
+    createdAt: partner.createdAt || Date.now(),
+    totalProfitPaid: asNumber(partner.totalProfitPaid)
+  };
+
+  await db.ref(`system_config/partners/${partnerId}`).set(partnerData);
+  return { success: true, partnerId };
+});
+
+exports.setPartnerStatus = onCall({ region: REGION }, async (request) => {
+  const uid = request.auth?.uid;
+  if (!uid) throw new HttpsError('unauthenticated', 'Login required');
+  const role = await getCallerRole(uid);
+  if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Admin access required.');
+
+  const { partnerId, status } = request.data;
+  if (!partnerId || !status) throw new HttpsError('invalid-argument', 'Partner ID and status are required.');
+
+  await admin.database().ref(`system_config/partners/${partnerId}/status`).set(status);
+  return { success: true };
 });

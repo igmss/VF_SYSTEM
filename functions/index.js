@@ -27,4 +27,17 @@ exports.transferInternalVfCash = adminFinance.transferInternalVfCash;
 exports.issueLoan = adminFinance.issueLoan;
 exports.recordLoanRepayment = adminFinance.recordLoanRepayment;
 exports.recordExpense = adminFinance.recordExpense;
+exports.recordInvestorCapital = adminFinance.recordInvestorCapital;
+exports.calculateSystemProfitSnapshot = adminFinance.calculateSystemProfitSnapshot;
+exports.calculateInvestorDailyProfit = adminFinance.calculateInvestorDailyProfit;
+exports.payInvestorProfit = adminFinance.payInvestorProfit;
+exports.withdrawInvestorCapital = adminFinance.withdrawInvestorCapital;
+exports.rebuildProfitSnapshots = adminFinance.rebuildProfitSnapshots;
+
+exports.calculatePartnerDailyProfit = adminFinance.calculatePartnerDailyProfit;
+exports.payPartnerProfit = adminFinance.payPartnerProfit;
+exports.seedPartners = adminFinance.seedPartners;
+exports.savePartner = adminFinance.savePartner;
+exports.setPartnerStatus = adminFinance.setPartnerStatus;
+
 exports.getRetailerPortalData = retailerRequests.getRetailerPortalData;

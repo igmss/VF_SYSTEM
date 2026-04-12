@@ -19,13 +19,13 @@ function roundCurrency(value) {
 }
 
 function getRetailerPendingDebt(retailer) {
-  const pending = asNumber(retailer.totalAssigned) - asNumber(retailer.totalCollected);
-  return pending > 0 ? pending : 0;
+  const outstanding = asNumber(retailer.totalAssigned) - asNumber(retailer.totalCollected);
+  return outstanding > 0 ? outstanding : 0;
 }
 
 function getRetailerInstaPayPendingDebt(retailer) {
-  const pending = asNumber(retailer.instaPayTotalAssigned) - asNumber(retailer.instaPayTotalCollected);
-  return pending > 0 ? pending : 0;
+  const outstanding = asNumber(retailer.instaPayTotalAssigned) - asNumber(retailer.instaPayTotalCollected);
+  return outstanding > 0 ? outstanding : 0;
 }
 
 async function getCallerRole(uid) {

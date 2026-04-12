@@ -176,7 +176,7 @@ class DatabaseService {
     try {
       // ── Duplicate check ──────────────────────────────────────────────────
       final orderId = transaction.bybitOrderId;
-      if (orderId != null && orderId.isNotEmpty) {
+      if (orderId.isNotEmpty) {
         if (knownIds != null) {
           // Fast path: O(1) Set lookup
           if (knownIds.contains(orderId)) {
@@ -201,7 +201,7 @@ class DatabaseService {
 
       // Update the in-memory Set so subsequent orders in the same batch
       // don't try to insert this one again.
-      if (orderId != null && orderId.isNotEmpty) knownIds?.add(orderId);
+      if (orderId.isNotEmpty) knownIds?.add(orderId);
 
       // Update mobile number usage if assigned
       if (transaction.phoneNumber != null) {

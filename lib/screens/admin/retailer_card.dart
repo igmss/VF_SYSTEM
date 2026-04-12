@@ -3,6 +3,8 @@ part of 'retailers_screen.dart';
 class _RetailerCard extends StatelessWidget {
   final Retailer retailer;
   final bool isAdmin;
+  final double dailyVf;
+  final double dailyInstaPay;
   final VoidCallback onDistribute;
   final VoidCallback onInstaPayDistribute;
   final VoidCallback onReturn;
@@ -11,6 +13,8 @@ class _RetailerCard extends StatelessWidget {
   const _RetailerCard({
     required this.retailer,
     required this.isAdmin,
+    required this.dailyVf,
+    required this.dailyInstaPay,
     required this.onDistribute,
     required this.onInstaPayDistribute,
     required this.onReturn,
@@ -192,6 +196,64 @@ class _RetailerCard extends StatelessWidget {
                               color: AppTheme.positiveColor(context),
                               fontSize: 12,
                               fontWeight: FontWeight.w900)),
+                    ],
+                  ),
+                ),
+              ],
+
+              // Daily totals row — only shown when there's activity today
+              if (dailyVf > 0 || dailyInstaPay > 0) ...[
+                const SizedBox(height: 16),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  decoration: BoxDecoration(
+                    color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.04),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.lineColor(context)),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(Icons.today_rounded,
+                          size: 14, color: AppTheme.textMutedColor(context)),
+                      const SizedBox(width: 6),
+                      Text("Today's assigned:",
+                          style: TextStyle(
+                              color: AppTheme.textMutedColor(context),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700)),
+                      const Spacer(),
+                      if (dailyVf > 0) ...[
+                        Icon(Icons.phonelink_ring_rounded,
+                            size: 13, color: AppTheme.warningColor(context)),
+                        const SizedBox(width: 4),
+                        Text(_f(dailyVf),
+                            style: TextStyle(
+                                color: AppTheme.warningColor(context),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900)),
+                        const SizedBox(width: 4),
+                        Text('EGP',
+                            style: TextStyle(
+                                color: AppTheme.textMutedColor(context),
+                                fontSize: 10)),
+                      ],
+                      if (dailyVf > 0 && dailyInstaPay > 0)
+                        const SizedBox(width: 14),
+                      if (dailyInstaPay > 0) ...[
+                        Icon(Icons.account_balance_rounded,
+                            size: 13, color: AppTheme.positiveColor(context)),
+                        const SizedBox(width: 4),
+                        Text(_f(dailyInstaPay),
+                            style: TextStyle(
+                                color: AppTheme.positiveColor(context),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900)),
+                        const SizedBox(width: 4),
+                        Text('EGP',
+                            style: TextStyle(
+                                color: AppTheme.textMutedColor(context),
+                                fontSize: 10)),
+                      ],
                     ],
                   ),
                 ),

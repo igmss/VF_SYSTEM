@@ -20,6 +20,8 @@ import 'exchange_rate_screen.dart';
 import 'retailer_assignment_requests_screen.dart';
 import 'loans_screen.dart';
 import 'expenses_screen.dart';
+import 'investors_screen.dart';
+import 'partners_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -72,6 +74,9 @@ class _AdminDashboardState extends State<AdminDashboard> {
           transferFees: dist.totalTransferFees,
           outstandingLoans: dist.totalOutstandingLoans,
           totalExpenses: dist.totalExpenses,
+          totalInvestorCapital: dist.totalInvestorCapital,
+          totalInvestorProfitOwed: dist.totalInvestorProfitOwed,
+          totalPartnerProfitOwed: dist.totalPartnerProfitOwed,
           userName: auth.currentUser?.name ?? 'Admin',
           canViewUsdExchange: canViewUsdExchange,
         ),
@@ -146,6 +151,20 @@ class _AdminDashboardState extends State<AdminDashboard> {
         selectedIcon: Icons.money_off,
         widget: const ExpensesScreen(),
         roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
+        label: 'investors'.tr(),
+        icon: Icons.group_work_outlined,
+        selectedIcon: Icons.group_work,
+        widget: const InvestorsScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
+      ),
+      _TabItem(
+        label: 'partners'.tr(),
+        icon: Icons.people_outline,
+        selectedIcon: Icons.people,
+        widget: const PartnersScreen(),
+        roles: [UserRole.ADMIN],
       ),
       _TabItem(
         label: 'users'.tr(),
@@ -309,6 +328,9 @@ class _Overview extends StatelessWidget {
   final double transferFees;
   final double outstandingLoans;
   final double totalExpenses;
+  final double totalInvestorCapital;
+  final double totalInvestorProfitOwed;
+  final double totalPartnerProfitOwed;
   final String userName;
   final bool canViewUsdExchange;
 
@@ -325,6 +347,9 @@ class _Overview extends StatelessWidget {
     required this.transferFees,
     required this.outstandingLoans,
     required this.totalExpenses,
+    required this.totalInvestorCapital,
+    required this.totalInvestorProfitOwed,
+    required this.totalPartnerProfitOwed,
     required this.userName,
     required this.canViewUsdExchange,
   });
@@ -399,7 +424,54 @@ class _Overview extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('total_capital'.tr(), style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('total_capital'.tr(), style: const TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w600)),
+                          GestureDetector(
+                            onTap: () async {
+                              final ctrl = TextEditingController();
+                              final val = await showDialog<String>(
+                                context: context,
+                                builder: (ctx) => AlertDialog(
+                                  backgroundColor: AppTheme.surfaceColor(context),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
+                                  title: Text('set_opening_capital'.tr(), style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w900, letterSpacing: -0.5)),
+                                  content: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text('Enter the initial capital amount to begin profit calculation tracking.', style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
+                                      const SizedBox(height: 20),
+                                      TextField(
+                                        controller: ctrl,
+                                        keyboardType: TextInputType.number,
+                                        style: TextStyle(color: AppTheme.textPrimaryColor(context)),
+                                        decoration: InputDecoration(
+                                          labelText: 'amount'.tr(),
+                                          prefixText: 'EGP ',
+                                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(16)),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                  actions: [
+                                    TextButton(onPressed: () => Navigator.pop(ctx), child: Text('cancel'.tr())),
+                                    ElevatedButton(
+                                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.accent),
+                                      onPressed: () => Navigator.pop(ctx, ctrl.text), 
+                                      child: Text('confirm'.tr(), style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
+                                    ),
+                                  ],
+                                )
+                              );
+                              if (val != null && double.tryParse(val) != null) {
+                                context.read<DistributionProvider>().setOpeningCapital(double.parse(val));
+                              }
+                            },
+                            child: const Icon(Icons.edit, color: Colors.white54, size: 16),
+                          )
+                        ],
+                      ),
                       const SizedBox(height: 6),
                       Text('${_f(totalAssets)} EGP', style: const TextStyle(color: Colors.white, fontSize: 34, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
                       const SizedBox(height: 12),
@@ -447,7 +519,20 @@ class _Overview extends StatelessWidget {
                   _AssetCard(icon: Icons.volunteer_activism_outlined, label: 'outstanding_loans'.tr(), amount: outstandingLoans, color: const Color(0xFFF4A261), muted: true),
                 ],
 
-                // ── Section 4: Expenses ───────────────────────────────────────────
+                // ── Section 4: Liabilities & Funding ──────────────────────────────
+                if (totalInvestorCapital > 0 || totalInvestorProfitOwed > 0) ...[
+                  const SizedBox(height: 12),
+                  const _SectionHeader(label: 'Liabilities & External Funding', icon: Icons.group_work_outlined, muted: true),
+                  const SizedBox(height: 8),
+                  if (totalInvestorCapital > 0)
+                    _AssetCard(icon: Icons.account_balance_wallet, label: 'investor_capital'.tr(), amount: totalInvestorCapital, color: const Color(0xFFC8A96E), muted: true),
+                  if (totalInvestorProfitOwed > 0)
+                    _AssetCard(icon: Icons.money_off, label: 'investor_profit_owed'.tr(), amount: totalInvestorProfitOwed, color: const Color(0xFFE63946), muted: true),
+                  if (totalPartnerProfitOwed > 0)
+                    _AssetCard(icon: Icons.people_outline, label: 'partner_profit_owed'.tr(), amount: totalPartnerProfitOwed, color: const Color(0xFFE63946), muted: true),
+                ],
+
+                // ── Section 5: Expenses ───────────────────────────────────────────
                 if (transferFees > 0 || totalExpenses > 0) ...[
                   const SizedBox(height: 12),
                   const _SectionHeader(label: 'Expenses', icon: Icons.money_off_outlined, muted: true),

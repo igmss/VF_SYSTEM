@@ -4,7 +4,6 @@ import 'package:intl/intl.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
-import '../../providers/app_provider.dart';
 import '../../models/financial_transaction.dart';
 import '../../theme/app_theme.dart';
 
@@ -280,7 +279,6 @@ class _RecordExpenseSheet extends StatefulWidget {
 }
 
 class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
-  String _sourceType = 'bank'; // 'bank' | 'vfnumber' | 'collector'
   String? _sourceId;
   String? _category;
   final _amtCtrl = TextEditingController();
@@ -290,20 +288,8 @@ class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
   @override
   void initState() {
     super.initState();
-    _updateSourceId();
-  }
-
-  void _updateSourceId() {
-    if (_sourceType == 'bank' && widget.dist.bankAccounts.isNotEmpty) {
+    if (widget.dist.bankAccounts.isNotEmpty) {
       _sourceId = widget.dist.bankAccounts.first.id;
-    } else if (_sourceType == 'vfnumber') {
-      final vfs = context.read<AppProvider>().mobileNumbers;
-      _sourceId = vfs.isNotEmpty ? vfs.first.id : null;
-    } else if (_sourceType == 'collector' &&
-        widget.dist.collectors.isNotEmpty) {
-      _sourceId = widget.dist.collectors.first.id;
-    } else {
-      _sourceId = null;
     }
   }
 
@@ -324,7 +310,6 @@ class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
     setState(() => _loading = true);
     try {
       await widget.dist.recordExpense(
-        sourceType: _sourceType,
         sourceId: _sourceId!,
         amount: amount,
         category: _category,
@@ -350,7 +335,6 @@ class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
 
   @override
   Widget build(BuildContext context) {
-    final app = context.watch<AppProvider>();
     final dist = widget.dist;
     final fmt = NumberFormat('#,##0.00', 'en_US');
 
@@ -387,70 +371,8 @@ class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
                     fontWeight: FontWeight.w900)),
             const SizedBox(height: 20),
 
-            // ── Source type chips ────────────────────────────────────────
-            Text('Funding Source',
-                style: TextStyle(
-                    color: AppTheme.textMutedColor(context),
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700)),
-            const SizedBox(height: 8),
-            Row(
-              children: [
-                for (final entry in [
-                  ('bank', 'banks'.tr(), Icons.account_balance),
-                  ('vfnumber', 'vf_cash'.tr(), Icons.phone_android),
-                  ('collector', 'collector'.tr(), Icons.delivery_dining),
-                ])
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => setState(() {
-                        _sourceType = entry.$1;
-                        _updateSourceId();
-                      }),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        margin: const EdgeInsets.only(right: 8),
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 10),
-                        decoration: BoxDecoration(
-                          color: _sourceType == entry.$1
-                              ? const Color(0xFFE63946)
-                              : AppTheme.textPrimaryColor(context)
-                                  .withValues(alpha: 0.05),
-                          borderRadius: BorderRadius.circular(14),
-                          border: Border.all(
-                            color: _sourceType == entry.$1
-                                ? const Color(0xFFE63946)
-                                : AppTheme.lineColor(context),
-                          ),
-                        ),
-                        child: Column(
-                          children: [
-                            Icon(entry.$3,
-                                size: 18,
-                                color: _sourceType == entry.$1
-                                    ? Colors.white
-                                    : AppTheme.textMutedColor(context)),
-                            const SizedBox(height: 4),
-                            Text(entry.$2,
-                                style: TextStyle(
-                                    color: _sourceType == entry.$1
-                                        ? Colors.white
-                                        : AppTheme.textMutedColor(context),
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.bold),
-                                textAlign: TextAlign.center),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-              ],
-            ),
-            const SizedBox(height: 16),
-
-            // ── Source entity dropdown ───────────────────────────────────
-            _buildSourceDropdown(context, app, dist, fmt),
+            // ── Bank account dropdown ────────────────────────────────────
+            _buildSourceDropdown(context, dist, fmt),
             const SizedBox(height: 14),
 
             // ── Amount field ────────────────────────────────────────────
@@ -495,33 +417,16 @@ class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
     );
   }
 
-  Widget _buildSourceDropdown(BuildContext context, AppProvider app,
+  Widget _buildSourceDropdown(BuildContext context,
       DistributionProvider dist, NumberFormat fmt) {
-    final List<DropdownMenuItem<String>> items = [];
-
-    if (_sourceType == 'bank') {
-      items.addAll(dist.bankAccounts.map((b) => DropdownMenuItem(
-            value: b.id,
-            child: Text('${b.bankName}  (${fmt.format(b.balance)} EGP)',
-                style: TextStyle(color: AppTheme.textPrimaryColor(context))),
-          )));
-    } else if (_sourceType == 'vfnumber') {
-      items.addAll(app.mobileNumbers.map((n) => DropdownMenuItem(
-            value: n.id,
-            child: Text(
-                '${n.phoneNumber}  (${fmt.format(n.currentBalance)} EGP)',
-                style: TextStyle(color: AppTheme.textPrimaryColor(context))),
-          )));
-    } else if (_sourceType == 'collector') {
-      items.addAll(dist.collectors.map((c) => DropdownMenuItem(
-            value: c.id,
-            child: Text('${c.name}  (${fmt.format(c.cashOnHand)} EGP)',
-                style: TextStyle(color: AppTheme.textPrimaryColor(context))),
-          )));
-    }
+    final items = dist.bankAccounts.map((b) => DropdownMenuItem(
+          value: b.id,
+          child: Text('${b.bankName}  (${fmt.format(b.balance)} EGP)',
+              style: TextStyle(color: AppTheme.textPrimaryColor(context))),
+        )).toList();
 
     if (items.isEmpty) {
-      return Text('No sources available.',
+      return Text('No bank accounts available.',
           style: TextStyle(color: AppTheme.textMutedColor(context)));
     }
 

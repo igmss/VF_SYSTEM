@@ -18,12 +18,14 @@ mixin BankAccountOperationsMixin on ChangeNotifier {
     // If there's an opening balance, record it as a FUND_BANK ledger entry
     if (account.balance > 0) {
       final openingTx = FinancialTransaction(
+        id: 'fund_${DateTime.now().millisecondsSinceEpoch}',
         type: FlowType.FUND_BANK,
         amount: account.balance,
         toId: account.id,
         toLabel: account.bankName,
         createdByUid: createdByUid,
         notes: 'Opening Balance',
+        timestamp: DateTime.now(),
       );
       await dist._db.ref('financial_ledger/${openingTx.id}').set(openingTx.toMap());
     }
@@ -149,6 +151,7 @@ mixin BankAccountOperationsMixin on ChangeNotifier {
 
       // 3. Add ledger entry
       final tx = FinancialTransaction(
+        id: 'buy_${bybitOrderId}',
         type: FlowType.BUY_USDT,
         amount: egpAmount,
         usdtQuantity: usdtQuantity,
@@ -251,12 +254,14 @@ mixin BankAccountOperationsMixin on ChangeNotifier {
 
       // New proper BANK_DEDUCTION entry
       final fixTx = FinancialTransaction(
+        id: 'fix_${wrongTx.id}',
         type: FlowType.BANK_DEDUCTION,
         amount: wrongTx.amount,
         fromId: bankId,
         fromLabel: bank.bankName,
         createdByUid: createdByUid,
         notes: 'BALANCE_CORRECTION (Fixed): BUY_USDT deduction that was incorrectly recorded as credit. Ref: ${wrongTx.id}',
+        timestamp: DateTime.now(),
       );
 
       await Future.wait([

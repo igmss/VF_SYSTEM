@@ -57,14 +57,19 @@ class RetailersScreen extends StatelessWidget {
                   child: ListView.builder(
                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 28),
                     itemCount: dist.retailers.length,
-                    itemBuilder: (ctx, i) => _RetailerCard(
-                      retailer: dist.retailers[i],
-                      isAdmin: auth.isAdmin || auth.isFinance,
-                      onDistribute: () => _showDistributeDialog(ctx, dist.retailers[i], dist, auth),
-                      onInstaPayDistribute: () => _showInstaPayDistributeDialog(ctx, dist.retailers[i], dist, auth),
-                      onReturn: () => _showCreditReturnDialog(ctx, dist.retailers[i]),
-                      onEdit: () => _showEditDialog(ctx, dist.retailers[i]),
-                    ),
+                    itemBuilder: (ctx, i) {
+                      final r = dist.retailers[i];
+                      return _RetailerCard(
+                        retailer: r,
+                        isAdmin: auth.isAdmin || auth.isFinance,
+                        dailyVf: dist.retailerDailyVf(r.id),
+                        dailyInstaPay: dist.retailerDailyInstaPay(r.id),
+                        onDistribute: () => _showDistributeDialog(ctx, r, dist, auth),
+                        onInstaPayDistribute: () => _showInstaPayDistributeDialog(ctx, r, dist, auth),
+                        onReturn: () => _showCreditReturnDialog(ctx, r),
+                        onEdit: () => _showEditDialog(ctx, r),
+                      );
+                    },
                   ),
                 ),
               ],

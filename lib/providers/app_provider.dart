@@ -46,6 +46,10 @@ class AppProvider extends ChangeNotifier {
   String? _publicDefaultNumberId;
   String? _publicDefaultNumberPhone;
   List<Map<String, String>> _publicVfNumbers = [];
+  
+  // Module Reconciliation Dates
+  String _vfStartDate = '2026-03-18';
+  String _instaPayStartDate = '2026-04-09';
 
   // ── Getters ───────────────────────────────────────────────────────────────
   // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
@@ -70,6 +74,8 @@ class AppProvider extends ChangeNotifier {
   String? get publicDefaultNumberPhone => _publicDefaultNumberPhone;
   /// List of {id, phoneNumber} maps readable by collectors.
   List<Map<String, String>> get publicVfNumbers => _publicVfNumbers;
+  String get vfStartDate => _vfStartDate;
+  String get instaPayStartDate => _instaPayStartDate;
 
   // Callback to trigger Bank logic in DistributionProvider
   Future<void> Function({
@@ -228,6 +234,19 @@ class AppProvider extends ChangeNotifier {
       }
       notifyListeners();
     });
+
+    FirebaseDatabase.instance
+        .ref('system_config/module_start_dates')
+        .onValue
+        .listen((event) {
+      final snap = event.snapshot;
+      if (snap.exists && snap.value is Map) {
+        final data = Map<String, dynamic>.from(snap.value as Map);
+        _vfStartDate = data['vf']?.toString() ?? '2026-03-18';
+        _instaPayStartDate = data['instapay']?.toString() ?? '2026-04-09';
+      }
+      notifyListeners();
+    });
   }
 
   /// Fetches the very latest default VF number directly from Firebase (one-shot read).
@@ -309,6 +328,16 @@ class AppProvider extends ChangeNotifier {
       'feePer1000': feePer1000,
     });
     _collectorVfDepositFeePer1000 = feePer1000;
+    notifyListeners();
+  }
+
+  Future<void> saveModuleStartDates(String vf, String insta) async {
+    await FirebaseDatabase.instance.ref('system_config/module_start_dates').set({
+      'vf': vf,
+      'instapay': insta,
+    });
+    _vfStartDate = vf;
+    _instaPayStartDate = insta;
     notifyListeners();
   }
 

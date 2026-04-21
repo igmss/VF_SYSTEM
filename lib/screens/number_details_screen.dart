@@ -55,7 +55,14 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
     return Scaffold(
       backgroundColor: AppTheme.scaffoldBg(context),
       appBar: AppBar(
-        title: Text(currentNum.phoneNumber),
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(currentNum.phoneNumber),
+            if (currentNum.name?.isNotEmpty == true)
+              Text(currentNum.name!, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.normal)),
+          ],
+        ),
         elevation: 0,
         actions: [
           if (!currentNum.isDefault)
@@ -74,7 +81,38 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
             ),
           PopupMenuButton<String>(
             onSelected: (val) async {
-              if (val == 'delete') {
+              if (val == 'edit') {
+                final ctrl = TextEditingController(text: currentNum.name ?? '');
+                final bool? save = await showDialog<bool>(
+                  context: context,
+                  builder: (ctx) => AlertDialog(
+                    title: const Text('Edit Name'),
+                    content: TextField(
+                      controller: ctrl,
+                      decoration: const InputDecoration(
+                        hintText: 'e.g. Main Vodafone Cash',
+                        prefixIcon: Icon(Icons.label),
+                      ),
+                    ),
+                    actions: [
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: Text('cancel'.tr()),
+                      ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: Text('save'.tr()),
+                      ),
+                    ],
+                  ),
+                );
+                if (save == true && mounted) {
+                  final newName = ctrl.text.trim();
+                  await provider.updateMobileNumber(
+                    currentNum.copyWith(name: newName.isEmpty ? null : newName),
+                  );
+                }
+              } else if (val == 'delete') {
                 final confirm = await showDialog<bool>(
                   context: context,
                   builder: (ctx) => AlertDialog(
@@ -99,11 +137,21 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
             },
             itemBuilder: (ctx) => [
                PopupMenuItem(
+                value: 'edit',
+                child: Row(
+                  children: [
+                    Icon(Icons.edit, color: AppTheme.textPrimaryColor(context), size: 20),
+                    const SizedBox(width: 8),
+                    Text('Edit Name', style: TextStyle(color: AppTheme.textPrimaryColor(context))),
+                  ],
+                ),
+              ),
+               PopupMenuItem(
                 value: 'delete',
                 child: Row(
                   children: [
-                    Icon(Icons.delete, color: Colors.red, size: 20),
-                    SizedBox(width: 8),
+                    const Icon(Icons.delete, color: Colors.red, size: 20),
+                    const SizedBox(width: 8),
                     Text('delete'.tr(), style: const TextStyle(color: Colors.red)),
                   ],
                 ),

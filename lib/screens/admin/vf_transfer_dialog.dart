@@ -227,7 +227,7 @@ class _VfTransferDialogState extends State<VfTransferDialog> {
                       if (_sourceVf != null)
                         _buildPreviewRow(
                           context,
-                          '${_sourceVf!.phoneNumber} (${'balance'.tr()})',
+                          '${_sourceVf!.name?.isNotEmpty == true ? _sourceVf!.name : _sourceVf!.phoneNumber} (${'balance'.tr()})',
                           _sourceVf!.currentBalance,
                           amount + fee,
                           true,
@@ -237,7 +237,7 @@ class _VfTransferDialogState extends State<VfTransferDialog> {
                       if (_destVf != null)
                         _buildPreviewRow(
                           context,
-                          '${_destVf!.phoneNumber} (${'balance'.tr()})',
+                          '${_destVf!.name?.isNotEmpty == true ? _destVf!.name : _destVf!.phoneNumber} (${'balance'.tr()})',
                           _destVf!.currentBalance,
                           amount,
                           false,
@@ -309,6 +309,17 @@ class _VfTransferDialogState extends State<VfTransferDialog> {
                       color: AppTheme.textPrimaryColor(context),
                     ),
                   ),
+                  if (num.name?.isNotEmpty == true)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 8.0),
+                      child: Text(
+                        num.name!,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: AppTheme.textMutedColor(context),
+                        ),
+                      ),
+                    ),
                   const Spacer(),
                   Text(
                     '${num.currentBalance.toStringAsFixed(0)} EGP',

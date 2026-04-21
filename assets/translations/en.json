@@ -405,5 +405,7 @@
   "partner": "Partner",
   "source_type": "Source Type",
   "partner_profit_paid_bank": "Partner Profit Paid (Bank)",
-  "partner_profit_paid_vf": "Partner Profit Paid (VF)"
+  "partner_profit_paid_vf": "Partner Profit Paid (VF)",
+  "deposit_to_vfcash": "Deposit to VF Cash",
+  "vfcash_retail_profit": "VF Retail Profit"
 }

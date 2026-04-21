@@ -2,26 +2,39 @@ class PartnerProfitSnapshot {
   final int calculationVersion;
   final String date;
   final int workingDays;
+  
+  // Ledger-Based Flow Metrics
+  final double totalVfDistributed;
+  final double totalInstaDistributed;
   final double vfDailyFlow;
   final double instaDailyFlow;
-  final double totalDistVf;
-  final double outstandingRetailerVfDebt;
-  final double effectiveVfDist;
-  final double systemAvgBuyPrice;
-  final double systemAvgSellPrice;
-  final double systemVfProfitPer1000;
-  final double systemInstaProfitPer1000;
-  final double businessGrossProfit;
-  final double totalFees;
-  final double internalVfFees;
-  final double externalVfFees;
-  final double instaFees;
+  final double totalDailyFlow;
+  
+  // Performance Breakdown (VF)
+  final double vfSpreadProfit;
+  final double vfDepositProfit;
+  final double vfDiscountCost;
+  final double vfFeeCost;
+  final double vfNetProfit;
+  final double vfNetPer1000;
+  
+  // Performance Breakdown (Insta)
+  final double instaGrossProfit;
+  final double instaFeeCost;
+  final double instaNetProfit;
+  final double instaNetPer1000;
+  
+  // Global Metrics
+  final double generalExpenses;
+  final double globalAvgBuyPrice;
+  
+  // Distribution Summary
+  final double totalNetProfit;
   final double totalInvestorProfitDeducted;
-  final double businessNetProfitBeforeInvestors;
-  final double businessNetProfitAfterInvestors;
-  final double businessNetProfit;
-  final double sharePercent;
+  final double remainingForPartners;
   final double partnerProfit;
+  final double sharePercent;
+  
   final bool isPaid;
   final int? paidAt;
   final String? paidByUid;
@@ -30,29 +43,31 @@ class PartnerProfitSnapshot {
   final int calculatedAt;
 
   PartnerProfitSnapshot({
-    this.calculationVersion = 0,
+    required this.calculationVersion,
     required this.date,
     required this.workingDays,
+    required this.totalVfDistributed,
+    required this.totalInstaDistributed,
     required this.vfDailyFlow,
     required this.instaDailyFlow,
-    this.totalDistVf = 0,
-    this.outstandingRetailerVfDebt = 0,
-    this.effectiveVfDist = 0,
-    required this.systemAvgBuyPrice,
-    required this.systemAvgSellPrice,
-    required this.systemVfProfitPer1000,
-    required this.systemInstaProfitPer1000,
-    required this.businessGrossProfit,
-    this.totalFees = 0,
-    this.internalVfFees = 0,
-    this.externalVfFees = 0,
-    this.instaFees = 0,
+    required this.totalDailyFlow,
+    required this.vfSpreadProfit,
+    required this.vfDepositProfit,
+    required this.vfDiscountCost,
+    required this.vfFeeCost,
+    required this.vfNetProfit,
+    required this.vfNetPer1000,
+    required this.instaGrossProfit,
+    required this.instaFeeCost,
+    required this.instaNetProfit,
+    required this.instaNetPer1000,
+    required this.generalExpenses,
+    required this.globalAvgBuyPrice,
+    required this.totalNetProfit,
     required this.totalInvestorProfitDeducted,
-    required this.businessNetProfitBeforeInvestors,
-    required this.businessNetProfitAfterInvestors,
-    required this.businessNetProfit,
-    required this.sharePercent,
+    required this.remainingForPartners,
     required this.partnerProfit,
+    required this.sharePercent,
     required this.isPaid,
     this.paidAt,
     this.paidByUid,
@@ -66,26 +81,28 @@ class PartnerProfitSnapshot {
       'calculationVersion': calculationVersion,
       'date': date,
       'workingDays': workingDays,
+      'totalVfDistributed': totalVfDistributed,
+      'totalInstaDistributed': totalInstaDistributed,
       'vfDailyFlow': vfDailyFlow,
       'instaDailyFlow': instaDailyFlow,
-      'totalDistVf': totalDistVf,
-      'outstandingRetailerVfDebt': outstandingRetailerVfDebt,
-      'effectiveVfDist': effectiveVfDist,
-      'systemAvgBuyPrice': systemAvgBuyPrice,
-      'systemAvgSellPrice': systemAvgSellPrice,
-      'systemVfProfitPer1000': systemVfProfitPer1000,
-      'systemInstaProfitPer1000': systemInstaProfitPer1000,
-      'businessGrossProfit': businessGrossProfit,
-      'totalFees': totalFees,
-      'internalVfFees': internalVfFees,
-      'externalVfFees': externalVfFees,
-      'instaFees': instaFees,
+      'totalDailyFlow': totalDailyFlow,
+      'vfSpreadProfit': vfSpreadProfit,
+      'vfDepositProfit': vfDepositProfit,
+      'vfDiscountCost': vfDiscountCost,
+      'vfFeeCost': vfFeeCost,
+      'vfNetProfit': vfNetProfit,
+      'vfNetPer1000': vfNetPer1000,
+      'instaGrossProfit': instaGrossProfit,
+      'instaFeeCost': instaFeeCost,
+      'instaNetProfit': instaNetProfit,
+      'instaNetPer1000': instaNetPer1000,
+      'generalExpenses': generalExpenses,
+      'globalAvgBuyPrice': globalAvgBuyPrice,
+      'totalNetProfit': totalNetProfit,
       'totalInvestorProfitDeducted': totalInvestorProfitDeducted,
-      'businessNetProfitBeforeInvestors': businessNetProfitBeforeInvestors,
-      'businessNetProfitAfterInvestors': businessNetProfitAfterInvestors,
-      'businessNetProfit': businessNetProfit,
-      'sharePercent': sharePercent,
+      'remainingForPartners': remainingForPartners,
       'partnerProfit': partnerProfit,
+      'sharePercent': sharePercent,
       'isPaid': isPaid,
       'paidAt': paidAt,
       'paidByUid': paidByUid,
@@ -112,28 +129,28 @@ class PartnerProfitSnapshot {
       calculationVersion: asInt(map['calculationVersion']),
       date: map['date'] ?? '',
       workingDays: asInt(map['workingDays']),
+      totalVfDistributed: asDouble(map['totalVfDistributed'] ?? map['totalDistVf']),
+      totalInstaDistributed: asDouble(map['totalInstaDistributed']),
       vfDailyFlow: asDouble(map['vfDailyFlow']),
       instaDailyFlow: asDouble(map['instaDailyFlow']),
-      totalDistVf: asDouble(map['totalDistVf']),
-      outstandingRetailerVfDebt: asDouble(map['outstandingRetailerVfDebt']),
-      effectiveVfDist: asDouble(map['effectiveVfDist']),
-      systemAvgBuyPrice: asDouble(map['systemAvgBuyPrice']),
-      systemAvgSellPrice: asDouble(map['systemAvgSellPrice']),
-      systemVfProfitPer1000: asDouble(map['systemVfProfitPer1000']),
-      systemInstaProfitPer1000: asDouble(map['systemInstaProfitPer1000']),
-      businessGrossProfit: asDouble(map['businessGrossProfit']),
-      totalFees: asDouble(map['totalFees']),
-      internalVfFees: asDouble(map['internalVfFees']),
-      externalVfFees: asDouble(map['externalVfFees']),
-      instaFees: asDouble(map['instaFees']),
-      totalInvestorProfitDeducted: asDouble(map['totalInvestorProfitDeducted']),
-      businessNetProfitBeforeInvestors: asDouble(map['businessNetProfitBeforeInvestors']),
-      businessNetProfitAfterInvestors: asDouble(
-        map['businessNetProfitAfterInvestors'] ?? map['businessNetProfit'],
-      ),
-      businessNetProfit: asDouble(map['businessNetProfit']),
-      sharePercent: asDouble(map['sharePercent']),
+      totalDailyFlow: asDouble(map['totalDailyFlow']),
+      vfSpreadProfit: asDouble(map['vfSpreadProfit']),
+      vfDepositProfit: asDouble(map['vfDepositProfit']),
+      vfDiscountCost: asDouble(map['vfDiscountCost']),
+      vfFeeCost: asDouble(map['vfFeeCost']),
+      vfNetProfit: asDouble(map['vfNetProfit']),
+      vfNetPer1000: asDouble(map['vfNetPer1000']),
+      instaGrossProfit: asDouble(map['instaGrossProfit']),
+      instaFeeCost: asDouble(map['instaFeeCost']),
+      instaNetProfit: asDouble(map['instaNetProfit']),
+      instaNetPer1000: asDouble(map['instaNetPer1000']),
+      generalExpenses: asDouble(map['generalExpenses']),
+      globalAvgBuyPrice: asDouble(map['globalAvgBuyPrice']),
+      totalNetProfit: asDouble(map['totalNetProfit'] ?? map['businessNetProfit']),
+      totalInvestorProfitDeducted: asDouble(map['totalInvestorProfitDeducted'] ?? map['totalInvestorProfitDeducted']),
+      remainingForPartners: asDouble(map['remainingForPartners']),
       partnerProfit: asDouble(map['partnerProfit']),
+      sharePercent: asDouble(map['sharePercent']),
       isPaid: map['isPaid'] == true,
       paidAt: map['paidAt'] != null ? asInt(map['paidAt']) : null,
       paidByUid: map['paidByUid'],
@@ -143,5 +160,5 @@ class PartnerProfitSnapshot {
     );
   }
 
-  bool get isCurrentVersion => calculationVersion >= 2;
+  bool get isCurrentVersion => calculationVersion >= 3;
 }

@@ -141,6 +141,9 @@ exports.recordLoanRepayment = onCall({ region: REGION }, async (request) => {
   updates[`loans/${loanId}/amountRepaid`] = newAmountRepaid;
   updates[`loans/${loanId}/status`] = newStatus;
   updates[`loans/${loanId}/lastUpdatedAt`] = nowTs;
+  if (newStatus === 'fully_repaid') {
+    updates[`loans/${loanId}/repaidAt`] = nowTs; // exact repayment timestamp for hurdle calculation
+  }
 
   updates[`financial_ledger/${txId}`] = {
     id: txId,

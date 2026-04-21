@@ -36,6 +36,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   Map<String, String> _userNames = {}; // UID -> Name
   double _usdtBalance = 0.0;     // USDT quantity in the exchange
   double _usdtLastPrice = 0.0;  // Last known EGP/USDT price (for EGP equivalent)
+  double _openingCapital = 180000.0; // Partners Opening Capital
 
   bool _isLoading = false;
   bool _isListenersInitialized = false;
@@ -66,6 +67,10 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   bool get isInvestorLoading => _isInvestorLoading;
   bool get isPartnerLoading => _isPartnerLoading;
 
+  double _totalInvestorPayable = 0.0;
+  double _totalPartnerPayable = 0.0;
+  double _totalInvestorVfFlow = 0.0;
+  double _totalInvestorInstaFlow = 0.0;
   String? _error;
 
   StreamSubscription<DatabaseEvent>? _usdExchangeSub;
@@ -79,6 +84,7 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   StreamSubscription<DatabaseEvent>? _partnersSub;
   StreamSubscription<DatabaseEvent>? _partnerSnapshotsSub;
   StreamSubscription<DatabaseEvent>? _systemProfitSnapshotsSub;
+  StreamSubscription<DatabaseEvent>? _openingCapitalSub;
 
   List<BankAccount> get bankAccounts => _bankAccounts;
   List<Investor> get investors => _investors;
@@ -97,12 +103,19 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   /// Last known EGP price per USDT
   double get usdtLastPrice => _usdtLastPrice;
 
+  /// Partners Opening Capital (Seed money)
+  double get openingCapital => _openingCapital;
+
   /// EGP equivalent of the USDT balance
   double get totalUsdExchangeBalance => _usdtBalance * (_usdtLastPrice > 0 ? _usdtLastPrice : 1);
 
   bool get isLoading => _isLoading;
   String? get error => _error;
   Map<String, String> get userNames => _userNames;
+  double get totalInvestorPayable => _totalInvestorPayable;
+  double get totalPartnerPayable => _totalPartnerPayable;
+  double get totalInvestorVfFlow => _totalInvestorVfFlow;
+  double get totalInvestorInstaFlow => _totalInvestorInstaFlow;
 
   // ——————————————————————————————————————————————————————————————————————————
   //  Daily Retailer Totals  (computed from today's ledger entries)
@@ -188,15 +201,8 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   double get totalInvestorCapital =>
       _investors.where((i) => i.status == 'active').fold(0.0, (s, i) => s + i.investedAmount);
 
-  double get totalInvestorProfitOwed => _investorSnapshots.values
-      .expand((snapshots) => snapshots)
-      .where((s) => s.isCurrentVersion && !s.isPaid)
-      .fold(0.0, (sum, s) => sum + s.investorProfit);
-
-  double get totalPartnerProfitOwed => _partnerSnapshots.values
-      .expand((snapshots) => snapshots)
-      .where((s) => s.isCurrentVersion && !s.isPaid)
-      .fold(0.0, (sum, s) => sum + s.partnerProfit);
+  double get totalInvestorProfitOwed => _totalInvestorPayable;
+  double get totalPartnerProfitOwed => _totalPartnerPayable;
 
   List<InvestorProfitSnapshot> validInvestorSnapshotsFor(String investorId) {
     final investor = _investors.cast<Investor?>().firstWhere(
@@ -232,6 +238,8 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       await Future.wait([
         _refreshOperationalData(),
         _refreshUsdExchangeData(),
+        getInvestorPerformance(), // Global summary
+        getPartnerPerformance(),   // Global summary
       ]);
       if (!_syncCompleted) {
         await _syncCollectorsFromUsers();
@@ -1018,36 +1026,33 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
     }
   }
 
-  Future<InvestorProfitSnapshot> calculateInvestorDailyProfit({
-    required String investorId,
-    required String date,
-    required int workingDays,
+  Future<Map<String, dynamic>> getInvestorPerformance({
+    String? investorId,
   }) async {
-    _isInvestorLoading = true;
-    notifyListeners();
     try {
-      final callable = _functions.httpsCallable('calculateInvestorDailyProfit');
+      final callable = _functions.httpsCallable('getInvestorPerformance');
       final result = await callable.call({
         'investorId': investorId,
-        'date': date,
-        'workingDays': workingDays,
       });
-      await loadAll();
-      return InvestorProfitSnapshot.fromMap(Map<String, dynamic>.from(result.data));
+      final data = Map<String, dynamic>.from(result.data);
+      if (investorId == null) {
+        _totalInvestorPayable = (data['totalPayable'] ?? 0.0).toDouble();
+        _totalInvestorVfFlow = (data['totalVfFlow'] ?? 0.0).toDouble();
+        _totalInvestorInstaFlow = (data['totalInstaFlow'] ?? 0.0).toDouble();
+      }
+      return data;
     } catch (e) {
-      debugPrint('Calculate daily profit error: $e');
+      debugPrint('Get investor performance error: $e');
       rethrow;
-    } finally {
-      _isInvestorLoading = false;
-      notifyListeners();
     }
   }
 
   Future<void> payInvestorProfit({
     required String investorId,
-    required List<String> dates,
+    required double amount,
     required String bankAccountId,
     required String createdByUid,
+    String? notes,
   }) async {
     _isInvestorLoading = true;
     notifyListeners();
@@ -1055,9 +1060,10 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       final callable = _functions.httpsCallable('payInvestorProfit');
       await callable.call({
         'investorId': investorId,
-        'dates': dates,
+        'amount': amount,
         'bankAccountId': bankAccountId,
         'createdByUid': createdByUid,
+        'notes': notes,
       });
       await loadAll();
     } catch (e) {
@@ -1099,7 +1105,11 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
 
   Future<void> setOpeningCapital(double value) async {
     try {
-      await _db.ref('system_config/openingCapital').set(value);
+      final todayKey = DateTime.now().toIso8601String().substring(0, 10); // YYYY-MM-DD
+      await Future.wait([
+        _db.ref('system_config/openingCapital').set(value),
+        _db.ref('system_config/openingCapitalHistory/$todayKey').set(value),
+      ]);
     } catch (e) {
       debugPrint('Set opening capital error: $e');
       rethrow;
@@ -1159,36 +1169,26 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
   // ——————————————————————————————————————————————————————————————————————————
 
 
-  Future<Map<String, dynamic>> calculatePartnerDailyProfit({
-    required String date,
-    required int workingDays,
-  }) async {
-    _isPartnerLoading = true;
-    notifyListeners();
+  Future<Map<String, dynamic>> getPartnerPerformance() async {
     try {
-      final callable = _functions.httpsCallable('calculatePartnerDailyProfit');
-      final result = await callable.call({
-        'date': date,
-        'workingDays': workingDays,
-      });
-      debugPrint('[DEBUG] Provider Calc Result: ${result.data}');
-      await loadAll();
-      return Map<String, dynamic>.from(result.data);
+      final callable = _functions.httpsCallable('getPartnerPerformance');
+      final result = await callable.call();
+      final data = Map<String, dynamic>.from(result.data);
+      _totalPartnerPayable = (data['totalPayable'] ?? 0.0).toDouble();
+      return data;
     } catch (e) {
-      debugPrint('Calculate partner daily profit error: $e');
+      debugPrint('Get partner performance error: $e');
       rethrow;
-    } finally {
-      _isPartnerLoading = false;
-      notifyListeners();
     }
   }
 
   Future<void> payPartnerProfit({
     required String partnerId,
-    required List<String> dates,
+    required double amount,
     required String paymentSourceType,
     required String paymentSourceId,
     required String createdByUid,
+    String? notes,
   }) async {
     _isPartnerLoading = true;
     notifyListeners();
@@ -1196,16 +1196,19 @@ class DistributionProvider extends ChangeNotifier with BankAccountOperationsMixi
       final callable = _functions.httpsCallable('payPartnerProfit');
       await callable.call({
         'partnerId': partnerId,
-        'dates': dates,
+        'amount': amount,
         'paymentSourceType': paymentSourceType,
         'paymentSourceId': paymentSourceId,
         'createdByUid': createdByUid,
+        'notes': notes,
       });
       await loadAll();
     } catch (e) {
       debugPrint('Pay partner profit error: $e');
       rethrow;
     } finally {
+      await getInvestorPerformance();
+      await getPartnerPerformance();
       _isPartnerLoading = false;
       notifyListeners();
     }

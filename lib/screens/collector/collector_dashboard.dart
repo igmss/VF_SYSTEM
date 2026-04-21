@@ -1,14 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
+import 'package:intl/intl.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/retailer.dart';
 import '../../models/collector.dart';
 import '../../models/bank_account.dart';
+import '../../models/financial_transaction.dart';
 import '../admin/retailer_details_screen.dart';
 import '../../theme/app_theme.dart';
+
+part 'collector_history_tab.dart';
 
 enum _DepositDestination { bank, vf }
 
@@ -71,10 +75,12 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
                         collector: collector,
                         bankAccounts: dist.bankAccounts,
                       )
-                    : _DepositTab(
-                        collector: collector,
-                        bankAccounts: dist.bankAccounts,
-                      ),
+                    : _tab == 1
+                        ? _DepositTab(
+                            collector: collector,
+                            bankAccounts: dist.bankAccounts,
+                          )
+                        : _HistoryTab(collector: collector),
               ),
             ],
           ),
@@ -247,6 +253,12 @@ class _CollectorDashboardState extends State<CollectorDashboard> {
               icon: Icons.account_balance,
               selected: _tab == 1,
               onTap: () => setState(() => _tab = 1)),
+          const SizedBox(width: 10),
+          _TabChip(
+              label: 'history'.tr(),
+              icon: Icons.history,
+              selected: _tab == 2,
+              onTap: () => setState(() => _tab = 2)),
         ],
       ),
     );

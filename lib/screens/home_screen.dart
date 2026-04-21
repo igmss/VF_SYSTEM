@@ -339,6 +339,18 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             const SizedBox(height: 14),
 
             // ── Phone Number ─────────────────────────────────────────────
+            if (number.name?.isNotEmpty == true)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 2),
+                child: Text(
+                  number.name!,
+                  style: TextStyle(
+                    color: textMuted,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
             Text(
               number.phoneNumber,
               style: TextStyle(

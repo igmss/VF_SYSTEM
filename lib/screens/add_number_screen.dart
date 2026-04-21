@@ -13,6 +13,7 @@ class AddNumberScreen extends StatefulWidget {
 class _AddNumberScreenState extends State<AddNumberScreen> {
   final _formKey = GlobalKey<FormState>();
   late TextEditingController _phoneController;
+  late TextEditingController _nameController;
   late TextEditingController _initialBalanceController;
   late TextEditingController _inDailyLimitController;
   late TextEditingController _inMonthlyLimitController;
@@ -24,6 +25,7 @@ class _AddNumberScreenState extends State<AddNumberScreen> {
   void initState() {
     super.initState();
     _phoneController = TextEditingController();
+    _nameController = TextEditingController();
     _initialBalanceController = TextEditingController(text: '0');
     _inDailyLimitController = TextEditingController(text: '50000');
     _inMonthlyLimitController = TextEditingController(text: '1000000');
@@ -34,6 +36,7 @@ class _AddNumberScreenState extends State<AddNumberScreen> {
   @override
   void dispose() {
     _phoneController.dispose();
+    _nameController.dispose();
     _initialBalanceController.dispose();
     _inDailyLimitController.dispose();
     _inMonthlyLimitController.dispose();
@@ -56,6 +59,15 @@ class _AddNumberScreenState extends State<AddNumberScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               _buildSectionTitle('basic_info'.tr()),
+              _buildLabel('Name (Optional)'),
+              TextFormField(
+                controller: _nameController,
+                decoration: _buildInputDecoration(
+                  hint: 'e.g. Main Vodafone Cash',
+                  icon: Icons.label,
+                ),
+              ),
+              const SizedBox(height: 16),
               _buildLabel('phone_number'.tr()),
               TextFormField(
                 controller: _phoneController,
@@ -220,6 +232,7 @@ class _AddNumberScreenState extends State<AddNumberScreen> {
     try {
       await context.read<AppProvider>().addMobileNumber(
             phoneNumber: _phoneController.text,
+            name: _nameController.text.trim().isEmpty ? null : _nameController.text.trim(),
             initialBalance: double.parse(_initialBalanceController.text),
             inDailyLimit: double.parse(_inDailyLimitController.text),
             inMonthlyLimit: double.parse(_inMonthlyLimitController.text),

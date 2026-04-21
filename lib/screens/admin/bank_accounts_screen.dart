@@ -378,7 +378,11 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
                   type == FlowType.EXPENSE_INSTAPAY_FEE ||
                   type == FlowType.LOAN_ISSUED ||
                   type == FlowType.EXPENSE_BANK ||
-                  type == FlowType.BANK_DEDUCTION;
+                  type == FlowType.BANK_DEDUCTION ||
+                  type == FlowType.INVESTOR_PROFIT_PAID ||
+                  type == FlowType.PARTNER_PROFIT_PAID_BANK ||
+                  type == FlowType.PARTNER_PROFIT_PAID_VF ||
+                  type == FlowType.INVESTOR_CAPITAL_OUT;
 
     final color = isOut ? _kRed : _kGreen;
     final icon  = isOut ? Icons.arrow_upward_rounded : Icons.arrow_downward_rounded;
@@ -392,6 +396,12 @@ class _BankAccountsScreenState extends State<BankAccountsScreen> {
       }
     } else if (tx.type == FlowType.BUY_USDT) {
       label = 'Buy USDT (${tx.fromLabel})';
+    } else if (tx.type == FlowType.INVESTOR_PROFIT_PAID || tx.type == FlowType.PARTNER_PROFIT_PAID_BANK) {
+      label = 'Profit Paid (${tx.toLabel})';
+    } else if (tx.type == FlowType.INVESTOR_CAPITAL_IN) {
+      label = 'Capital Deposit (${tx.fromLabel})';
+    } else if (tx.type == FlowType.INVESTOR_CAPITAL_OUT) {
+      label = 'Capital Withdrawal (${tx.toLabel})';
     }
 
     return Container(

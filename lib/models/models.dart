@@ -3,6 +3,7 @@
 class MobileNumber {
   final String id;
   final String phoneNumber;
+  final String? name;
   final bool isDefault;
   final DateTime createdAt;
   final DateTime lastUpdatedAt;
@@ -25,6 +26,7 @@ class MobileNumber {
   MobileNumber({
     required this.id,
     required this.phoneNumber,
+    this.name,
     required this.isDefault,
     required this.createdAt,
     DateTime? lastUpdatedAt,
@@ -45,6 +47,7 @@ class MobileNumber {
     return {
       'id': id,
       'phoneNumber': phoneNumber,
+      'name': name,
       'isDefault': isDefault,
       'createdAt': createdAt.toIso8601String(),
       'lastUpdatedAt': lastUpdatedAt.toIso8601String(),
@@ -74,6 +77,7 @@ class MobileNumber {
     return MobileNumber(
       id: map['id']?.toString() ?? '',
       phoneNumber: map['phoneNumber']?.toString() ?? '',
+      name: map['name']?.toString(),
       isDefault: map['isDefault'] == true,
       createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
       lastUpdatedAt: map['lastUpdatedAt'] != null 
@@ -103,6 +107,7 @@ class MobileNumber {
   MobileNumber copyWith({
     String? id,
     String? phoneNumber,
+    String? name,
     bool? isDefault,
     DateTime? createdAt,
     DateTime? lastUpdatedAt,
@@ -121,6 +126,7 @@ class MobileNumber {
     return MobileNumber(
       id: id ?? this.id,
       phoneNumber: phoneNumber ?? this.phoneNumber,
+      name: name ?? this.name,
       isDefault: isDefault ?? this.isDefault,
       createdAt: createdAt ?? this.createdAt,
       lastUpdatedAt: lastUpdatedAt ?? this.lastUpdatedAt,

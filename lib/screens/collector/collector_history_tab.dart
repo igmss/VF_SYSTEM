@@ -21,7 +21,12 @@ class _HistoryTab extends StatelessWidget {
                           tx.toId == collector!.id;
       final isMyBankDeposit = tx.type == FlowType.DEPOSIT_TO_BANK && tx.fromId == collector!.id;
       final isMyVfDeposit = tx.type == FlowType.DEPOSIT_TO_VFCASH && tx.fromId == collector!.id;
-      return isMyCollect || isMyBankDeposit || isMyVfDeposit;
+      
+      // Include Margin Profits (InstaPay Margin & Retail Profit) assigned to this collector
+      final isMyProfit = (tx.type == FlowType.INSTAPAY_DIST_PROFIT || tx.type == FlowType.VFCASH_RETAIL_PROFIT) &&
+                         tx.toId == collector!.id;
+                         
+      return isMyCollect || isMyBankDeposit || isMyVfDeposit || isMyProfit;
     }).toList();
 
     if (history.isEmpty) {
@@ -42,7 +47,10 @@ class _HistoryTab extends StatelessWidget {
       itemCount: history.length,
       itemBuilder: (context, index) {
         final tx = history[index];
-        final isInbound = tx.type == FlowType.COLLECT_CASH || tx.type == FlowType.COLLECT_INSTAPAY_CASH;
+        final isInbound = tx.type == FlowType.COLLECT_CASH || 
+                          tx.type == FlowType.COLLECT_INSTAPAY_CASH ||
+                          tx.type == FlowType.INSTAPAY_DIST_PROFIT || 
+                          tx.type == FlowType.VFCASH_RETAIL_PROFIT;
         final color = isInbound ? AppTheme.positiveColor(context) : AppTheme.errorColor(context);
         final dateStr = DateFormat('dd MMM yyyy, hh:mm a').format(tx.timestamp);
 

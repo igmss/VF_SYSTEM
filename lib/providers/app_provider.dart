@@ -437,6 +437,7 @@ class AppProvider extends ChangeNotifier {
 
   Future<void> addMobileNumber({
     required String phoneNumber,
+    String? name,
     required double initialBalance,
     required double inDailyLimit,
     required double inMonthlyLimit,
@@ -451,6 +452,7 @@ class AppProvider extends ChangeNotifier {
       final number = MobileNumber(
         id: const Uuid().v4(),
         phoneNumber: phoneNumber,
+        name: name,
         initialBalance: initialBalance,
         inDailyLimit: inDailyLimit,
         inMonthlyLimit: inMonthlyLimit,
@@ -465,6 +467,28 @@ class AppProvider extends ChangeNotifier {
       _mobileNumbers.add(number);
       
       pushDefaultNumberToPublic(override: number.isDefault ? number : null); 
+    } catch (e) {
+      _error = e.toString();
+      notifyListeners();
+      rethrow;
+    } finally {
+      _isLoading = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateMobileNumber(MobileNumber updatedNumber) async {
+    _isLoading = true;
+    _error = null;
+    notifyListeners();
+
+    try {
+      await _dbService.addMobileNumber(updatedNumber);
+      final index = _mobileNumbers.indexWhere((n) => n.id == updatedNumber.id);
+      if (index != -1) {
+        _mobileNumbers[index] = updatedNumber;
+      }
+      pushDefaultNumberToPublic(override: updatedNumber.isDefault ? updatedNumber : null);
     } catch (e) {
       _error = e.toString();
       notifyListeners();

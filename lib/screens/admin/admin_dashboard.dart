@@ -22,6 +22,7 @@ import 'loans_screen.dart';
 import 'expenses_screen.dart';
 import 'investors_screen.dart';
 import 'partners_screen.dart';
+import 'daily_flow_screen.dart';
 
 class AdminDashboard extends StatefulWidget {
   const AdminDashboard({super.key});
@@ -172,6 +173,13 @@ class _AdminDashboardState extends State<AdminDashboard> {
         selectedIcon: Icons.people,
         widget: const UserManagementScreen(),
         roles: [UserRole.ADMIN],
+      ),
+      _TabItem(
+        label: 'daily_flow'.tr(),
+        icon: Icons.bar_chart_outlined,
+        selectedIcon: Icons.bar_chart,
+        widget: const DailyFlowScreen(),
+        roles: [UserRole.ADMIN, UserRole.FINANCE],
       ),
       _TabItem(
         label: 'settings'.tr(),

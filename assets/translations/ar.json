@@ -1,6 +1,8 @@
 {
   "app_name": "نظام توزيع فودافون كاش",
   "dashboard": "لوحة التحكم",
+  "daily_flow": "حركة التدفق اليومية",
+  "total_gross_flow": "إجمالي الحركة الكلية",
   "settings": "الإعدادات",
   "overview": "نظرة عامة",
   "vf_numbers": "أرقام فودافون",
@@ -405,5 +407,7 @@
   "partner": "شريك",
   "source_type": "نوع المصدر",
   "partner_profit_paid_bank": "دفع أرباح شريك (بنك)",
-  "partner_profit_paid_vf": "دفع أرباح شريك (فودافون)"
+  "partner_profit_paid_vf": "دفع أرباح شريك (فودافون)",
+  "deposit_to_vfcash": "إيداع فودافون كاش",
+  "vfcash_retail_profit": "ربح فودافون (تجزئة)"
 }

@@ -37,12 +37,12 @@ exports.recordLoanRepayment = loans.recordLoanRepayment;
 exports.recordExpense = loans.recordExpense;
 exports.recordInvestorCapital = investors.recordInvestorCapital;
 exports.calculateSystemProfitSnapshot = profitSnapshots.calculateSystemProfitSnapshot;
-exports.calculateInvestorDailyProfit = investors.calculateInvestorDailyProfit;
+exports.getInvestorPerformance = investors.getInvestorPerformance;
 exports.payInvestorProfit = investors.payInvestorProfit;
 exports.withdrawInvestorCapital = investors.withdrawInvestorCapital;
 exports.rebuildProfitSnapshots = profitSnapshots.rebuildProfitSnapshots;
 
-exports.calculatePartnerDailyProfit = partners.calculatePartnerDailyProfit;
+exports.getPartnerPerformance = partners.getPartnerPerformance;
 exports.payPartnerProfit = partners.payPartnerProfit;
 exports.seedPartners = partners.seedPartners;
 exports.savePartner = partners.savePartner;

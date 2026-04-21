@@ -8,7 +8,7 @@ const {
   getTransactionTimestampMs,
 } = require('./helpers');
 
-const PROFIT_CALCULATION_VERSION = 2;
+const PROFIT_CALCULATION_VERSION = 3.1;
 
 function formatDateKey(dateInput) {
   const parsed = safeDate(dateInput, new Date().toISOString());
@@ -125,79 +125,129 @@ function _computeCurrentAssetTotal(dbData) {
   };
 }
 
-function _computeReconciledProfit(dbData) {
+function _computeReconciledProfit(dbData, totalDistributions = 0) {
   const openingCapital = asNumber(dbData.openingCapital);
   const totalActiveInvestorCapital = _sumActiveInvestorCapital(dbData.investorsSnap);
   const totalOutstandingLoans = _sumOutstandingLoans(dbData.loansSnap);
   const currentAssets = _computeCurrentAssetTotal(dbData);
-  const effectiveStartingCapital = openingCapital + totalActiveInvestorCapital - totalOutstandingLoans;
-  const reconciledProfit = currentAssets.currentTotalAssets - effectiveStartingCapital;
+  
+  // Total capital injected into the business (Startup funds + Investors)
+  const effectiveStartingCapital = openingCapital + totalActiveInvestorCapital;
+  
+  // Adjusted Assets = Cash in Banks + Wallet Balances + Collector Cash + Retailer Debts + Outstanding Loans + Money already paid out
+  const adjustedTotalAssets = currentAssets.currentTotalAssets + totalOutstandingLoans + asNumber(totalDistributions);
+  
+  // Net Profit is the lifetime growth of business assets over the total invested capital
+  const reconciledProfit = adjustedTotalAssets - effectiveStartingCapital;
 
   return {
     openingCapital,
     totalActiveInvestorCapital,
     totalOutstandingLoans,
     effectiveStartingCapital,
+    totalDistributions: asNumber(totalDistributions),
     ...currentAssets,
+    adjustedTotalAssets,
+    netProfit: reconciledProfit, // Now represents Lifetime Growth
     reconciledProfit
   };
 }
 
-function _getGlobalAvgBuyPrice(ledgerSnap) {
-  let totalBuyEgp = 0;
-  let totalBuyUsdt = 0;
+/**
+ * Calculates earnings for an investor based on the NEW fixed rate logic (V4.0)
+ * VF: 7 per 1,000 | InstaPay: 5 per 1,000
+ * Only on flow exceeding the waterfall hurdle.
+ */
+function _calculateInvestorEarningsFixedRate(investor, vfFlow, instaFlow, precedingCapital, openingCapital) {
+  const hurdle = (asNumber(openingCapital) / 2) + asNumber(precedingCapital);
+  
+  const totalFlow = asNumber(vfFlow) + asNumber(instaFlow);
+  const excessFlow = Math.max(0, totalFlow - hurdle);
+  
+  if (excessFlow <= 0) return { investorProfit: 0, vfProfit: 0, instaProfit: 0, hurdle, excessFlow: 0 };
+
+  // Calculate proportional excess for each channel
+  const vfRatio = totalFlow > 0 ? asNumber(vfFlow) / totalFlow : 0;
+  const instaRatio = totalFlow > 0 ? asNumber(instaFlow) / totalFlow : 0;
+  
+  const vfExcess = excessFlow * vfRatio;
+  const instaExcess = excessFlow * instaRatio;
+  
+  // V4.0 rates
+  const baseVfProfit = (vfExcess / 1000) * 7;
+  const baseInstaProfit = (instaExcess / 1000) * 5;
+  
+  // Apply investor's share % (V4.3)
+  const shareFactor = asNumber(investor.profitSharePercent) / 100;
+  const vfProfit = baseVfProfit * shareFactor;
+  const instaProfit = baseInstaProfit * shareFactor;
+  
+  return {
+    investorProfit: vfProfit + instaProfit,
+    vfProfit,
+    instaProfit,
+    baseVfProfit,
+    baseInstaProfit,
+    hurdle,
+    excessFlow,
+    vfExcess,
+    instaExcess
+  };
+}
+
+function _getDailyAvgBuyPrice(ledgerSnap, targetTs) {
+  let dailyBuyEgp = 0;
+  let dailyBuyUsdt = 0;
+  
+  const targetDate = new Date(targetTs).toISOString().split('T')[0];
+  
+  // First pass: Try to find average for the specific day
   if (ledgerSnap && ledgerSnap.exists()) {
     ledgerSnap.forEach((child) => {
       const tx = child.val();
       if (tx.type === 'BUY_USDT') {
-        totalBuyEgp += asNumber(tx.amount);
-        totalBuyUsdt += asNumber(tx.usdtQuantity);
+        const txDate = new Date(getTransactionTimestampMs(tx)).toISOString().split('T')[0];
+        if (txDate === targetDate) {
+          dailyBuyEgp += asNumber(tx.amount);
+          dailyBuyUsdt += asNumber(tx.usdtQuantity);
+        }
       }
     });
   }
-  return totalBuyUsdt > 0 ? totalBuyEgp / totalBuyUsdt : 0;
-}
 
-function _getGlobalAvgSellPrice(ledgerSnap) {
-  let totalSellEgp = 0;
-  let totalSellUsdt = 0;
+  if (dailyBuyUsdt > 0) return dailyBuyEgp / dailyBuyUsdt;
+
+  // Fallback: Find the most recent buy before this day
+  let bestTs = 0;
+  let fallbackPrice = 53.52; // Safety default based on historical data
+
   if (ledgerSnap && ledgerSnap.exists()) {
     ledgerSnap.forEach((child) => {
       const tx = child.val();
-      if (tx.type === 'SELL_USDT') {
-        totalSellEgp += asNumber(tx.amount);
-        totalSellUsdt += asNumber(tx.usdtQuantity);
+      if (tx.type === 'BUY_USDT') {
+        const txTs = getTransactionTimestampMs(tx);
+        if (txTs < targetTs && txTs > bestTs) {
+          const qty = asNumber(tx.usdtQuantity);
+          if (qty > 0) {
+            fallbackPrice = asNumber(tx.amount) / qty;
+            bestTs = txTs;
+          }
+        }
       }
     });
   }
-  return totalSellUsdt > 0 ? totalSellEgp / totalSellUsdt : 0;
+  
+  return fallbackPrice;
 }
 
 function _getPerformanceForDateRange(dbData, dateStr, workingDays = 1) {
-  const { ledgerSnap, retailersSnap } = dbData;
+  const { ledgerSnap } = dbData;
+  const numDays = asNumber(workingDays) || 1;
 
-  // DISTRIBUTE_VFCASH is the true daily VF business volume metric.
-  // SELL_USDT / BUY_USDT are kept only for computing avgBuy / avgSell (spread calc).
-  let totalDistVf = 0;
-  let totalDistVfDebt = 0;
-
-  let totalBuyEgp = 0;
-  let totalBuyUsdt = 0;
-  let totalSellEgp = 0;
-  let totalSellUsdt = 0;
-  let buyEntriesCount = 0;
-  let sellEntriesCount = 0;
-
-  let totalInstaFlow = 0;
-  let totalInstaProfit = 0;
-  let totalInstaFees = 0;
-  let totalInternalVfFees = 0;
-  let totalExternalVfFees = 0;
-  let totalExpenses = 0;
-
+  // Date Range Setup
   const targetDate = safeDate(dateStr, new Date().toISOString());
   const startDate = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate()));
-  startDate.setUTCDate(startDate.getUTCDate() - (asNumber(workingDays) - 1));
+  startDate.setUTCDate(startDate.getUTCDate() - (numDays - 1));
   startDate.setUTCHours(0, 0, 0, 0);
 
   const endThreshold = new Date(Date.UTC(targetDate.getUTCFullYear(), targetDate.getUTCMonth(), targetDate.getUTCDate()));
@@ -206,122 +256,127 @@ function _getPerformanceForDateRange(dbData, dateStr, workingDays = 1) {
   const startTs = startDate.getTime();
   const endTs = endThreshold.getTime();
 
+  // Calculate Daily Average Buy Price (Direct Daily Mode)
+  const dailyAvgBuyPrice = _getDailyAvgBuyPrice(ledgerSnap, endTs);
+
+  // PASS 2: Accumulate performance metrics for the date range
+  let totalVfDistributed = 0;
+  let totalInstaDistributed = 0;
+  let totalSellEgp = 0;
+  let totalSellUsdt = 0;
+  let vfDepositProfit = 0;
+  let vfDiscountCost = 0;
+  let vfFeeCost = 0;
+  let instaGrossProfit = 0;
+  let instaFeeCost = 0;
+  let generalExpenses = 0;
+  let sellEntriesCount = 0;
+  let buyEntriesRangeCount = 0;
+
   if (ledgerSnap && ledgerSnap.exists()) {
     ledgerSnap.forEach((child) => {
       const tx = child.val();
       const txTs = getTransactionTimestampMs(tx);
-      if (txTs < startTs || txTs > endTs) return;
+      const isWithinRange = txTs >= startTs && txTs <= endTs;
 
-      if (tx.type === 'BUY_USDT') {
-        totalBuyEgp += asNumber(tx.amount);
-        totalBuyUsdt += asNumber(tx.usdtQuantity);
-        buyEntriesCount += 1;
-      } else if (tx.type === 'SELL_USDT') {
+      if (!isWithinRange) return;
+
+      if (tx.type === 'SELL_USDT') {
         totalSellEgp += asNumber(tx.amount);
         totalSellUsdt += asNumber(tx.usdtQuantity);
-        sellEntriesCount += 1;
+        sellEntriesCount++;
+      } else if (tx.type === 'BUY_USDT') {
+        buyEntriesRangeCount++;
       } else if (tx.type === 'DISTRIBUTE_VFCASH') {
-        totalDistVf += asNumber(tx.amount);
+        const amount = asNumber(tx.amount);
+        totalVfDistributed += amount;
         const debtMatch = (tx.notes || '').match(/Debt \+([0-9.]+)/);
-        totalDistVfDebt += debtMatch ? parseFloat(debtMatch[1]) : asNumber(tx.amount);
+        const debtAmount = debtMatch ? parseFloat(debtMatch[1]) : amount;
+        const discount = amount - debtAmount;
+        if (discount > 0) vfDiscountCost += discount;
       } else if (tx.type === 'DISTRIBUTE_INSTAPAY') {
-        totalInstaFlow += asNumber(tx.amount);
+        totalInstaDistributed += asNumber(tx.amount);
       } else if (tx.type === 'INSTAPAY_DIST_PROFIT') {
-        totalInstaProfit += asNumber(tx.amount);
-      } else if (tx.type === 'INTERNAL_VF_TRANSFER_FEE') {
-        totalInternalVfFees += asNumber(tx.amount);
-      } else if (tx.type === 'EXPENSE_VFCASH_FEE') {
-        totalExternalVfFees += asNumber(tx.amount);
+        instaGrossProfit += asNumber(tx.amount);
+      } else if (tx.type === 'VFCASH_RETAIL_PROFIT') {
+        vfDepositProfit += asNumber(tx.amount);
+      } else if (tx.type === 'INTERNAL_VF_TRANSFER_FEE' || tx.type === 'EXPENSE_VFCASH_FEE') {
+        vfFeeCost += asNumber(tx.amount);
       } else if (tx.type === 'EXPENSE_INSTAPAY_FEE') {
-        totalInstaFees += asNumber(tx.amount);
-      } else if (
-        tx.type === 'EXPENSE_BANK' ||
-        tx.type === 'EXPENSE_VFNUMBER' ||
-        tx.type === 'EXPENSE_COLLECTOR'
-      ) {
-        totalExpenses += asNumber(tx.amount);
+        instaFeeCost += asNumber(tx.amount);
+      } else if (tx.type === 'EXPENSE_BANK') {
+        // As per user audit, only EXPENSE_BANK counts as general expenses (salaries/rent).
+        // Fees are already included in net calculations below.
+        generalExpenses += asNumber(tx.amount);
       }
     });
   }
 
-  let outstandingRetailerVfDebt = 0;
-  if (retailersSnap && retailersSnap.exists()) {
-    retailersSnap.forEach((child) => {
-      const r = child.val();
-      outstandingRetailerVfDebt += Math.max(0, asNumber(r.totalAssigned) - asNumber(r.totalCollected));
-    });
-  }
+  // Calculate Final Metrics
+  const vfSpreadProfit = totalSellEgp - (totalSellUsdt * dailyAvgBuyPrice);
+  const vfNetProfit = vfSpreadProfit + vfDepositProfit - vfDiscountCost - vfFeeCost;
+  const instaNetProfit = instaGrossProfit - instaFeeCost;
+  const totalNetProfit = vfNetProfit + instaNetProfit - generalExpenses;
 
-  const avgBuy = totalBuyUsdt > 0 ? totalBuyEgp / totalBuyUsdt : _getGlobalAvgBuyPrice(ledgerSnap);
-  const avgSell = totalSellUsdt > 0 ? totalSellEgp / totalSellUsdt : _getGlobalAvgSellPrice(ledgerSnap);
-
-  const rawSpread = avgBuy > 0 && avgSell > 0 ? ((avgSell - avgBuy) / avgBuy) * 1000 : 0;
-  const totalVfDiscount = Math.max(0, totalDistVf - totalDistVfDebt);
-  const retailerDiscountPer1000 = totalDistVf > 0 ? (totalVfDiscount / totalDistVf) * 1000 : 0;
-  const spread = Math.max(0, rawSpread - retailerDiscountPer1000);
-
-  const days = asNumber(workingDays) || 1;
-  const vfDailyFlow = totalDistVf / days;
-  const instaDailyFlow = totalInstaFlow / days;
-
-  const effectiveVfDist = Math.max(0, totalDistVf - outstandingRetailerVfDebt);
-  const vfProfit = totalDistVf > 0 ? Math.max(0, totalDistVf * spread / 1000) / days : 0;
-
-  const systemInstaProfitPer1000 = totalInstaFlow > 0 ? (totalInstaProfit / totalInstaFlow) * 1000 : 0;
-  const businessGrossProfit = vfProfit + totalInstaProfit;
-
-  const totalFees = totalInternalVfFees + totalExternalVfFees + totalInstaFees + totalExpenses;
-  const businessNetProfit = businessGrossProfit - totalFees;
+  const vfNetPer1000 = totalVfDistributed > 0 ? (vfNetProfit / totalVfDistributed) * 1000 : 0;
+  const instaNetPer1000 = totalInstaDistributed > 0 ? (instaNetProfit / totalInstaDistributed) * 1000 : 0;
 
   return {
     date: formatDateKey(dateStr),
-    workingDays: days,
-    totalSellAmount: totalDistVf,
-    vfDailyFlow,
-    totalInstaAmount: totalInstaFlow,
-    instaDailyFlow,
-    totalDailyFlow: vfDailyFlow + instaDailyFlow,
-    totalBuyEgp,
-    totalBuyUsdt,
-    totalSellEgp,
+    workingDays: numDays,
+    
+    // Performance Summary
+    vfNetProfit,
+    instaNetProfit,
+    totalNetProfit,
+    vfNetPer1000,
+    instaNetPer1000,
+    totalFlow: totalVfDistributed + totalInstaDistributed,
+
+    // Daily Flow Fields
+    totalVfDistributed,
+    totalInstaDistributed,
+    
+    // Detailed Breakdown
+    dailyAvgBuyPrice, // Renamed for clarity in logic, but keeping backward compatibility if needed:
+    globalAvgBuyPrice: dailyAvgBuyPrice, 
+    vfSpreadProfit,
+    vfDepositProfit,
+    vfDiscountCost,
+    vfFeeCost,
+    instaGrossProfit,
+    instaFeeCost,
+    generalExpenses,
+    
+    // Audit Tracking
     totalSellUsdt,
-    totalDistVf,
-    totalDistVfDebt,
-    outstandingRetailerVfDebt,
-    effectiveVfDist,
-    avgBuy,
-    avgSell,
-    spread,
-    rawSpread,
-    retailerDiscountAmount: totalVfDiscount,
-    retailerDiscountPer1000,
-    buyEntriesCount,
+    totalSellEgp,
     sellEntriesCount,
-    vfProfit,
-    instaProfit: totalInstaProfit,
-    internalVfFees: totalInternalVfFees,
-    externalVfFees: totalExternalVfFees,
-    instaFees: totalInstaFees,
-    expenses: totalExpenses,
-    totalFees,
-    systemInstaProfitPer1000,
-    businessGrossProfit,
-    businessNetProfit
+    buyEntriesRangeCount,
+    calculatedAt: Date.now()
   };
 }
 
+
 function _buildSystemProfitSnapshotForDate(dbData, dateStr) {
   const performance = _getPerformanceForDateRange(dbData, dateStr, 1);
-  const reconciliation = _computeReconciledProfit(dbData);
+  const state = _computeReconciledProfit(dbData);
 
   return {
     ...performance,
+    openingCapital: state.openingCapital,
+    effectiveStartingCapital: state.effectiveStartingCapital,
+    totalOutstandingLoans: state.totalOutstandingLoans,
+    currentTotalAssets: state.currentTotalAssets,
+    bankBalance: state.bankBalance,
+    vfNumberBalance: state.vfNumberBalance,
+    retailerDebt: state.retailerDebt,
+    retailerInstaDebt: state.retailerInstaDebt,
+    collectorCash: state.collectorCash,
+    usdExchangeEGP: state.usdExchangeEgp,
+    adjustedTotalAssets: state.adjustedTotalAssets,
+    reconciledProfit: state.reconciledProfit,
     calculationVersion: PROFIT_CALCULATION_VERSION,
-    openingCapital: asNumber(dbData.openingCapital),
-    effectiveStartingCapital: reconciliation.effectiveStartingCapital,
-    currentTotalAssets: reconciliation.currentTotalAssets,
-    reconciledProfit: reconciliation.reconciledProfit,
-    calculatedAt: Date.now()
   };
 }
 
@@ -350,7 +405,7 @@ function _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData) {
   const distributableProfitByDate = {};
 
   dateKeys.forEach((dayKey) => {
-    const rawNet = asNumber(systemSnapshots[dayKey]?.businessNetProfit);
+    const rawNet = asNumber(systemSnapshots[dayKey]?.totalNetProfit);
     operationalProfit += rawNet;
     positiveOperationalProfit += Math.max(0, rawNet);
   });
@@ -362,7 +417,7 @@ function _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData) {
   const allocationRatio = positiveOperationalProfit > 0 ? (cappedProfit / positiveOperationalProfit) : 0;
 
   dateKeys.forEach((dayKey) => {
-    const rawNet = asNumber(systemSnapshots[dayKey]?.businessNetProfit);
+    const rawNet = asNumber(systemSnapshots[dayKey]?.totalNetProfit);
     distributableProfitByDate[dayKey] = Math.max(0, rawNet) * allocationRatio;
   });
 
@@ -376,119 +431,131 @@ function _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData) {
   };
 }
 
-function _buildInvestorSnapshotForDate(investor, systemSnapshot, distributableNetProfit, existingSnapshot = null) {
-  // Paid snapshots are frozen — recalculating would change the recorded profit amount
-  if (existingSnapshot?.isPaid === true &&
-      existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION) {
+function _buildInvestorSnapshotForDate(
+  investor,
+  systemSnapshot,
+  precedingCapital,
+  openingCapital,
+  existingSnapshot = null
+) {
+  // Paid snapshots are historical records and must stay frozen.
+  if (existingSnapshot?.isPaid === true) {
     return existingSnapshot;
   }
 
-  const openingCapital = asNumber(investor.halfCumulativeCapital) > 0
-    ? asNumber(investor.halfCumulativeCapital) * 2
-    : asNumber(systemSnapshot.openingCapital);
-  const vfDailyFlow = asNumber(systemSnapshot.vfDailyFlow);
-  const instaDailyFlow = asNumber(systemSnapshot.instaDailyFlow);
-  const totalDailyFlow = asNumber(systemSnapshot.totalDailyFlow);
-  const hurdle = asNumber(investor.halfCumulativeCapital) > 0
-    ? asNumber(investor.halfCumulativeCapital)
-    : openingCapital / 2;
-  const investorCap = asNumber(investor.investedAmount) / 2;
-  const excessFlow = Math.max(0, totalDailyFlow - hurdle);
-  const eligibleTotal = Math.min(excessFlow, investorCap);
-  const shareFactor = asNumber(investor.profitSharePercent) / 100;
-  const flowRatio = totalDailyFlow > 0 ? (eligibleTotal / totalDailyFlow) : 0;
-  const investorProfit = Math.max(0, asNumber(distributableNetProfit) * flowRatio * shareFactor);
+  const hurdle = (asNumber(openingCapital) / 2) + asNumber(precedingCapital);
+  const totalFlow = asNumber(systemSnapshot.totalFlow);
+  const vfFlow = asNumber(systemSnapshot.totalVfDistributed);
+  const instaFlow = asNumber(systemSnapshot.totalInstaDistributed);
 
-  const vfFlowRatio = totalDailyFlow > 0 ? (vfDailyFlow / totalDailyFlow) : 0;
-  const instaFlowRatio = totalDailyFlow > 0 ? (instaDailyFlow / totalDailyFlow) : 0;
-  const vfShare = eligibleTotal * vfFlowRatio;
-  const instaShare = eligibleTotal * instaFlowRatio;
-  const vfProfit = investorProfit * vfFlowRatio;
-  const instaProfit = investorProfit * instaFlowRatio;
+  let investorProfit = 0;
+  let vfInvestorProfit = 0;
+  let instaInvestorProfit = 0;
+  let excess = 0;
+  let vfExcess = 0;
+  let instaExcess = 0;
+
+  if (totalFlow > hurdle) {
+    excess = totalFlow - hurdle;
+    vfExcess = excess * (totalFlow > 0 ? (vfFlow / totalFlow) : 0);
+    instaExcess = excess * (totalFlow > 0 ? (instaFlow / totalFlow) : 0);
+
+    const vfNetPer1000 = Math.max(0, asNumber(systemSnapshot.vfNetPer1000));
+    const instaNetPer1000 = Math.max(0, asNumber(systemSnapshot.instaNetPer1000));
+    const shareFactor = asNumber(investor.profitSharePercent) / 100;
+
+    vfInvestorProfit = (vfExcess / 1000) * vfNetPer1000 * shareFactor;
+    instaInvestorProfit = (instaExcess / 1000) * instaNetPer1000 * shareFactor;
+    investorProfit = vfInvestorProfit + instaInvestorProfit;
+  }
 
   return {
     calculationVersion: PROFIT_CALCULATION_VERSION,
     date: systemSnapshot.date,
     workingDays: 1,
-    openingCapital,
-    totalLoansOutstanding: 0,
-    currentTotalCapital: 0,
-    capitalShortfall: Math.max(0, hurdle - totalDailyFlow),
-    totalVfCollected: 0,
-    totalInstaCollected: 0,
-    currentBankBalance: 0,
-    usdExchangeEGP: 0,
-    retailerVfDebt: 0,
-    collectorCash: 0,
-    retailerInstaDebt: 0,
-    vfRawFlow: asNumber(systemSnapshot.totalSellAmount),
-    instaRawFlow: asNumber(systemSnapshot.totalInstaAmount),
-    vfDailyFlow: asNumber(systemSnapshot.vfDailyFlow),
-    instaDailyFlow: asNumber(systemSnapshot.instaDailyFlow),
-    totalDailyFlow,
-    halfCumulativeCapital: asNumber(investor.halfCumulativeCapital),
-    eligibleTotal,
-    vfShare,
-    instaShare,
-    avgBuyPrice: asNumber(systemSnapshot.avgBuy),
-    avgSellPrice: asNumber(systemSnapshot.avgSell),
-    buyEntriesCount: asNumber(systemSnapshot.buyEntriesCount),
-    sellEntriesCount: asNumber(systemSnapshot.sellEntriesCount),
-    vfProfitPer1000: asNumber(systemSnapshot.spread),
-    instaProfitPer1000: asNumber(systemSnapshot.systemInstaProfitPer1000),
-    totalInstaPayProfit: asNumber(systemSnapshot.instaProfit),
-    totalInstaPayVolume: asNumber(systemSnapshot.totalInstaAmount),
-    vfProfit,
-    instaProfit,
-    totalGrossProfit: asNumber(distributableNetProfit),
+    hurdle,
+    precedingCapital,
+    excess,
+    vfExcess,
+    instaExcess,
+    vfNetPer1000: asNumber(systemSnapshot.vfNetPer1000),
+    instaNetPer1000: asNumber(systemSnapshot.instaNetPer1000),
+    vfInvestorProfit,
+    instaInvestorProfit,
     investorProfit,
-    isPaid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION && existingSnapshot?.isPaid === true,
-    paidAt: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidAt ?? null) : null,
-    paidByUid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidByUid ?? null) : null,
+    totalFlow,
+    vfFlow,
+    instaFlow,
+    profitSharePercent: asNumber(investor.profitSharePercent),
+    
+    // Audit / State Snapshot (V3.1 Clean Return)
+    openingCapital: asNumber(openingCapital),
+    totalLoansOutstanding: asNumber(systemSnapshot.totalOutstandingLoans),
+    currentTotalAssets: asNumber(systemSnapshot.currentTotalAssets),
+    reconciledProfit: asNumber(systemSnapshot.reconciledProfit),
+    currentBankBalance: asNumber(systemSnapshot.bankBalance),
+    usdExchangeEGP: asNumber(systemSnapshot.usdExchangeEGP),
+    retailerVfDebt: asNumber(systemSnapshot.retailerDebt),
+    collectorCash: asNumber(systemSnapshot.collectorCash),
+    retailerInstaDebt: asNumber(systemSnapshot.retailerInstaDebt),
+    globalAvgBuyPrice: asNumber(systemSnapshot.globalAvgBuyPrice),
+    totalNetProfit: asNumber(systemSnapshot.totalNetProfit), 
+    
+    isPaid: existingSnapshot?.isPaid === true,
+    paidAt: existingSnapshot?.paidAt ?? null,
+    paidByUid: existingSnapshot?.paidByUid ?? null,
     calculatedAt: Date.now()
   };
 }
 
-function _buildPartnerSnapshotForDate(partner, systemSnapshot, distributableNetProfit, totalInvestorProfitDeducted, existingSnapshot = null) {
-  // Paid snapshots are frozen — recalculating would change the recorded profit amount
-  if (existingSnapshot?.isPaid === true &&
-      existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION) {
-    return existingSnapshot;
-  }
-
-  const businessNetProfitBeforeInvestors = asNumber(distributableNetProfit);
-  const businessNetProfitAfterInvestors = Math.max(0, businessNetProfitBeforeInvestors - asNumber(totalInvestorProfitDeducted));
-  const partnerProfit = businessNetProfitAfterInvestors * (asNumber(partner.sharePercent) / 100);
+function _buildPartnerSnapshotForDate(partner, systemSnapshot, totalInvestorProfitDeducted, existingSnapshot = null, allocationRatio = 1) {
+  const totalNetProfit = asNumber(systemSnapshot.totalNetProfit);
+  const reconciledPool = Math.max(0, totalNetProfit * asNumber(allocationRatio));
+  const remainingForPartners = Math.max(0, reconciledPool - asNumber(totalInvestorProfitDeducted));
+  const partnerProfit = remainingForPartners * (asNumber(partner.sharePercent) / 100);
 
   return {
     calculationVersion: PROFIT_CALCULATION_VERSION,
     date: systemSnapshot.date,
     workingDays: 1,
-    vfDailyFlow: asNumber(systemSnapshot.vfDailyFlow),
-    instaDailyFlow: asNumber(systemSnapshot.instaDailyFlow),
-    totalDistVf: asNumber(systemSnapshot.totalDistVf),
-    outstandingRetailerVfDebt: asNumber(systemSnapshot.outstandingRetailerVfDebt),
-    effectiveVfDist: asNumber(systemSnapshot.effectiveVfDist),
-    systemAvgBuyPrice: asNumber(systemSnapshot.avgBuy),
-    systemAvgSellPrice: asNumber(systemSnapshot.avgSell),
-    systemVfProfitPer1000: asNumber(systemSnapshot.spread),
-    systemInstaProfitPer1000: asNumber(systemSnapshot.systemInstaProfitPer1000),
-    businessGrossProfit: asNumber(systemSnapshot.businessGrossProfit),
-    totalFees: asNumber(systemSnapshot.totalFees),
-    internalVfFees: asNumber(systemSnapshot.internalVfFees),
-    externalVfFees: asNumber(systemSnapshot.externalVfFees),
-    instaFees: asNumber(systemSnapshot.instaFees),
-    totalInvestorProfitDeducted: asNumber(totalInvestorProfitDeducted),
-    businessNetProfitBeforeInvestors,
-    businessNetProfitAfterInvestors,
-    businessNetProfit: businessNetProfitAfterInvestors,
-    sharePercent: asNumber(partner.sharePercent),
+    
+    // Core Distribution
+    totalNetProfit,
+    allocationRatio: asNumber(allocationRatio),
+    reconciledPool,
+    totalInvestorProfitDeducted,
+    remainingForPartners,
     partnerProfit,
-    isPaid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION && existingSnapshot?.isPaid === true,
-    paidAt: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidAt ?? null) : null,
-    paidByUid: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidByUid ?? null) : null,
-    paidFromType: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidFromType ?? null) : null,
-    paidFromId: existingSnapshot?.calculationVersion === PROFIT_CALCULATION_VERSION ? (existingSnapshot?.paidFromId ?? null) : null,
+    sharePercent: asNumber(partner.sharePercent),
+    
+    // V3.1 Performance Breakdown (Direct from systemSnapshot)
+    vfSpreadProfit: asNumber(systemSnapshot.vfSpreadProfit),
+    vfDepositProfit: asNumber(systemSnapshot.vfDepositProfit),
+    vfDiscountCost: asNumber(systemSnapshot.vfDiscountCost),
+    vfFeeCost: asNumber(systemSnapshot.vfFeeCost),
+    vfNetProfit: asNumber(systemSnapshot.vfNetProfit),
+    vfNetPer1000: asNumber(systemSnapshot.vfNetPer1000),
+    
+    instaGrossProfit: asNumber(systemSnapshot.instaGrossProfit),
+    instaFeeCost: asNumber(systemSnapshot.instaFeeCost),
+    instaNetProfit: asNumber(systemSnapshot.instaNetProfit),
+    instaNetPer1000: asNumber(systemSnapshot.instaNetPer1000),
+    
+    generalExpenses: asNumber(systemSnapshot.generalExpenses),
+    globalAvgBuyPrice: asNumber(systemSnapshot.globalAvgBuyPrice),
+    
+    // Flow Metrics
+    vfDailyFlow: asNumber(systemSnapshot.totalVfDistributed),
+    instaDailyFlow: asNumber(systemSnapshot.totalInstaDistributed),
+    totalDailyFlow: asNumber(systemSnapshot.totalFlow),
+    totalVfDistributed: asNumber(systemSnapshot.totalVfDistributed),
+    totalInstaDistributed: asNumber(systemSnapshot.totalInstaDistributed),
+
+    isPaid: existingSnapshot?.isPaid === true,
+    paidAt: existingSnapshot?.paidAt ?? null,
+    paidByUid: existingSnapshot?.paidByUid ?? null,
+    paidFromType: existingSnapshot?.paidFromType ?? null,
+    paidFromId: existingSnapshot?.paidFromId ?? null,
     calculatedAt: Date.now()
   };
 }
@@ -502,8 +569,7 @@ module.exports = {
   _sumOutstandingLoans,
   _computeCurrentAssetTotal,
   _computeReconciledProfit,
-  _getGlobalAvgBuyPrice,
-  _getGlobalAvgSellPrice,
+  _calculateInvestorEarningsFixedRate,
   _getPerformanceForDateRange,
   _buildSystemProfitSnapshotForDate,
   _ensureSystemProfitSnapshots,

@@ -651,7 +651,11 @@ exports.processRetailerRequest = onCall({ region: REGION }, async (request) => {
 
   const { portalUserUid, requestId, status, proofImageUrl, adminNotes } = request.data;
   if (!portalUserUid || !requestId || !status) {
-    throw new HttpsError('invalid-argument', 'Missing core request fields.');
+    const missing = [];
+    if (!portalUserUid) missing.push('portalUserUid');
+    if (!requestId) missing.push('requestId');
+    if (!status) missing.push('status');
+    throw new HttpsError('invalid-argument', `Missing core request fields: ${missing.join(', ')}.`);
   }
 
   const db = admin.database();

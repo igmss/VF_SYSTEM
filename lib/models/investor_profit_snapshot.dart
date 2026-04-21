@@ -2,79 +2,80 @@ class InvestorProfitSnapshot {
   final int calculationVersion;
   final String date;
   final int workingDays;
+  
+  // Waterfall Hurdle Logic
+  final double hurdle;
+  final double precedingCapital;
+  final double excess;
+  final double vfExcess;
+  final double instaExcess;
+  
+  // Flow & Performance
+  final double totalFlow; // totalVf + totalInsta
+  final double vfFlow;
+  final double instaFlow;
+  final double vfNetPer1000;
+  final double instaNetPer1000;
+  final double profitSharePercent;
+  
+  // Final Distribution
+  final double vfInvestorProfit;
+  final double instaInvestorProfit;
+  final double investorProfit;
+  
+  // Business State (Audit)
   final double openingCapital;
   final double totalLoansOutstanding;
-  final double currentTotalCapital;
-  final double capitalShortfall;
-  final double totalVfCollected;
-  final double totalInstaCollected;
+  final double currentTotalAssets;
+  final double reconciledProfit;
   final double currentBankBalance;
   final double usdExchangeEGP;
   final double retailerVfDebt;
   final double collectorCash;
   final double retailerInstaDebt;
-  final double vfRawFlow;
-  final double instaRawFlow;
-  final double vfDailyFlow;
-  final double instaDailyFlow;
-  final double totalDailyFlow;
-  final double halfCumulativeCapital;
-  final double eligibleTotal;
-  final double vfShare;
-  final double instaShare;
-  final double avgBuyPrice;
-  final double avgSellPrice;
-  final int buyEntriesCount;
-  final int sellEntriesCount;
-  final double vfProfitPer1000;
-  final double instaProfitPer1000;
-  final double totalInstaPayProfit;
-  final double totalInstaPayVolume;
-  final double vfProfit;
-  final double instaProfit;
-  final double totalGrossProfit;
-  final double investorProfit;
+  
+  // Ledger Activity / Profit Breakdown (Audit)
+  final double globalAvgBuyPrice;
+  final double totalNetProfit;
+  final double vfNetProfit;
+  final double instaNetProfit;
+  
   final bool isPaid;
   final int? paidAt;
   final String? paidByUid;
   final int calculatedAt;
 
   InvestorProfitSnapshot({
-    this.calculationVersion = 0,
+    required this.calculationVersion,
     required this.date,
     required this.workingDays,
+    required this.hurdle,
+    required this.precedingCapital,
+    required this.excess,
+    required this.vfExcess,
+    required this.instaExcess,
+    required this.totalFlow,
+    required this.vfFlow,
+    required this.instaFlow,
+    required this.vfNetPer1000,
+    required this.instaNetPer1000,
+    required this.profitSharePercent,
+    required this.vfInvestorProfit,
+    required this.instaInvestorProfit,
+    required this.investorProfit,
     required this.openingCapital,
     required this.totalLoansOutstanding,
-    required this.currentTotalCapital,
-    required this.capitalShortfall,
-    required this.totalVfCollected,
-    required this.totalInstaCollected,
+    required this.currentTotalAssets,
+    required this.reconciledProfit,
     required this.currentBankBalance,
     required this.usdExchangeEGP,
     required this.retailerVfDebt,
     required this.collectorCash,
     required this.retailerInstaDebt,
-    required this.vfRawFlow,
-    required this.instaRawFlow,
-    required this.vfDailyFlow,
-    required this.instaDailyFlow,
-    required this.totalDailyFlow,
-    required this.halfCumulativeCapital,
-    required this.eligibleTotal,
-    required this.vfShare,
-    required this.instaShare,
-    required this.avgBuyPrice,
-    required this.avgSellPrice,
-    required this.buyEntriesCount,
-    required this.sellEntriesCount,
-    required this.vfProfitPer1000,
-    required this.instaProfitPer1000,
-    required this.totalInstaPayProfit,
-    required this.totalInstaPayVolume,
-    required this.vfProfit,
-    required this.instaProfit,
-    required this.totalGrossProfit,
-    required this.investorProfit,
+    required this.globalAvgBuyPrice,
+    required this.totalNetProfit,
+    required this.vfNetProfit,
+    required this.instaNetProfit,
     required this.isPaid,
     this.paidAt,
     this.paidByUid,
@@ -86,38 +87,33 @@ class InvestorProfitSnapshot {
       'calculationVersion': calculationVersion,
       'date': date,
       'workingDays': workingDays,
+      'hurdle': hurdle,
+      'precedingCapital': precedingCapital,
+      'excess': excess,
+      'vfExcess': vfExcess,
+      'instaExcess': instaExcess,
+      'totalFlow': totalFlow,
+      'vfFlow': vfFlow,
+      'instaFlow': instaFlow,
+      'vfNetPer1000': vfNetPer1000,
+      'instaNetPer1000': instaNetPer1000,
+      'profitSharePercent': profitSharePercent,
+      'vfInvestorProfit': vfInvestorProfit,
+      'instaInvestorProfit': instaInvestorProfit,
+      'investorProfit': investorProfit,
       'openingCapital': openingCapital,
       'totalLoansOutstanding': totalLoansOutstanding,
-      'currentTotalCapital': currentTotalCapital,
-      'capitalShortfall': capitalShortfall,
-      'totalVfCollected': totalVfCollected,
-      'totalInstaCollected': totalInstaCollected,
+      'currentTotalAssets': currentTotalAssets,
+      'reconciledProfit': reconciledProfit,
       'currentBankBalance': currentBankBalance,
       'usdExchangeEGP': usdExchangeEGP,
       'retailerVfDebt': retailerVfDebt,
       'collectorCash': collectorCash,
       'retailerInstaDebt': retailerInstaDebt,
-      'vfRawFlow': vfRawFlow,
-      'instaRawFlow': instaRawFlow,
-      'vfDailyFlow': vfDailyFlow,
-      'instaDailyFlow': instaDailyFlow,
-      'totalDailyFlow': totalDailyFlow,
-      'halfCumulativeCapital': halfCumulativeCapital,
-      'eligibleTotal': eligibleTotal,
-      'vfShare': vfShare,
-      'instaShare': instaShare,
-      'avgBuyPrice': avgBuyPrice,
-      'avgSellPrice': avgSellPrice,
-      'buyEntriesCount': buyEntriesCount,
-      'sellEntriesCount': sellEntriesCount,
-      'vfProfitPer1000': vfProfitPer1000,
-      'instaProfitPer1000': instaProfitPer1000,
-      'totalInstaPayProfit': totalInstaPayProfit,
-      'totalInstaPayVolume': totalInstaPayVolume,
-      'vfProfit': vfProfit,
-      'instaProfit': instaProfit,
-      'totalGrossProfit': totalGrossProfit,
-      'investorProfit': investorProfit,
+      'globalAvgBuyPrice': globalAvgBuyPrice,
+      'totalNetProfit': totalNetProfit,
+      'vfNetProfit': vfNetProfit,
+      'instaNetProfit': instaNetProfit,
       'isPaid': isPaid,
       'paidAt': paidAt,
       'paidByUid': paidByUid,
@@ -142,38 +138,33 @@ class InvestorProfitSnapshot {
       calculationVersion: asInt(map['calculationVersion']),
       date: map['date'] ?? '',
       workingDays: asInt(map['workingDays']),
+      hurdle: asDouble(map['hurdle']),
+      precedingCapital: asDouble(map['precedingCapital']),
+      excess: asDouble(map['excess']),
+      vfExcess: asDouble(map['vfExcess']),
+      instaExcess: asDouble(map['instaExcess']),
+      totalFlow: asDouble(map['totalFlow']),
+      vfFlow: asDouble(map['vfFlow'] ?? map['vfDailyFlow']),
+      instaFlow: asDouble(map['instaFlow'] ?? map['instaDailyFlow']),
+      vfNetPer1000: asDouble(map['vfNetPer1000']),
+      instaNetPer1000: asDouble(map['instaNetPer1000']),
+      profitSharePercent: asDouble(map['profitSharePercent']),
+      vfInvestorProfit: asDouble(map['vfInvestorProfit']),
+      instaInvestorProfit: asDouble(map['instaInvestorProfit']),
+      investorProfit: asDouble(map['investorProfit']),
       openingCapital: asDouble(map['openingCapital']),
       totalLoansOutstanding: asDouble(map['totalLoansOutstanding']),
-      currentTotalCapital: asDouble(map['currentTotalCapital']),
-      capitalShortfall: asDouble(map['capitalShortfall']),
-      totalVfCollected: asDouble(map['totalVfCollected']),
-      totalInstaCollected: asDouble(map['totalInstaCollected']),
+      currentTotalAssets: asDouble(map['currentTotalAssets'] ?? map['currentTotalCapital']),
+      reconciledProfit: asDouble(map['reconciledProfit']),
       currentBankBalance: asDouble(map['currentBankBalance']),
       usdExchangeEGP: asDouble(map['usdExchangeEGP']),
       retailerVfDebt: asDouble(map['retailerVfDebt']),
       collectorCash: asDouble(map['collectorCash']),
       retailerInstaDebt: asDouble(map['retailerInstaDebt']),
-      vfRawFlow: asDouble(map['vfRawFlow']),
-      instaRawFlow: asDouble(map['instaRawFlow']),
-      vfDailyFlow: asDouble(map['vfDailyFlow']),
-      instaDailyFlow: asDouble(map['instaDailyFlow']),
-      totalDailyFlow: asDouble(map['totalDailyFlow']),
-      halfCumulativeCapital: asDouble(map['halfCumulativeCapital']),
-      eligibleTotal: asDouble(map['eligibleTotal']),
-      vfShare: asDouble(map['vfShare']),
-      instaShare: asDouble(map['instaShare']),
-      avgBuyPrice: asDouble(map['avgBuyPrice']),
-      avgSellPrice: asDouble(map['avgSellPrice']),
-      buyEntriesCount: asInt(map['buyEntriesCount']),
-      sellEntriesCount: asInt(map['sellEntriesCount']),
-      vfProfitPer1000: asDouble(map['vfProfitPer1000']),
-      instaProfitPer1000: asDouble(map['instaProfitPer1000']),
-      totalInstaPayProfit: asDouble(map['totalInstaPayProfit']),
-      totalInstaPayVolume: asDouble(map['totalInstaPayVolume']),
-      vfProfit: asDouble(map['vfProfit']),
-      instaProfit: asDouble(map['instaProfit']),
-      totalGrossProfit: asDouble(map['totalGrossProfit']),
-      investorProfit: asDouble(map['investorProfit']),
+      globalAvgBuyPrice: asDouble(map['globalAvgBuyPrice']),
+      totalNetProfit: asDouble(map['totalNetProfit'] ?? map['totalGrossProfit']),
+      vfNetProfit: asDouble(map['vfNetProfit']),
+      instaNetProfit: asDouble(map['instaNetProfit']),
       isPaid: map['isPaid'] == true,
       paidAt: map['paidAt'] != null ? asInt(map['paidAt']) : null,
       paidByUid: map['paidByUid'],
@@ -181,5 +172,5 @@ class InvestorProfitSnapshot {
     );
   }
 
-  bool get isCurrentVersion => calculationVersion >= 2;
+  bool get isCurrentVersion => calculationVersion >= 3;
 }

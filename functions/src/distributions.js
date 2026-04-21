@@ -17,6 +17,9 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
   await requireFinanceRole(uid);
 
+  console.log(`--- [distributeVfCash] REQUEST: UID=${uid} ---`);
+  console.log(`    DATA:`, JSON.stringify(request.data));
+
   const retailerId = request.data?.retailerId?.toString();
   const fromVfNumberId = request.data?.fromVfNumberId?.toString();
   const fromVfPhone = request.data?.fromVfPhone?.toString();
@@ -26,14 +29,18 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
   const applyCredit = request.data?.applyCredit === true;
   const createdByUid = uid;
   const notes = request.data?.notes?.toString().trim() || null;
-  if (!retailerId || !fromVfNumberId || !fromVfPhone || amount <= 0 || fees < 0) {
-    throw new HttpsError('invalid-argument', 'Invalid distribution request.');
-  }
+
+  if (!retailerId) throw new HttpsError('invalid-argument', 'Missing "retailerId" field.');
+  if (!fromVfNumberId) throw new HttpsError('invalid-argument', 'Missing "fromVfNumberId" field.');
+  if (!fromVfPhone) throw new HttpsError('invalid-argument', 'Missing "fromVfPhone" field.');
+  if (amount <= 0) throw new HttpsError('invalid-argument', 'The "amount" must be greater than zero.');
+  if (fees < 0) throw new HttpsError('invalid-argument', 'The "fees" cannot be negative.');
 
   const db = admin.database();
   const totalDeduction = amount + fees;
   const now = new Date();
   const nowIso = now.toISOString();
+  const dateStr = nowIso.split('T')[0];
   const nowTs = now.getTime();
 
   // ─── Phase 1: Compute retailer amounts (read-only, no lock) ──────────────
@@ -105,6 +112,7 @@ exports.distributeVfCash = onCall({ region: REGION }, async (request) => {
     },
     [`retailers/${retailerId}/totalAssigned`]: admin.database.ServerValue.increment(actualDebtIncrease),
     [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
+    [`summary/daily_flow/${dateStr}/vf`]: admin.database.ServerValue.increment(amount),
   };
 
   if (creditUsed > 0) {
@@ -167,13 +175,13 @@ exports.distributeInstaPay = onCall({ region: REGION }, async (request) => {
   console.log(`    BANK_ID: "${bankAccountId}"`);
   console.log(`    AMT: ${amount}, FEES: ${fees}, CREDIT: ${applyCredit}`);
 
-  if (!retailerId || !bankAccountId || amount <= 0) {
-    console.error(`    ABORT: Invalid arguments.`);
-    throw new HttpsError('invalid-argument', 'Invalid InstaPay distribution request.');
-  }
+  if (!retailerId) throw new HttpsError('invalid-argument', 'Missing "retailerId" field.');
+  if (!bankAccountId) throw new HttpsError('invalid-argument', 'Missing "bankAccountId" field.');
+  if (amount <= 0) throw new HttpsError('invalid-argument', 'The "amount" must be greater than zero.');
 
   const now = new Date();
   const nowIso = now.toISOString();
+  const dateStr = nowIso.split('T')[0];
   const nowTs = now.getTime();
 
   // ─── Phase 1: Fetching retailer and bank ────────────
@@ -273,6 +281,7 @@ exports.distributeInstaPay = onCall({ region: REGION }, async (request) => {
     [`retailers/${retailerId}/instaPayTotalAssigned`]: admin.database.ServerValue.increment(actualDebtIncrease),
     [`retailers/${retailerId}/lastUpdatedAt`]: nowIso,
     [`bank_accounts/${bankAccountId}/lastUpdatedAt`]: nowIso,
+    [`summary/daily_flow/${dateStr}/insta`]: admin.database.ServerValue.increment(amount),
   };
 
   if (creditUsed > 0) {

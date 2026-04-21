@@ -164,20 +164,27 @@ exports.rebuildProfitSnapshots = onCall({ region: REGION }, async (request) => {
     throw new HttpsError('invalid-argument', 'startDate must be <= endDate.');
   }
 
-  let existingInvestorSnapshots = {};
-  let existingPartnerSnapshots = {};
-  if (!resetPaidFlags) {
-    const [existingInvSnap, existingPartSnap] = await Promise.all([
-      db.ref('investor_profit_snapshots').once('value'),
-      db.ref('partner_profit_snapshots').once('value'),
-    ]);
-    existingInvestorSnapshots = existingInvSnap.exists() ? existingInvSnap.val() : {};
-    existingPartnerSnapshots = existingPartSnap.exists() ? existingPartSnap.val() : {};
+  const [existingInvSnap, existingPartSnap] = await Promise.all([
+    db.ref('investor_profit_snapshots').once('value'),
+    db.ref('partner_profit_snapshots').once('value'),
+  ]);
+  const existingInvestorSnapshots = existingInvSnap.exists() ? existingInvSnap.val() : {};
+  const existingPartnerSnapshots = existingPartSnap.exists() ? existingPartSnap.val() : {};
+
+  // v3.1 Waterfall Hurdle Logic: Sort active investors by join date
+  const activeInvestors = [];
+  if (investorsSnap.exists()) {
+    investorsSnap.forEach(child => {
+      activeInvestors.push({ ...child.val(), id: child.key });
+    });
   }
+  activeInvestors.sort((a, b) => formatDateKey(a.investmentDate).localeCompare(formatDateKey(b.investmentDate)));
 
   const updates = {};
   const rebuiltDates = [];
   const dateKeys = [];
+  const bankRefunds = {};
+  const vfRefunds = {};
 
   for (
     let cursor = new Date(normalizedStart);
@@ -192,28 +199,36 @@ exports.rebuildProfitSnapshots = onCall({ region: REGION }, async (request) => {
     systemSnapshots[dayKey] = _buildSystemProfitSnapshotForDate(dbData, dayKey);
     updates[`system_profit_snapshots/${dayKey}`] = systemSnapshots[dayKey];
   });
+
   const distributionContext = _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData);
 
   for (const dayKey of dateKeys) {
     const systemSnapshot = systemSnapshots[dayKey];
     const investorProfitByDate = {};
-    if (investorsSnap.exists()) {
-      investorsSnap.forEach((child) => {
-        const investorId = child.key;
-        const investor = child.val();
-        if (investor.status !== 'active') return;
-        if (!isInvestorEligibleForDate(investor, dayKey)) return;
+    
+    let precedingCapital = 0;
+    for (const investor of activeInvestors) {
+      if (investor.status !== 'active') continue;
+      
+      const invId = investor.id;
+      if (!isInvestorEligibleForDate(investor, dayKey)) {
+        precedingCapital += asNumber(investor.investedAmount);
+        continue;
+      }
 
-        const existingInvSnap = resetPaidFlags ? null : (existingInvestorSnapshots[investorId]?.[dayKey] || null);
-        const dailyInvestorSnapshot = _buildInvestorSnapshotForDate(
-          investor,
-          systemSnapshot,
-          distributionContext.distributableProfitByDate[dayKey] || 0,
-          existingInvSnap
-        );
-        investorProfitByDate[dayKey] = (investorProfitByDate[dayKey] || 0) + asNumber(dailyInvestorSnapshot.investorProfit);
-        updates[`investor_profit_snapshots/${investorId}/${dayKey}`] = dailyInvestorSnapshot;
-      });
+      const existingInvSnap = resetPaidFlags ? null : (existingInvestorSnapshots[invId]?.[dayKey] || null);
+      const dailyInvestorSnapshot = _buildInvestorSnapshotForDate(
+        investor,
+        systemSnapshot,
+        precedingCapital,
+        dbData.openingCapital,
+        existingInvSnap
+      );
+      
+      investorProfitByDate[dayKey] = (investorProfitByDate[dayKey] || 0) + asNumber(dailyInvestorSnapshot.investorProfit);
+      updates[`investor_profit_snapshots/${invId}/${dayKey}`] = dailyInvestorSnapshot;
+      
+      precedingCapital += asNumber(investor.investedAmount);
     }
 
     if (partnersSnap.exists()) {
@@ -222,19 +237,81 @@ exports.rebuildProfitSnapshots = onCall({ region: REGION }, async (request) => {
         const partner = child.val();
         if (partner.status !== 'active' && partner.status !== undefined) return;
 
-        const existingPartSnap = resetPaidFlags ? null : (existingPartnerSnapshots[partnerId]?.[dayKey] || null);
+        const oldPartSnap = existingPartnerSnapshots[partnerId]?.[dayKey] || null;
+
+        if (resetPaidFlags && oldPartSnap && oldPartSnap.isPaid) {
+          const refundAmt = asNumber(oldPartSnap.partnerProfit);
+          const type = oldPartSnap.paidFromType;
+          const srcId = oldPartSnap.paidFromId;
+          
+          if (type === 'bank' && srcId) {
+            bankRefunds[srcId] = (bankRefunds[srcId] || 0) + refundAmt;
+          } else if (type === 'vf' && srcId) {
+            vfRefunds[srcId] = (vfRefunds[srcId] || 0) + refundAmt;
+          }
+        }
+
+        const existingPartSnap = resetPaidFlags ? null : oldPartSnap;
         const partnerSnapshot = _buildPartnerSnapshotForDate(
           partner,
           systemSnapshot,
-          distributionContext.distributableProfitByDate[dayKey] || 0,
           asNumber(investorProfitByDate[dayKey] || 0),
-          existingPartSnap
+          existingPartSnap,
+          asNumber(distributionContext.allocationRatio || 1)
         );
         updates[`partner_profit_snapshots/${partnerId}/${dayKey}`] = partnerSnapshot;
       });
     }
 
     rebuiltDates.push(dayKey);
+  }
+
+  if (resetPaidFlags) {
+    const { v4: uuidv4 } = require('uuid');
+    const nowTs = Date.now();
+    let totalRollbackAmt = 0;
+
+    for (const [bankId, amount] of Object.entries(bankRefunds)) {
+      if (amount > 0) {
+        updates[`bank_accounts/${bankId}/balance`] = admin.database.ServerValue.increment(amount);
+        updates[`bank_accounts/${bankId}/lastUpdatedAt`] = new Date(nowTs).toISOString();
+        const txId = uuidv4();
+        updates[`financial_ledger/${txId}`] = {
+          id: txId,
+          type: 'SYSTEM_CORRECTION',
+          amount: amount,
+          toId: bankId,
+          toLabel: 'Bank Account Rollback',
+          notes: `Rebuilt ${rebuiltDates.length} snapshots causing automatic rollback of previous partner profit payments.`,
+          createdByUid: uid,
+          timestamp: nowTs,
+        };
+        totalRollbackAmt += amount;
+      }
+    }
+
+    for (const [vfId, amount] of Object.entries(vfRefunds)) {
+      if (amount > 0) {
+        updates[`mobile_numbers/${vfId}/outTotalUsed`] = admin.database.ServerValue.increment(-amount);
+        updates[`mobile_numbers/${vfId}/outDailyUsed`] = admin.database.ServerValue.increment(-amount);
+        updates[`mobile_numbers/${vfId}/outMonthlyUsed`] = admin.database.ServerValue.increment(-amount);
+        updates[`mobile_numbers/${vfId}/lastUpdatedAt`] = new Date(nowTs).toISOString();
+        const txId = uuidv4();
+        updates[`financial_ledger/${txId}`] = {
+          id: txId,
+          type: 'SYSTEM_CORRECTION',
+          amount: amount,
+          toId: vfId,
+          toLabel: 'VF Number Rollback',
+          notes: `Rebuilt ${rebuiltDates.length} snapshots causing automatic rollback of previous partner profit payments.`,
+          createdByUid: uid,
+          timestamp: nowTs,
+        };
+        totalRollbackAmt += amount;
+      }
+    }
+    
+    console.log(`[ROLLBACK] resetPaidFlags=true. Refunded ${totalRollbackAmt} EGP total across banks and VF numbers.`);
   }
 
   await db.ref().update(updates);

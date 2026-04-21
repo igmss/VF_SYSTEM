@@ -524,21 +524,54 @@ class RetailersScreen extends StatelessWidget {
                   onChanged: (val) => setSt(() => applyCredit = val ?? false),
                 ),
             ],
-            confirmLabel: 'Assign',
+            confirmLabel: 'assign'.tr(),
             isLoading: isSubmitting,
             onConfirm: () async {
               final num = numbers.firstWhere((n) => n.id == selectedId);
               final amount = double.tryParse(amtCtrl.text) ?? 0;
               final fees = double.tryParse(feesCtrl.text) ?? 0;
-              if (amount <= 0) return false;
+              
+              if (amount <= 0) {
+                if (context.mounted) {
+                   ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text('enter_valid_amount'.tr()), backgroundColor: Colors.red),
+                  );
+                }
+                return false;
+              }
+              
+              if (num.currentBalance < (amount + fees)) {
+                if (context.mounted) {
+                   ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text('insufficient_vf_balance'.tr(args: [num.phoneNumber, (amount + fees).toStringAsFixed(0)])),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return false;
+              }
+
               try {
                 await dist.distributeVfCash(
-                  retailerId: retailer.id, fromVfNumberId: num.id, fromVfPhone: num.phoneNumber,
-                  amount: amount, fees: fees, chargeFeesToRetailer: isExternalWallet,
-                  applyCredit: applyCredit, createdByUid: auth.currentUser?.uid ?? 'system',
+                  retailerId: retailer.id, 
+                  fromVfNumberId: num.id, 
+                  fromVfPhone: num.phoneNumber,
+                  amount: amount, 
+                  fees: fees, 
+                  chargeFeesToRetailer: isExternalWallet,
+                  applyCredit: applyCredit, 
+                  createdByUid: auth.currentUser?.uid ?? 'system',
                 );
                 return true;
-              } catch (e) { return false; }
+              } catch (e) {
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(e.toString().replaceAll('Exception: ', '')), backgroundColor: Colors.red),
+                  );
+                }
+                return false;
+              }
             },
           );
         },

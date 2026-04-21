@@ -59,7 +59,7 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     notifyListeners();
     try {
       final callable = dist._functions.httpsCallable('distributeVfCash');
-      await callable.call({
+      final requestData = {
         'retailerId': retailerId,
         'fromVfNumberId': fromVfNumberId,
         'fromVfPhone': fromVfPhone,
@@ -69,7 +69,10 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
         'applyCredit': applyCredit,
         'createdByUid': createdByUid,
         if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-      });
+      };
+      print('--- PROV: distributeVfCash CALL ---');
+      print('    Payload: $requestData');
+      await callable.call(requestData);
       await dist.loadAll();
     } finally {
       dist._isDistributing = false;
@@ -96,7 +99,7 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     print('    Retailer: $retailerId, Bank: $bankAccountId, Amt: $amount, Fees: $fees');
     try {
       final callable = dist._functions.httpsCallable('distributeInstaPay');
-      final result = await callable.call({
+      final requestData = {
         'retailerId': retailerId,
         'bankAccountId': bankAccountId,
         'amount': amount,
@@ -104,7 +107,10 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
         'applyCredit': applyCredit,
         'createdByUid': createdByUid,
         if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-      });
+      };
+      print('--- PROV: distributeInstaPay CALL ---');
+      print('    Payload: $requestData');
+      final result = await callable.call(requestData);
       print('--- PROV: distributeInstaPay SUCCESS ---');
       print('    Result: ${result.data}');
       await dist.loadAll();

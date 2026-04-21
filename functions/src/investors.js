@@ -9,9 +9,12 @@ const {
   _ensureSystemProfitSnapshots,
   _buildProfitDistributionContext,
   _buildInvestorSnapshotForDate,
+  _calculateInvestorEarningsFixedRate,
+  _computeReconciledProfit,
 } = require('./shared/profitEngine');
-
 const REGION = 'asia-east1';
+
+
 
 exports.recordInvestorCapital = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
@@ -76,6 +79,7 @@ exports.recordInvestorCapital = onCall({ region: REGION }, async (request) => {
     notes: notes || null,
     createdByUid: createdByUid || uid,
     createdAt: nowTs,
+    capitalHistory: { [formatDateKey(investmentDate || nowTs)]: numAmount }
   };
 
   const updates = {};
@@ -97,186 +101,243 @@ exports.recordInvestorCapital = onCall({ region: REGION }, async (request) => {
   return { success: true, investorId, halfCumulativeCapital };
 });
 
-exports.calculateInvestorDailyProfit = onCall({ region: REGION }, async (request) => {
+/**
+ * V6.0: Time-sensitive hurdle system.
+ * Each day's hurdle = (effectiveCapital(date) / 2) + precedingCapital
+ * Where: effectiveCapital(date) = openingCapital that was set on or before that date
+ *                               - outstanding loan principal on that date
+ * Changing openingCapital or issuing/repaying loans ONLY affects calculations
+ * from that event date forward — historical dates are never retroactively changed.
+ */
+exports.getInvestorPerformance = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
-  await requireFinanceRole(uid);
 
-  const { investorId, date, workingDays } = request.data;
-  const numWorkingDays = asNumber(workingDays);
-  if (numWorkingDays <= 0) throw new HttpsError('invalid-argument', 'workingDays must be > 0.');
-
+  const { investorId } = request.data;
   const db = admin.database();
-  const investorSnap = await db.ref(`investors/${investorId}`).once('value');
-  if (!investorSnap.exists()) throw new HttpsError('not-found', 'Investor not found.');
-  const investor = investorSnap.val();
-  if (investor.status !== 'active') throw new HttpsError('failed-precondition', 'Investor is not active.');
 
-  const results = await Promise.all([
+  const [capitalSnap, capitalHistorySnap, ledgerSnap, investorsSnap, loansSnap] = await Promise.all([
     db.ref('system_config/openingCapital').once('value'),
+    db.ref('system_config/openingCapitalHistory').once('value'),
     db.ref('financial_ledger').once('value'),
-    db.ref('bank_accounts').once('value'),
-    db.ref('usd_exchange').once('value'),
-    db.ref('retailers').once('value'),
-    db.ref('collectors').once('value'),
-    db.ref('loans').orderByChild('status').equalTo('active').once('value'),
-    db.ref('system_config/module_start_dates').once('value'),
     db.ref('investors').orderByChild('status').equalTo('active').once('value'),
-    db.ref('mobile_numbers').once('value')
+    db.ref('loans').once('value'),
   ]);
 
-  const dbData = {
-    openingCapital: asNumber(results[0].val()),
-    ledgerSnap: results[1],
-    banksSnap: results[2],
-    usdSnap: results[3],
-    retailersSnap: results[4],
-    collectorsSnap: results[5],
-    loansSnap: results[6],
-    moduleDatesSnap: results[7],
-    investorsSnap: results[8],
-    mobileNumbersSnap: results[9]
+  // ── Capital history: { 'YYYY-MM-DD': value } ───────────────────────────
+  // Seed: if no history exists, treat the current value as valid from epoch
+  const rawHistory = capitalHistorySnap.val() || {};
+  if (Object.keys(rawHistory).length === 0) {
+    rawHistory['2000-01-01'] = asNumber(capitalSnap.val()); // fallback for all dates
+  }
+  const capitalHistory = Object.entries(rawHistory)
+    .map(([d, v]) => ({ date: d, value: asNumber(v) }))
+    .sort((a, b) => a.date.localeCompare(b.date)); // ascending
+
+  // Returns the openingCapital that was set on or before the given date
+  const getCapitalOnDate = (date) => {
+    let val = capitalHistory[0].value;
+    for (const entry of capitalHistory) {
+      if (entry.date <= date) val = entry.value;
+      else break;
+    }
+    return val;
   };
 
-  const systemSnapshots = await _ensureSystemProfitSnapshots(db, date, numWorkingDays, dbData);
-  const dateKeys = getDateKeysForRange(date, numWorkingDays)
-    .filter((dayKey) => isInvestorEligibleForDate(investor, dayKey));
-  const updates = {};
-
-  if (dateKeys.length === 0) {
-    throw new HttpsError(
-      'failed-precondition',
-      `Selected range is before investor start date ${investor.investmentDate}.`
-    );
-  }
-  const distributionContext = _buildProfitDistributionContext(dateKeys, systemSnapshots, dbData);
-
-  let aggregateInvestorProfit = 0;
-  let aggregateEligibleTotal = 0;
-  let aggregateVfShare = 0;
-  let aggregateInstaShare = 0;
-  let aggregateVfProfit = 0;
-  let aggregateInstaProfit = 0;
-  let aggregateGrossProfit = 0;
-  let aggregateVfDailyFlow = 0;
-  let aggregateInstaDailyFlow = 0;
-  let aggregateTotalDailyFlow = 0;
-  let aggregateVfRawFlow = 0;
-  let aggregateInstaRawFlow = 0;
-  let aggregateInstaPayProfit = 0;
-  let aggregateInstaPayVolume = 0;
-  let aggregateCapitalShortfall = 0;
-  let aggregateBuyEntries = 0;
-  let aggregateSellEntries = 0;
-  let aggregateAvgBuyWeighted = 0;
-  let aggregateAvgSellWeighted = 0;
-  let aggregateVfProfitPer1000Weighted = 0;
-  let aggregateInstaProfitPer1000Weighted = 0;
-  let firstDailySnapshot = null;
-
-  for (const dayKey of dateKeys) {
-    const systemSnapshot = systemSnapshots[dayKey];
-    const existingSnap = await db.ref(`investor_profit_snapshots/${investorId}/${dayKey}`).once('value');
-    const dailyInvestorSnapshot = _buildInvestorSnapshotForDate(
-      investor,
-      systemSnapshot,
-      distributionContext.distributableProfitByDate[dayKey] || 0,
-      existingSnap.exists() ? existingSnap.val() : null
-    );
-
-    updates[`investor_profit_snapshots/${investorId}/${dayKey}`] = dailyInvestorSnapshot;
-
-    if (!firstDailySnapshot) firstDailySnapshot = dailyInvestorSnapshot;
-
-    aggregateInvestorProfit += asNumber(dailyInvestorSnapshot.investorProfit);
-    aggregateEligibleTotal += asNumber(dailyInvestorSnapshot.eligibleTotal);
-    aggregateVfShare += asNumber(dailyInvestorSnapshot.vfShare);
-    aggregateInstaShare += asNumber(dailyInvestorSnapshot.instaShare);
-    aggregateVfProfit += asNumber(dailyInvestorSnapshot.vfProfit);
-    aggregateInstaProfit += asNumber(dailyInvestorSnapshot.instaProfit);
-    aggregateGrossProfit += asNumber(dailyInvestorSnapshot.totalGrossProfit);
-    aggregateVfDailyFlow += asNumber(dailyInvestorSnapshot.vfDailyFlow);
-    aggregateInstaDailyFlow += asNumber(dailyInvestorSnapshot.instaDailyFlow);
-    aggregateTotalDailyFlow += asNumber(dailyInvestorSnapshot.totalDailyFlow);
-    aggregateVfRawFlow += asNumber(dailyInvestorSnapshot.vfRawFlow);
-    aggregateInstaRawFlow += asNumber(dailyInvestorSnapshot.instaRawFlow);
-    aggregateInstaPayProfit += asNumber(dailyInvestorSnapshot.totalInstaPayProfit);
-    aggregateInstaPayVolume += asNumber(dailyInvestorSnapshot.totalInstaPayVolume);
-    aggregateCapitalShortfall += asNumber(dailyInvestorSnapshot.capitalShortfall);
-    aggregateBuyEntries += asNumber(dailyInvestorSnapshot.buyEntriesCount);
-    aggregateSellEntries += asNumber(dailyInvestorSnapshot.sellEntriesCount);
-    aggregateAvgBuyWeighted += asNumber(dailyInvestorSnapshot.avgBuyPrice);
-    aggregateAvgSellWeighted += asNumber(dailyInvestorSnapshot.avgSellPrice);
-    aggregateVfProfitPer1000Weighted += asNumber(dailyInvestorSnapshot.vfProfitPer1000);
-    aggregateInstaProfitPer1000Weighted += asNumber(dailyInvestorSnapshot.instaProfitPer1000);
+  // ── Loan timeline: list of { issuedDate, principal, repaidDate|null } ──
+  const loanEvents = [];
+  if (loansSnap.exists()) {
+    loansSnap.forEach((child) => {
+      const loan = child.val();
+      const issuedDate = (() => {
+        const d = new Date(asNumber(loan.issuedAt));
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      })();
+      const repaidDate = loan.repaidAt ? (() => {
+        const d = new Date(asNumber(loan.repaidAt));
+        return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+      })() : null;
+      loanEvents.push({
+        principal: asNumber(loan.principalAmount),
+        issuedDate,
+        repaidDate, // null = still outstanding
+      });
+    });
   }
 
-  await db.ref().update(updates);
-
-  const divisor = Math.max(1, dateKeys.length);
-  return {
-    ...(firstDailySnapshot || {}),
-    date: formatDateKey(date),
-    workingDays: divisor,
-    vfRawFlow: aggregateVfRawFlow,
-    instaRawFlow: aggregateInstaRawFlow,
-    vfDailyFlow: aggregateVfDailyFlow / divisor,
-    instaDailyFlow: aggregateInstaDailyFlow / divisor,
-    totalDailyFlow: aggregateTotalDailyFlow / divisor,
-    capitalShortfall: aggregateCapitalShortfall / divisor,
-    eligibleTotal: aggregateEligibleTotal,
-    vfShare: aggregateVfShare,
-    instaShare: aggregateInstaShare,
-    avgBuyPrice: aggregateAvgBuyWeighted / divisor,
-    avgSellPrice: aggregateAvgSellWeighted / divisor,
-    buyEntriesCount: aggregateBuyEntries,
-    sellEntriesCount: aggregateSellEntries,
-    vfProfitPer1000: aggregateVfProfitPer1000Weighted / divisor,
-    instaProfitPer1000: aggregateInstaProfitPer1000Weighted / divisor,
-    totalInstaPayProfit: aggregateInstaPayProfit,
-    totalInstaPayVolume: aggregateInstaPayVolume,
-    vfProfit: aggregateVfProfit,
-    instaProfit: aggregateInstaProfit,
-    totalGrossProfit: aggregateGrossProfit,
-    investorProfit: aggregateInvestorProfit,
-    operationalProfit: distributionContext.operationalProfit,
-    reconciledProfit: distributionContext.reconciledProfit,
-    finalDistributableProfit: distributionContext.finalDistributableProfit,
-    calculatedAt: Date.now()
+  // Returns total outstanding loan principal on a specific date
+  const getLoansOnDate = (date) => {
+    let outstanding = 0;
+    loanEvents.forEach(({ principal, issuedDate, repaidDate }) => {
+      if (issuedDate > date) return; // not yet issued
+      if (repaidDate && repaidDate <= date) return; // already fully repaid
+      outstanding += principal;
+    });
+    return outstanding;
   };
+
+  // ── Step 1: Build daily flow map from ledger ───────────────────────────
+  const dailyFlow = {};
+  if (ledgerSnap.exists()) {
+    ledgerSnap.forEach((child) => {
+      const tx = child.val();
+      if (tx.type !== 'DISTRIBUTE_VFCASH' && tx.type !== 'DISTRIBUTE_INSTAPAY') return;
+      const dt = new Date(asNumber(tx.timestamp));
+      const dateKey = `${dt.getUTCFullYear()}-${String(dt.getUTCMonth()+1).padStart(2,'0')}-${String(dt.getUTCDate()).padStart(2,'0')}`;
+      if (!dailyFlow[dateKey]) dailyFlow[dateKey] = { vf: 0, insta: 0 };
+      if (tx.type === 'DISTRIBUTE_VFCASH')   dailyFlow[dateKey].vf    += asNumber(tx.amount);
+      if (tx.type === 'DISTRIBUTE_INSTAPAY') dailyFlow[dateKey].insta += asNumber(tx.amount);
+    });
+  }
+
+  // ── Step 2: Load investors ─────────────────────────────────────────────
+  const activeInvestors = [];
+  investorsSnap.forEach(c => activeInvestors.push({ ...c.val(), id: c.key }));
+  activeInvestors.sort((a, b) =>
+    formatDateKey(a.investmentDate).localeCompare(formatDateKey(b.investmentDate))
+  );
+
+  // ── Step 3: Core per-day profit calculator (time-sensitive tiered hurdle) ──
+  const getInvestorCapitalOnDate = (inv, date) => {
+    if (!inv.capitalHistory) return asNumber(inv.investedAmount);
+    const history = Object.entries(inv.capitalHistory)
+      .map(([d, v]) => ({ date: d, value: asNumber(v) }))
+      .sort((a, b) => a.date.localeCompare(b.date));
+    if (history.length === 0) return asNumber(inv.investedAmount);
+    let val = history[0].value;
+    for (const entry of history) {
+      if (entry.date <= date) val = entry.value;
+      else break;
+    }
+    return val;
+  };
+
+  const getPrecedingHalfCapitalOnDate = (currentInvestorId, date) => {
+    let sum = 0;
+    for (const inv of activeInvestors) {
+      if (inv.id === currentInvestorId) break;
+      if (formatDateKey(inv.investmentDate) <= date) {
+        sum += getInvestorCapitalOnDate(inv, date) / 2;
+      }
+    }
+    return sum;
+  };
+
+  const calcDay = (investor, date, vfFlow, instaFlow) => {
+    const sharePercent = asNumber(investor.profitSharePercent);
+    const effectiveCap = getCapitalOnDate(date) - getLoansOnDate(date);
+    const baseHurdle = (effectiveCap / 2);
+    const precedingHalfCap = getPrecedingHalfCapitalOnDate(investor.id, date);
+    const investorHurdle = baseHurdle + precedingHalfCap;
+    
+    const totalFlow = vfFlow + instaFlow;
+    const grossExcess = Math.max(0, totalFlow - investorHurdle);
+
+    if (grossExcess <= 0) {
+      return { hurdle: investorHurdle, effectiveCap, excessFlow: 0, vfExcess: 0, instaExcess: 0, vfProfit: 0, instaProfit: 0, profit: 0 };
+    }
+
+    const myHistoricalCap = getInvestorCapitalOnDate(investor, date);
+    const myHalfCap = myHistoricalCap / 2;
+    const allowedExcess = Math.min(grossExcess, myHalfCap);
+
+    if (allowedExcess <= 0) {
+      return { hurdle: investorHurdle, effectiveCap, excessFlow: 0, vfExcess: 0, instaExcess: 0, vfProfit: 0, instaProfit: 0, profit: 0 };
+    }
+
+    const ratio = totalFlow > 0 ? vfFlow / totalFlow : 0;
+    const vfExcess    = allowedExcess * ratio;
+    const instaExcess = allowedExcess * (1 - ratio);
+    const vfProfit    = (vfExcess    / 1000) * 7 * (sharePercent / 100);
+    const instaProfit = (instaExcess / 1000) * 5 * (sharePercent / 100);
+
+    return { hurdle: investorHurdle, effectiveCap, excessFlow: allowedExcess, vfExcess, instaExcess, vfProfit, instaProfit, profit: vfProfit + instaProfit };
+  };
+
+  // ── Step 4: Return single or global ────────────────────────────────────
+  if (investorId) {
+    const investor = activeInvestors.find(i => i.id === investorId);
+    if (!investor) throw new HttpsError('not-found', 'Investor not found or inactive.');
+
+    const startDate = formatDateKey(investor.investmentDate);
+    let totalEarned = 0;
+    const dailyBreakdown = [];
+
+    Object.keys(dailyFlow)
+      .filter(d => d >= startDate)
+      .sort((a, b) => b.localeCompare(a)) // newest first
+      .forEach(date => {
+        const { vf, insta } = dailyFlow[date];
+        const d = calcDay(investor, date, vf, insta);
+        totalEarned += d.profit;
+        dailyBreakdown.push({
+          date,
+          vfFlow: vf,
+          instaFlow: insta,
+          effectiveCap: d.effectiveCap,
+          hurdle: d.hurdle,
+          excessFlow: d.excessFlow,
+          vfExcess: d.vfExcess,
+          instaExcess: d.instaExcess,
+          vfProfit: d.vfProfit,
+          instaProfit: d.instaProfit,
+          profit: d.profit,
+        });
+      });
+
+    const totalPaid = asNumber(investor.totalProfitPaid);
+    return {
+      success: true,
+      investorId,
+      totalEarned,
+      totalPaid,
+      totalVfFlow:    dailyBreakdown.reduce((s, d) => s + d.vfExcess, 0),
+      totalInstaFlow: dailyBreakdown.reduce((s, d) => s + d.instaExcess, 0),
+      payableBalance: Math.max(0, totalEarned - totalPaid),
+      dailyBreakdown,
+    };
+
+  } else {
+    // Global summary
+    let globalTotalEarned  = 0;
+    let globalTotalPaid    = 0;
+    let globalTotalPayable = 0;
+    const investorBreakdown = {};
+
+    activeInvestors.forEach(investor => {
+      const startDate = formatDateKey(investor.investmentDate);
+      let totalEarned = 0;
+
+      Object.entries(dailyFlow)
+        .filter(([d]) => d >= startDate)
+        .forEach(([date, { vf, insta }]) => {
+          totalEarned += calcDay(investor, date, vf, insta).profit;
+        });
+
+      const paid    = asNumber(investor.totalProfitPaid);
+      const payable = Math.max(0, totalEarned - paid);
+      investorBreakdown[investor.id] = { name: investor.name, totalEarned, totalPaid: paid, payableBalance: payable };
+      globalTotalEarned  += totalEarned;
+      globalTotalPaid    += paid;
+      globalTotalPayable += payable;
+    });
+
+    return { success: true, global: true, totalEarned: globalTotalEarned, totalPaid: globalTotalPaid, totalPayable: globalTotalPayable, investorBreakdown };
+  }
 });
-
 exports.payInvestorProfit = onCall({ region: REGION }, async (request) => {
   const uid = request.auth?.uid;
   if (!uid) throw new HttpsError('unauthenticated', 'Login required');
   const role = await getCallerRole(uid);
   if (role !== 'ADMIN') throw new HttpsError('permission-denied', 'Only admins can pay profit.');
 
-  const { investorId, dates, bankAccountId, createdByUid } = request.data;
-  if (!investorId || !dates || !Array.isArray(dates) || dates.length === 0 || !bankAccountId) {
+  const { investorId, amount, bankAccountId, notes, createdByUid } = request.data;
+  const numAmount = asNumber(amount);
+  if (!investorId || numAmount <= 0 || !bankAccountId) {
     throw new HttpsError('invalid-argument', 'Invalid pay profit request.');
   }
 
   const db = admin.database();
-
-  const allInvSnapsSnap = await db.ref(`investor_profit_snapshots/${investorId}`).once('value');
-  const allInvSnaps = allInvSnapsSnap.exists() ? allInvSnapsSnap.val() : {};
-
-  let totalPayout = 0;
-  const snapshotsToUpdate = [];
-
-  for (const date of dates) {
-    const snap = allInvSnaps[date];
-    if (snap && !snap.isPaid) {
-      totalPayout += asNumber(snap.investorProfit);
-      snapshotsToUpdate.push(date);
-    }
-  }
-
-  if (snapshotsToUpdate.length === 0) {
-    throw new HttpsError('failed-precondition', 'No unpaid snapshots found for the given dates.');
-  }
-
   const bankRef = db.ref(`bank_accounts/${bankAccountId}`);
   const bankSnap = await bankRef.once('value');
   if (!bankSnap.exists()) throw new HttpsError('not-found', 'Bank account not found.');
@@ -285,43 +346,39 @@ exports.payInvestorProfit = onCall({ region: REGION }, async (request) => {
   const balanceResult = await bankRef.child('balance').transaction((current) => {
     if (current === null) return current;
     const balance = asNumber(current);
-    if (balance < totalPayout) return;
-    return balance - totalPayout;
+    if (balance < numAmount) return; // Abort if insufficient funds
+    return balance - numAmount;
   });
 
   if (!balanceResult.committed) {
     throw new HttpsError('failed-precondition', 'Insufficient bank balance.');
   }
 
-  const investorSnap = await db.ref(`investors/${investorId}`).once('value');
-  const investorName = investorSnap.exists() ? investorSnap.val().name : 'Investor';
+  const investorRef = db.ref(`investors/${investorId}`);
+  const investorSnap = await investorRef.once('value');
+  const investor = investorSnap.val();
 
   const nowTs = Date.now();
   const txId = uuidv4();
   const updates = {};
 
-  for (const date of snapshotsToUpdate) {
-    updates[`investor_profit_snapshots/${investorId}/${date}/isPaid`] = true;
-    updates[`investor_profit_snapshots/${investorId}/${date}/paidAt`] = nowTs;
-    updates[`investor_profit_snapshots/${investorId}/${date}/paidByUid`] = createdByUid || uid;
-  }
-
-  updates[`investors/${investorId}/totalProfitPaid`] = admin.database.ServerValue.increment(totalPayout);
+  updates[`investors/${investorId}/totalProfitPaid`] = admin.database.ServerValue.increment(numAmount);
+  updates[`investors/${investorId}/lastPaidAt`] = nowTs;
 
   updates[`financial_ledger/${txId}`] = {
     id: txId,
     type: 'INVESTOR_PROFIT_PAID',
-    amount: totalPayout,
+    amount: numAmount,
     fromId: bankAccountId,
     fromLabel: bankName,
-    toLabel: investorName,
-    notes: `Profit for dates: ${dates.join(', ')}`,
+    toLabel: investor.name || 'Investor',
+    notes: notes || 'Investor Profit Payout (V4.0)',
     createdByUid: createdByUid || uid,
     timestamp: nowTs,
   };
 
   await db.ref().update(updates);
-  return { success: true, totalPayout, datesCount: snapshotsToUpdate.length };
+  return { success: true, amount: numAmount };
 });
 
 exports.withdrawInvestorCapital = onCall({ region: REGION }, async (request) => {
@@ -366,12 +423,14 @@ exports.withdrawInvestorCapital = onCall({ region: REGION }, async (request) => 
   const newStatus = newInvestedAmount <= 0 ? 'withdrawn' : 'active';
 
   const nowTs = Date.now();
+  const dateKey = formatDateKey(nowTs);
   const txId = uuidv4();
   const updates = {};
 
   updates[`investors/${investorId}/investedAmount`] = newInvestedAmount;
   updates[`investors/${investorId}/halfInvestedAmount`] = newHalfInvestedAmount;
   updates[`investors/${investorId}/status`] = newStatus;
+  updates[`investors/${investorId}/capitalHistory/${dateKey}`] = newInvestedAmount;
 
   updates[`financial_ledger/${txId}`] = {
     id: txId,

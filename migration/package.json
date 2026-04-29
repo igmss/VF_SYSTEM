@@ -1,0 +1,10 @@
+{
+  "name": "migration",
+  "version": "1.0.0",
+  "description": "Migration script from Firebase RTDB to Supabase",
+  "main": "migrate_to_supabase.js",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.42.0",
+    "dotenv": "^16.4.5"
+  }
+}

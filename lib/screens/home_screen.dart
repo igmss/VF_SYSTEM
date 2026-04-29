@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../providers/app_provider.dart';
+import '../providers/distribution_provider.dart';
 import '../models/models.dart';
+import '../models/financial_transaction.dart';
 import '../theme/app_theme.dart';
 import 'add_number_screen.dart';
 import 'number_details_screen.dart';
@@ -45,7 +47,11 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     setState(() => _reloading = true);
     try {
       final p = context.read<AppProvider>();
-      await p.recalculateAllUsage();
+      // Just re-initialize listeners to refresh data from Supabase.
+      // Do NOT call recalculateAllUsage() — it overwrites correct ledger-based
+      // balances with incorrect transaction-table sums.
+      p.loadMobileNumbers();
+      await Future.delayed(const Duration(milliseconds: 500));
       if (!silent && mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -487,36 +493,88 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     final textMuted = AppTheme.textMutedColor(context);
     final raised = AppTheme.surfaceRaisedColor(context);
     final line = AppTheme.lineColor(context);
-
-    if (provider.transactions.isEmpty) {
-      return Center(
-        child: Padding(
-          padding: const EdgeInsets.only(top: 40),
-          child: Text(
-            'no_activity'.tr(),
-            style: TextStyle(color: textMuted.withValues(alpha: 0.72)),
-          ),
-        ),
-      );
-    }
+    final dist = context.watch<DistributionProvider>();
 
     final selectedNumber = numbers.isNotEmpty ? numbers[_selectedIndex] : null;
 
-    final filtered = provider.transactions
+    // ── Build unified activity items from both sources ─────────────────────
+    // Source 1: Bybit transactions (SELL_USDT = incoming EGP) for this SIM
+    final txItems = provider.transactions
         .where((tx) {
-          final pm = tx.paymentMethod.toLowerCase();
-          final isVf = pm.contains('vodafone') ||
-              pm.contains('voda') ||
-              pm.startsWith('vf') ||
-              pm.contains(' vf');
-          if (!isVf) return false;
-          if (selectedNumber == null) return true;
-          return tx.phoneNumber == selectedNumber.phoneNumber;
+          if (tx.status != 'completed') return false;
+          if (selectedNumber != null && tx.phoneNumber != selectedNumber.phoneNumber) return false;
+          return true;
         })
-        .take(20)
+        .map((tx) => _ActivityItem(
+              icon: tx.side == 1 ? Icons.arrow_downward : Icons.arrow_upward,
+              color: tx.side == 1 ? AppTheme.positiveColor(context) : const Color(0xFFE63946),
+              title: '${tx.side == 1 ? "+" : "-"}${tx.amount.toStringAsFixed(2)} EGP',
+              subtitle: 'Bybit  •  ${tx.bybitOrderId.length > 8 ? tx.bybitOrderId.substring(0, 8) : tx.bybitOrderId}...',
+              trailing: tx.phoneNumber ?? '',
+              timestamp: tx.timestamp,
+            ))
         .toList();
 
-    if (filtered.isEmpty) {
+    // Source 2: Ledger entries involving this SIM
+    final ledgerItems = dist.ledger
+        .where((tx) {
+          if (selectedNumber == null) return false;
+          final isInvolved = tx.fromId == selectedNumber.id || tx.toId == selectedNumber.id;
+          if (!isInvolved) return false;
+          
+          // Only show types relevant to the SIM card view
+          return [
+            FlowType.DISTRIBUTE_VFCASH,
+            FlowType.DISTRIBUTE_INSTAPAY,
+            FlowType.DEPOSIT_TO_VFCASH,
+            FlowType.INTERNAL_VF_TRANSFER,
+            FlowType.CREDIT_RETURN,
+          ].contains(tx.type);
+        })
+        .map((tx) {
+          final isOutgoing = tx.fromId == selectedNumber?.id;
+          final isTransfer = tx.type == FlowType.INTERNAL_VF_TRANSFER;
+          final isDeposit = tx.type == FlowType.DEPOSIT_TO_VFCASH;
+          
+          IconData icon;
+          Color color;
+          String title;
+          String subtitle;
+          
+          if (isTransfer) {
+            icon = Icons.swap_horiz_rounded;
+            color = Colors.blueAccent;
+            title = '${isOutgoing ? "-" : "+"}${tx.amount.toStringAsFixed(2)} EGP';
+            subtitle = 'Transfer  •  ${isOutgoing ? tx.toLabel : tx.fromLabel}';
+          } else if (isDeposit) {
+            icon = Icons.account_balance_wallet_outlined;
+            color = AppTheme.positiveColor(context);
+            title = '+${tx.amount.toStringAsFixed(2)} EGP';
+            subtitle = 'Deposit  •  ${tx.fromLabel ?? ""}';
+          } else {
+            icon = Icons.store_outlined;
+            color = isOutgoing ? const Color(0xFFFF9800) : AppTheme.positiveColor(context);
+            title = '${isOutgoing ? "-" : "+"}${tx.amount.toStringAsFixed(2)} EGP';
+            subtitle = '${tx.type == FlowType.DISTRIBUTE_VFCASH ? "VF Dist" : "InstaPay"}  •  ${isOutgoing ? tx.toLabel : tx.fromLabel}';
+          }
+
+          return _ActivityItem(
+            icon: icon,
+            color: color,
+            title: title,
+            subtitle: subtitle,
+            trailing: isOutgoing ? (tx.toLabel ?? '') : (tx.fromLabel ?? ''),
+            timestamp: tx.timestamp,
+          );
+        })
+        .toList();
+
+    // Merge + sort by timestamp desc, take latest 25
+    final allItems = [...txItems, ...ledgerItems]
+      ..sort((a, b) => b.timestamp.compareTo(a.timestamp));
+    final display = allItems.take(25).toList();
+
+    if (display.isEmpty) {
       return Center(
         child: Padding(
           padding: const EdgeInsets.only(top: 40),
@@ -546,12 +604,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     return ListView.builder(
       shrinkWrap: true,
       physics: const NeverScrollableScrollPhysics(),
-      itemCount: filtered.length,
+      itemCount: display.length,
       itemBuilder: (context, index) {
-        final tx = filtered[index];
-        final isIncoming = tx.side == 1;
-        final color = isIncoming ? AppTheme.positiveColor(context) : const Color(0xFFE63946);
-
+        final item = display[index];
         return Container(
           margin: const EdgeInsets.only(bottom: 10),
           decoration: BoxDecoration(
@@ -565,27 +620,23 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               width: 40,
               height: 40,
               decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.1),
+                color: item.color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12),
               ),
-              child: Icon(
-                isIncoming ? Icons.arrow_downward : Icons.arrow_upward,
-                color: color,
-                size: 18,
-              ),
+              child: Icon(item.icon, color: item.color, size: 18),
             ),
             title: Text(
-              '${isIncoming ? "+" : "-"}${tx.amount.toStringAsFixed(2)} ${tx.currency}',
+              item.title,
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 15,
-                color: color,
+                color: item.color,
               ),
             ),
             subtitle: Padding(
               padding: const EdgeInsets.only(top: 2),
               child: Text(
-                '${tx.paymentMethod}  •  ${tx.bybitOrderId.length > 8 ? tx.bybitOrderId.substring(0, 8) : tx.bybitOrderId}...',
+                item.subtitle,
                 style: TextStyle(fontSize: 11, color: textMuted.withValues(alpha: 0.72)),
               ),
             ),
@@ -594,17 +645,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
                 Text(
-                  tx.phoneNumber ?? 'unassigned'.tr(),
+                  item.trailing,
                   style: TextStyle(
                     fontSize: 11,
-                    color: tx.phoneNumber == null ? Colors.orange : textMuted.withValues(alpha: 0.72),
-                    fontWeight: tx.phoneNumber == null ? FontWeight.bold : FontWeight.normal,
+                    color: textMuted.withValues(alpha: 0.72),
                   ),
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  '${tx.timestamp.day}/${tx.timestamp.month} '
-                  '${tx.timestamp.hour}:${tx.timestamp.minute.toString().padLeft(2, '0')}',
+                  '${item.timestamp.day}/${item.timestamp.month} '
+                  '${item.timestamp.hour}:${item.timestamp.minute.toString().padLeft(2, '0')}',
                   style: TextStyle(fontSize: 10, color: textMuted.withValues(alpha: 0.55)),
                 ),
               ],
@@ -709,4 +759,24 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
   }
+}
+
+/// Unified activity item for the home screen recent activity feed.
+/// Merges Bybit transactions and financial ledger distributions.
+class _ActivityItem {
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final String trailing;
+  final DateTime timestamp;
+
+  const _ActivityItem({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.trailing,
+    required this.timestamp,
+  });
 }

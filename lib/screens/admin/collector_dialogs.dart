@@ -1,5 +1,7 @@
 part of 'collectors_screen.dart';
 
+import '../../widgets/async_button.dart';
+
 class _Dialog extends StatelessWidget {
   final String title;
   final List<Widget> fields;
@@ -31,7 +33,7 @@ class _Dialog extends StatelessWidget {
                   child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton(
+                AsyncButton(
                   onPressed: () async {
                     final shouldClose = await onConfirm();
                     if (shouldClose && context.mounted) {

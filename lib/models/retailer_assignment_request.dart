@@ -47,30 +47,37 @@ class RetailerAssignmentRequest {
       return double.tryParse(v.toString()) ?? 0;
     }
 
-    int? asI(dynamic v) {
-      if (v == null) return null;
-      if (v is int) return v;
-      if (v is num) return v.toInt();
-      return int.tryParse(v.toString());
+    DateTime asDT(dynamic v) {
+      if (v == null) return DateTime.now();
+      if (v is int) return DateTime.fromMillisecondsSinceEpoch(v);
+      return DateTime.tryParse(v.toString()) ?? DateTime.now();
     }
+
+    final createdAtDt = asDT(map['created_at'] ?? map['createdAt']);
+    final updatedAtDt = asDT(map['updated_at'] ?? map['updatedAt']);
+    final completedAtDt = (map['completed_at'] ?? map['completedAt']) != null 
+        ? asDT(map['completed_at'] ?? map['completedAt']) 
+        : null;
 
     return RetailerAssignmentRequest(
       id: map['id']?.toString() ?? id,
-      retailerId: map['retailerId']?.toString() ?? '',
-      createdByUid: map['createdByUid']?.toString() ?? '',
-      requestedAmount: asD(map['requestedAmount']),
-      vfPhoneNumber: map['vfPhoneNumber']?.toString() ?? '',
+      retailerId: (map['retailer_id'] ?? map['retailerId'])?.toString() ?? '',
+      createdByUid: (map['created_by_uid'] ?? map['createdByUid'])?.toString() ?? '',
+      requestedAmount: asD(map['requested_amount'] ?? map['requestedAmount']),
+      vfPhoneNumber: (map['vf_phone_number'] ?? map['vfPhoneNumber'])?.toString() ?? '',
       notes: map['notes']?.toString(),
       status: map['status']?.toString() ?? 'PENDING',
-      createdAt: asI(map['createdAt']) ?? 0,
-      updatedAt: asI(map['updatedAt']) ?? 0,
-      assignedAmount: map['assignedAmount'] != null ? asD(map['assignedAmount']) : null,
-      adminNotes: map['adminNotes']?.toString(),
-      proofImageUrl: map['proofImageUrl']?.toString(),
-      completedAt: asI(map['completedAt']),
-      completedByUid: map['completedByUid']?.toString(),
-      rejectedReason: map['rejectedReason']?.toString(),
-      processingBy: map['processingBy']?.toString(),
+      createdAt: createdAtDt.millisecondsSinceEpoch,
+      updatedAt: updatedAtDt.millisecondsSinceEpoch,
+      assignedAmount: (map['assigned_amount'] ?? map['assignedAmount']) != null 
+          ? asD(map['assigned_amount'] ?? map['assignedAmount']) 
+          : null,
+      adminNotes: (map['admin_notes'] ?? map['adminNotes'])?.toString(),
+      proofImageUrl: (map['proof_image_url'] ?? map['proofImageUrl'])?.toString(),
+      completedAt: completedAtDt?.millisecondsSinceEpoch,
+      completedByUid: (map['completed_by_uid'] ?? map['completedByUid'])?.toString(),
+      rejectedReason: (map['rejected_reason'] ?? map['rejectedReason'])?.toString(),
+      processingBy: (map['processing_by'] ?? map['processingBy'])?.toString(),
     );
   }
 }

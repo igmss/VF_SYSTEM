@@ -1,8 +1,9 @@
 import 'package:flutter/material.dart';
 import '../../theme/app_theme.dart';
 import '../../providers/auth_provider.dart';
-import 'package:provider/provider.dart';
-import 'package:firebase_database/firebase_database.dart';
+import '../../providers/distribution_provider.dart';
+import '../../models/financial_transaction.dart';
+import '../../widgets/async_button.dart';
 import 'package:intl/intl.dart';
 
 // ─── Palette ──────────────────────────────────────────────────────────────────
@@ -60,7 +61,6 @@ class ExchangeRateScreen extends StatefulWidget {
 }
 
 class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
-  final _db = FirebaseDatabase.instance;
 
   /// All loaded points (unfiltered)
   List<_PricePoint> _allPoints = [];
@@ -83,114 +83,71 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
   }
 
   Future<void> _loadHistory() async {
-    setState(() {
-      _loading = true;
-      _error = null;
-    });
-    try {
-      final snap = await _db.ref('financial_ledger').get();
-      if (!snap.exists || snap.value == null) {
-        setState(() => _loading = false);
-        return;
-      }
-
-      final map = Map<String, dynamic>.from(snap.value as Map);
-      final list = <_PricePoint>[];
-
-      for (final v in map.values) {
-        if (v is! Map) continue;
-        final row = Map<String, dynamic>.from(v);
-
-        final type = row['type']?.toString() ?? '';
-        if (type != 'BUY_USDT' && type != 'SELL_USDT') continue;
-
-        final rawPrice = row['usdtPrice'];
-        if (rawPrice == null) continue;
-        final price = (rawPrice as num).toDouble();
-        if (price <= 0) continue;
-
-        final ts = row['timestamp'];
-        DateTime time;
-        if (ts is int) {
-          time = DateTime.fromMillisecondsSinceEpoch(ts);
-        } else {
-          time = DateTime.tryParse(ts?.toString() ?? '') ?? DateTime.now();
-        }
-
-        list.add(_PricePoint(
-          price: price,
-          side: type == 'BUY_USDT' ? 'buy' : 'sell',
-          time: time,
-        ));
-      }
-
-      list.sort((a, b) => a.time.compareTo(b.time));
-
-      setState(() {
-        _allPoints = list;
-        _loading = false;
-      });
-    } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _loading = false;
-      });
-    }
+    // History is now managed by DistributionProvider
+    context.read<DistributionProvider>().loadAll();
   }
 
   // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
-    final auth = context.watch<AuthProvider>();
-    final isEmbedded = auth.isAdmin || auth.isFinance;
+    final dist = context.watch<DistributionProvider>();
+    
+    // Sync _allPoints with DistributionProvider.ledger
+    final ledger = dist.ledger
+        .where((t) => t.type == FlowType.BUY_USDT || t.type == FlowType.SELL_USDT)
+        .map((t) => _PricePoint(
+              price: t.usdtPrice ?? 0.0,
+              side: t.type == FlowType.BUY_USDT ? 'buy' : 'sell',
+              time: t.timestamp,
+            ))
+        .where((p) => p.price > 0)
+        .toList();
+    
+    // Sort ascending for chart
+    ledger.sort((a, b) => a.time.compareTo(b.time));
+    _allPoints = ledger;
 
-    final bodyContent = _loading
+    final bodyContent = dist.isLoading
         ? const Center(child: CircularProgressIndicator(color: _kBlue))
-        : _error != null
-            ? _buildError()
+        : dist.error != null
+            ? _buildError(dist.error!)
             : _buildContent();
 
-    if (isEmbedded) {
-      return Scaffold(
-        backgroundColor: AppTheme.scaffoldBg(context),
-        body: bodyContent,
-      );
-    } else {
-      return Scaffold(
-        backgroundColor: AppTheme.scaffoldBg(context),
-        appBar: AppBar(
-          backgroundColor: AppTheme.surfaceColor(context),
-          iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
-          title: Text(
-            'EGP / USDT Rate',
-            style: TextStyle(
-                color: AppTheme.textPrimaryColor(context),
-                fontWeight: FontWeight.bold,
-                fontSize: 16),
-          ),
-          actions: [
-            IconButton(
-              icon: Icon(Icons.refresh,
-                  color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7)),
-              onPressed: _loadHistory,
-            ),
-          ],
+    return Scaffold(
+      backgroundColor: AppTheme.scaffoldBg(context),
+      appBar: AppBar(
+        backgroundColor: AppTheme.surfaceColor(context),
+        iconTheme: IconThemeData(color: AppTheme.textPrimaryColor(context)),
+        elevation: 0,
+        title: Text(
+          'EGP / USDT Rate',
+          style: TextStyle(
+              color: AppTheme.textPrimaryColor(context),
+              fontWeight: FontWeight.bold,
+              fontSize: 16),
         ),
-        body: bodyContent,
-      );
-    }
+        actions: [
+          AsyncIconButton(
+            icon: Icon(Icons.refresh,
+                color: AppTheme.textPrimaryColor(context).withValues(alpha: 0.7)),
+            onPressed: _loadHistory,
+          ),
+        ],
+      ),
+      body: bodyContent,
+    );
   }
 
   // ── Error state ───────────────────────────────────────────────────────────
 
-  Widget _buildError() => Center(
+  Widget _buildError(String error) => Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             const Icon(Icons.error_outline, size: 48, color: _kRed),
             const SizedBox(height: 12),
-            Text('Could not load rate history.',
+            Text('Error: $error',
                 style: TextStyle(color: AppTheme.textMutedColor(context))),
             const SizedBox(height: 8),
             TextButton(
@@ -283,7 +240,7 @@ class _ExchangeRateScreenState extends State<ExchangeRateScreen> {
           // ── Top row: refresh + period filter ──────────────────────────
           Row(
             children: [
-              TextButton.icon(
+              AsyncTextButton.icon(
                 icon: const Icon(Icons.refresh, size: 16, color: _kBlue),
                 label: const Text('Refresh',
                     style: TextStyle(color: _kBlue, fontSize: 12)),

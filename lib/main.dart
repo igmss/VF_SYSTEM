@@ -14,6 +14,8 @@ import 'screens/retailer/retailer_dashboard.dart';
 import 'screens/splash_screen.dart';
 import 'theme/app_theme.dart';
 import 'firebase_options.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'config/supabase_config.dart';
 
 import 'package:vodafone_cash_tracker/services/ussd_service.dart';
 import 'package:vodafone_cash_tracker/services/retailer_ussd_auto_queue_service.dart';
@@ -30,6 +32,11 @@ Future<void> main() async {
   } catch (e) {
     debugPrint('Firebase init warning: $e');
   }
+
+  await Supabase.initialize(
+    url: SupabaseConfig.url,
+    anonKey: SupabaseConfig.anonKey,
+  );
 
   runApp(
     EasyLocalization(

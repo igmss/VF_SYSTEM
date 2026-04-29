@@ -49,3 +49,4 @@ app.*.map.json
 ledger.json
 recent_ledger.json
 vodatracking-default-rtdb-export.json
+.env

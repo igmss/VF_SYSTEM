@@ -7,6 +7,7 @@ import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/financial_transaction.dart';
+import '../../widgets/async_button.dart';
 
 class UsdExchangeScreen extends StatelessWidget {
   const UsdExchangeScreen({Key? key}) : super(key: key);
@@ -233,15 +234,15 @@ class UsdExchangeScreen extends StatelessWidget {
             onPressed: () => Navigator.pop(context),
             child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
           ),
-          ElevatedButton(
+          AsyncButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: _gold,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
             ),
-            onPressed: () {
+            onPressed: () async {
               final val = double.tryParse(ctrl.text) ?? 0;
-              dist.setUsdExchangeBalance(val);
-              Navigator.pop(context);
+              await dist.setUsdExchangeBalance(val);
+              if (context.mounted) Navigator.pop(context);
             },
             child: Text('Save', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
           ),

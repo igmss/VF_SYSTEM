@@ -43,13 +43,13 @@ class BankAccount {
 
     return BankAccount(
       id: map['id']?.toString() ?? const Uuid().v4(),
-      bankName: map['bankName']?.toString() ?? '',
-      accountHolder: map['accountHolder']?.toString() ?? '',
-      accountNumber: map['accountNumber']?.toString() ?? '',
+      bankName: (map['bank_name'] ?? map['bankName'])?.toString() ?? '',
+      accountHolder: (map['account_holder'] ?? map['accountHolder'])?.toString() ?? '',
+      accountNumber: (map['account_number'] ?? map['accountNumber'])?.toString() ?? '',
       balance: asDouble(map['balance']),
-      isDefaultForBuy: map['isDefaultForBuy'] ?? false,
-      createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
-      lastUpdatedAt: DateTime.tryParse(map['lastUpdatedAt']?.toString() ?? '') ?? DateTime.now(),
+      isDefaultForBuy: (map['is_default_for_buy'] ?? map['isDefaultForBuy']) == true,
+      createdAt: DateTime.tryParse((map['created_at'] ?? map['createdAt'])?.toString() ?? '') ?? DateTime.now(),
+      lastUpdatedAt: DateTime.tryParse((map['last_updated_at'] ?? map['lastUpdatedAt'])?.toString() ?? '') ?? DateTime.now(),
     );
   }
 

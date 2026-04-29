@@ -249,21 +249,10 @@ class _DepositTabState extends State<_DepositTab> {
           const SizedBox(height: 24),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              icon: isDepositing
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                      ),
-                    )
-                  : const Icon(Icons.upload_rounded),
+            child: AsyncButton.icon(
+              icon: const Icon(Icons.upload_rounded),
               label: Text(
-                isDepositing
-                    ? 'processing'.tr()
-                    : isBankDestination
+                isBankDestination
                         ? 'deposit_to_bank'.tr()
                         : 'deposit_to_default_vf'.tr(),
               ),
@@ -276,7 +265,8 @@ class _DepositTabState extends State<_DepositTab> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                 elevation: 0,
               ),
-              onPressed: collector == null || isDepositing ? null : _doDeposit,
+              isDisabled: collector == null || isDepositing,
+              onPressed: () async => _doDeposit(),
             ),
           ),
         ],

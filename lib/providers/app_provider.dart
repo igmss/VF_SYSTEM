@@ -1,33 +1,27 @@
 import 'package:flutter/material.dart';
 import 'package:uuid/uuid.dart';
 import 'dart:async';
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../models/models.dart';
 import '../services/database_service.dart';
 
 class SyncResult {
   final int added;
-  final int skipped; // duplicates
+  final int skipped; 
   final String? error;
-
   const SyncResult({this.added = 0, this.skipped = 0, this.error});
-
   bool get isSuccess => error == null;
-
   @override
   String toString() {
     if (error != null) return 'Sync failed: $error';
-    return 'Added $added order${added == 1 ? '' : 's'}'
-        '${skipped > 0 ? ', skipped $skipped duplicate${skipped == 1 ? '' : 's'}' : ''}';
+    return 'Added $added order${added == 1 ? '' : 's'}${skipped > 0 ? ', skipped $skipped duplicate${skipped == 1 ? '' : 's'}' : ''}';
   }
 }
 
 class AppProvider extends ChangeNotifier {
-  bool _isInit = false;
   bool _isSyncing = false;
-
   final DatabaseService _dbService = DatabaseService();
+  final sb.SupabaseClient _supabase = sb.Supabase.instance.client;
 
   List<MobileNumber> _mobileNumbers = [];
   List<CashTransaction> _transactions = [];
@@ -35,11 +29,10 @@ class AppProvider extends ChangeNotifier {
   bool _isLoading = false;
   String? _error;
 
-  // Sync state
   bool _hasApiCredentials = false;
-  DateTime? _lastSyncTime;      // when we last ran a sync (for display)
-  int _lastSyncedOrderTs = 0;   // createTime of newest order synced (for next beginTime)
-  String _syncStatus = '';      // live progress text e.g. "Fetching page 2..."
+  DateTime? _lastSyncTime;      
+  int _lastSyncedOrderTs = 0;   
+  String _syncStatus = '';      
   bool _isLiveSyncEnabled = false;
   Timer? _liveSyncTimer;
   double _collectorVfDepositFeePer1000 = 7.0;
@@ -47,17 +40,13 @@ class AppProvider extends ChangeNotifier {
   String? _publicDefaultNumberPhone;
   List<Map<String, String>> _publicVfNumbers = [];
   
-  // Module Reconciliation Dates
   String _vfStartDate = '2026-03-18';
   String _instaPayStartDate = '2026-04-09';
 
-  // ── Getters ───────────────────────────────────────────────────────────────
-  // ─── Real-Time Stream Subscriptions ───────────────────────────────────────
-  StreamSubscription<List<MobileNumber>>? _numbersSub;
-  StreamSubscription<List<CashTransaction>>? _transactionsSub;
-  StreamSubscription<DatabaseEvent>? _syncDataSub;
-  StreamSubscription<DatabaseEvent>? _bybitMetadataSub;
-  StreamSubscription<DatabaseEvent>? _operationSettingsSub;
+  StreamSubscription? _numbersSub;
+  StreamSubscription? _transactionsSub;
+  StreamSubscription? _syncDataSub;
+  StreamSubscription? _systemConfigSub;
 
   List<MobileNumber> get mobileNumbers => _mobileNumbers;
   List<CashTransaction> get transactions => _transactions;
@@ -68,16 +57,14 @@ class AppProvider extends ChangeNotifier {
   DateTime? get lastSyncTime => _lastSyncTime;
   String get syncStatus => _syncStatus;
   bool get isLiveSyncEnabled => _isLiveSyncEnabled;
-  bool get useServerSync => true;
   double get collectorVfDepositFeePer1000 => _collectorVfDepositFeePer1000;
   String? get publicDefaultNumberId => _publicDefaultNumberId;
   String? get publicDefaultNumberPhone => _publicDefaultNumberPhone;
-  /// List of {id, phoneNumber} maps readable by collectors.
   List<Map<String, String>> get publicVfNumbers => _publicVfNumbers;
   String get vfStartDate => _vfStartDate;
   String get instaPayStartDate => _instaPayStartDate;
 
-  // Callback to trigger Bank logic in DistributionProvider
+  // Callbacks for Bybit Sync (to bridge with DistributionProvider logic)
   Future<void> Function({
     required String bybitOrderId,
     required double usdtQuantity,
@@ -98,29 +85,27 @@ class AppProvider extends ChangeNotifier {
     required DateTime timestamp,
   })? _onSellOrderCallback;
 
-  void setBuyOrderCallback(
-      Future<void> Function({
-        required String bybitOrderId,
-        required double usdtQuantity,
-        required double egpAmount,
-        required double usdtPrice,
-        required DateTime timestamp,
-      }) callback) {
+  void setBuyOrderCallback(Future<void> Function({
+    required String bybitOrderId,
+    required double usdtQuantity,
+    required double egpAmount,
+    required double usdtPrice,
+    required DateTime timestamp,
+  }) callback) {
     _onBuyOrderCallback = callback;
   }
 
-  void setSellOrderCallback(
-      Future<void> Function({
-        required String bybitOrderId,
-        required double egpAmount,
-        required double usdtQuantity,
-        required double usdtPrice,
-        required String paymentMethod,
-        required String? vfNumberId,
-        required String vfNumberLabel,
-        required String createdByUid,
-        required DateTime timestamp,
-      }) callback) {
+  void setSellOrderCallback(Future<void> Function({
+    required String bybitOrderId,
+    required double egpAmount,
+    required double usdtQuantity,
+    required double usdtPrice,
+    required String paymentMethod,
+    required String? vfNumberId,
+    required String vfNumberLabel,
+    required String createdByUid,
+    required DateTime timestamp,
+  }) callback) {
     _onSellOrderCallback = callback;
   }
 
@@ -131,10 +116,9 @@ class AppProvider extends ChangeNotifier {
   Future<void> _initialize() async {
     try {
       _initializeListeners();
-      await _loadLiveSyncState();
     } catch (e) {
-      debugPrint('Initialization error (non-fatal): $e');
-      _error = 'Could not connect to database. Check your internet connection.';
+      debugPrint('Initialization error: $e');
+      _error = 'Could not connect to Supabase.';
       notifyListeners();
     }
   }
@@ -150,16 +134,10 @@ class AppProvider extends ChangeNotifier {
     _numbersSub = _dbService.streamMobileNumbers().listen((numbers) {
       _mobileNumbers = numbers;
       _mobileNumbers.sort((a, b) {
-        if (a.isDefault == b.isDefault) {
-          return a.phoneNumber.compareTo(b.phoneNumber);
-        }
+        if (a.isDefault == b.isDefault) return a.phoneNumber.compareTo(b.phoneNumber);
         return a.isDefault ? -1 : 1;
       });
-      _defaultNumber = _mobileNumbers.isEmpty
-          ? null
-          : _mobileNumbers.where((n) => n.isDefault).firstOrNull ?? _mobileNumbers.first;
-
-      // Admin/Finance Auto-Sync: Ensure public settings are up to date.
+      _defaultNumber = _mobileNumbers.isEmpty ? null : _mobileNumbers.where((n) => n.isDefault).firstOrNull ?? _mobileNumbers.first;
       pushDefaultNumberToPublic();
       notifyListeners();
     });
@@ -171,123 +149,54 @@ class AppProvider extends ChangeNotifier {
     });
 
     _syncDataSub?.cancel();
-    _syncDataSub = FirebaseDatabase.instance.ref('sync_data').onValue.listen((event) {
-      final snap = event.snapshot;
-      if (snap.exists && snap.value != null && snap.value is Map) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        _lastSyncedOrderTs = data['lastSyncedOrderTs'] as int? ?? 0;
-        final ms = data['lastSyncTime'] as int?;
+    _syncDataSub = _supabase.from('sync_state').stream(primaryKey: ['id']).listen((rows) {
+      if (rows.isNotEmpty) {
+        final data = rows.first;
+        _lastSyncedOrderTs = data['last_synced_order_ts'] as int? ?? 0;
+        final ms = data['last_sync_time'] as int?;
         _lastSyncTime = ms != null ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
-      } else {
-        _lastSyncedOrderTs = 0;
-        _lastSyncTime = null;
       }
       notifyListeners();
     });
 
-    _bybitMetadataSub?.cancel();
-    _bybitMetadataSub = FirebaseDatabase.instance
-        .ref('system/api_credentials/bybit_metadata')
-        .onValue
-        .listen((event) {
-      final snap = event.snapshot;
-      if (snap.exists && snap.value is Map) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        _hasApiCredentials = data['configured'] == true;
-      } else {
-        _hasApiCredentials = false;
-      }
-      notifyListeners();
-    });
-
-    _operationSettingsSub?.cancel();
-    _operationSettingsSub = FirebaseDatabase.instance
-        .ref('system/operation_settings')
-        .onValue
-        .listen((event) {
-      final snap = event.snapshot;
-      if (snap.exists && snap.value is Map) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        _collectorVfDepositFeePer1000 =
-            _asDouble(data['collectorVfDepositFeePer1000']);
-        _publicDefaultNumberId = data['defaultVfNumberId']?.toString();
-        _publicDefaultNumberPhone = data['defaultVfNumberPhone']?.toString();
-        // Read the public VF numbers list
-        final rawList = data['vfNumbers'];
-        if (rawList is List) {
-          _publicVfNumbers = rawList
-              .whereType<Map>()
-              .map((m) => {
-                    'id': m['id']?.toString() ?? '',
-                    'phoneNumber': m['phoneNumber']?.toString() ?? '',
-                  })
-              .where((m) => m['id']!.isNotEmpty && m['phoneNumber']!.isNotEmpty)
-              .toList();
-        } else {
-          _publicVfNumbers = [];
+    _systemConfigSub?.cancel();
+    _systemConfigSub = _supabase.from('system_config').stream(primaryKey: ['key']).listen((rows) {
+      for (final row in rows) {
+        final key = row['key'];
+        final val = row['value'];
+        if (key == 'operation_settings') {
+          _collectorVfDepositFeePer1000 = _asDouble(val['collectorVfDepositFeePer1000']);
+          _publicDefaultNumberId = val['defaultVfNumberId']?.toString();
+          _publicDefaultNumberPhone = val['defaultVfNumberPhone']?.toString();
+          if (val['vfNumbers'] is List) {
+            _publicVfNumbers = (val['vfNumbers'] as List).map((m) => {
+              'id': m['id']?.toString() ?? '',
+              'phoneNumber': m['phoneNumber']?.toString() ?? '',
+            }).toList();
+          }
+        } else if (key == 'sync_config') {
+          _isLiveSyncEnabled = val['enabled'] == true;
+        } else if (key == 'bybit_metadata') {
+          _hasApiCredentials = val['configured'] == true;
+        } else if (key == 'module_start_dates') {
+          _vfStartDate = val['vf']?.toString() ?? '2026-03-18';
+          _instaPayStartDate = val['instapay']?.toString() ?? '2026-04-09';
         }
-      } else {
-        _collectorVfDepositFeePer1000 = 7.0;
-        _publicDefaultNumberId = null;
-        _publicDefaultNumberPhone = null;
-        _publicVfNumbers = [];
-      }
-      notifyListeners();
-    });
-
-    FirebaseDatabase.instance
-        .ref('system_config/module_start_dates')
-        .onValue
-        .listen((event) {
-      final snap = event.snapshot;
-      if (snap.exists && snap.value is Map) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        _vfStartDate = data['vf']?.toString() ?? '2026-03-18';
-        _instaPayStartDate = data['instapay']?.toString() ?? '2026-04-09';
       }
       notifyListeners();
     });
   }
 
-  /// Fetches the very latest default VF number directly from Firebase (one-shot read).
-  /// Use this in the collector dashboard to guarantee up-to-date info before a deposit.
-  Future<void> fetchLatestDefaultVfNumber() async {
-    try {
-      final snap = await FirebaseDatabase.instance
-          .ref('system/operation_settings')
-          .get();
-      if (snap.exists && snap.value is Map) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        _publicDefaultNumberId = data['defaultVfNumberId']?.toString();
-        _publicDefaultNumberPhone = data['defaultVfNumberPhone']?.toString();
-      } else {
-        _publicDefaultNumberId = null;
-        _publicDefaultNumberPhone = null;
-      }
-      notifyListeners();
-    } catch (e) {
-      debugPrint('fetchLatestDefaultVfNumber error: $e');
-      rethrow;
-    }
-  }
-
-  /// Syncs the current internal [_defaultNumber] to the public node `system/operation_settings`.
-  /// Also writes the full VF numbers list so collectors can pick any number.
   Future<void> pushDefaultNumberToPublic({MobileNumber? override}) async {
     final numToPush = override ?? _defaultNumber;
-    // Build a safe public list — only id and phoneNumber, no sensitive fields
-    final vfList = _mobileNumbers
-        .map((n) => {'id': n.id, 'phoneNumber': n.phoneNumber})
-        .toList();
-    final updates = <String, dynamic>{
+    final vfList = _mobileNumbers.map((n) => {'id': n.id, 'phoneNumber': n.phoneNumber}).toList();
+    final data = {
       'defaultVfNumberId': numToPush?.id,
       'defaultVfNumberPhone': numToPush?.phoneNumber,
       'vfNumbers': vfList,
+      'collectorVfDepositFeePer1000': _collectorVfDepositFeePer1000,
     };
-    await FirebaseDatabase.instance
-        .ref('system/operation_settings')
-        .update(updates)
-        .catchError((e) => debugPrint('Public sync failed: $e'));
+    await _supabase.from('system_config').upsert({'key': 'operation_settings', 'value': data});
   }
 
   @override
@@ -296,350 +205,105 @@ class AppProvider extends ChangeNotifier {
     _numbersSub?.cancel();
     _transactionsSub?.cancel();
     _syncDataSub?.cancel();
-    _bybitMetadataSub?.cancel();
-    _operationSettingsSub?.cancel();
-    _syncConfigSub?.cancel();
+    _systemConfigSub?.cancel();
     super.dispose();
   }
 
-
-  // ── API Credentials ───────────────────────────────────────────────────────
-
   Future<void> saveApiCredentials(String apiKey, String apiSecret) async {
-    final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
-    await functions.httpsCallable('setBybitCredentials').call({
+    await _supabase.functions.invoke('manual-sync-bybit', body: {
       'apiKey': apiKey,
       'apiSecret': apiSecret,
+      'action': 'set_credentials'
     });
-    _hasApiCredentials = true;
-    notifyListeners();
   }
 
   Future<void> clearApiCredentials() async {
-    final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
-    await functions.httpsCallable('clearBybitCredentials').call();
-    _hasApiCredentials = false;
-    notifyListeners();
+    await _supabase.from('system_config').delete().eq('key', 'bybit_metadata');
   }
 
   Future<void> saveCollectorVfDepositFeePer1000(double feePer1000) async {
-    final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
-    await functions.httpsCallable('setCollectorVfDepositFeePer1000').call({
-      'feePer1000': feePer1000,
-    });
     _collectorVfDepositFeePer1000 = feePer1000;
-    notifyListeners();
+    await pushDefaultNumberToPublic();
   }
 
   Future<void> saveModuleStartDates(String vf, String insta) async {
-    await FirebaseDatabase.instance.ref('system_config/module_start_dates').set({
-      'vf': vf,
-      'instapay': insta,
+    await _supabase.from('system_config').upsert({
+      'key': 'module_start_dates',
+      'value': {'vf': vf, 'instapay': insta}
     });
-    _vfStartDate = vf;
-    _instaPayStartDate = insta;
-    notifyListeners();
   }
 
-  Future<SyncResult> _syncOrdersServer({DateTime? fromDate, bool isSilent = false}) async {
+  Future<SyncResult> syncOrders({DateTime? fromDate, bool isSilent = false}) async {
     if (_isSyncing) return const SyncResult(error: 'Sync in progress');
     _isSyncing = true;
-    if (!isSilent) {
-      _isLoading = true;
-      _syncStatus = 'Requesting server sync...';
-      notifyListeners();
-    }
-
+    if (!isSilent) { _isLoading = true; _syncStatus = 'Syncing...'; notifyListeners(); }
     try {
-      final functions = FirebaseFunctions.instanceFor(region: 'asia-east1');
-
-      // Build payload — include beginTime only if a custom fromDate was chosen
-      Map<String, dynamic>? payload;
-      if (fromDate != null) {
-        final utcDate = DateTime.utc(fromDate.year, fromDate.month, fromDate.day);
-        payload = {'beginTime': utcDate.millisecondsSinceEpoch.toString()};
-        _syncStatus = 'Syncing from ${fromDate.day}/${fromDate.month}/${fromDate.year}...';
-        if (!isSilent) notifyListeners();
-      }
-
-      final result = await functions.httpsCallable('manualSyncBybit').call(payload);
-
-      final Map<String, dynamic> data = Map<String, dynamic>.from(result.data as Map);
-      final added = data['added'] as int? ?? 0;
-      final skipped = data['skipped'] as int? ?? 0;
-
-      // Data updates are real-time via Firebase, but we reload to be sure
-      await loadAllTransactions();
-      await loadMobileNumbers();
-
-      _lastSyncTime = DateTime.now();
-      _syncStatus = '';
-      return SyncResult(added: added, skipped: skipped);
+      final response = await _supabase.functions.invoke('manual-sync-bybit', body: {
+        if (fromDate != null) 'beginTime': fromDate.millisecondsSinceEpoch.toString(),
+      });
+      final data = response.data;
+      return SyncResult(added: data['added'] ?? 0, skipped: data['skipped'] ?? 0);
     } catch (e) {
-      _syncStatus = '';
       return SyncResult(error: e.toString());
     } finally {
       _isSyncing = false;
       _isLoading = false;
+      _syncStatus = ''; // Clear status so the progress bar disappears
       notifyListeners();
     }
-  }
-
-  // ── Live Sync Monitoring ────────────────────────────────────────────────
-  
-  StreamSubscription? _syncConfigSub;
-
-  Future<void> _loadLiveSyncState() async {
-    // Listen to Firebase for the central sync switch without overriding it on startup.
-    _syncConfigSub?.cancel();
-    _syncConfigSub = FirebaseDatabase.instance.ref('system/sync_config').onValue.listen((event) {
-      final snap = event.snapshot;
-      if (snap.exists && snap.value is Map) {
-        final data = Map<String, dynamic>.from(snap.value as Map);
-        _isLiveSyncEnabled = data['enabled'] == true;
-      } else {
-        _isLiveSyncEnabled = false;
-      }
-      notifyListeners();
-    });
-  }
-
-  Future<void> toggleServerSync(bool enabled) async {
-    await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(enabled);
-    notifyListeners();
-  }
-
-  void _startLiveSyncTimer() {
-    _liveSyncTimer?.cancel();
-    _liveSyncTimer = Timer.periodic(const Duration(seconds: 30), (timer) {
-      syncOrders(isSilent: true);
-    });
-    debugPrint('Sync: Live Monitoring STARTED (30s interval) from TS $_lastSyncedOrderTs');
-  }
-
-  void _stopLiveSyncTimer() {
-    _liveSyncTimer?.cancel();
-    _liveSyncTimer = null;
-    debugPrint('Sync: Live Monitoring STOPPED');
   }
 
   Future<void> toggleLiveSync(bool enabled) async {
-    await FirebaseDatabase.instance.ref('system/sync_config/enabled').set(enabled);
+    await _supabase.from('system_config').upsert({
+      'key': 'sync_config',
+      'value': {'enabled': enabled}
+    });
   }
 
-  //  dispose method moved to top
-
-  // ── Mobile Numbers ────────────────────────────────────────────────────────
-
   Future<void> loadMobileNumbers() async {
-    // Deprecated: Now handled automatically via real-time stream `_initializeListeners`
+    // Re-initialize listeners or manually fetch if needed
+    _initializeListeners();
+  }
+
+  Future<List<CashTransaction>> getTransactionsForNumber(String phoneNumber) async {
+    return await _dbService.getTransactionsForNumber(phoneNumber);
   }
 
   Future<void> addMobileNumber({
-    required String phoneNumber,
-    String? name,
-    required double initialBalance,
-    required double inDailyLimit,
-    required double inMonthlyLimit,
-    required double outDailyLimit,
-    required double outMonthlyLimit,
+    required String phoneNumber, String? name, required double initialBalance,
+    required double inDailyLimit, required double inMonthlyLimit,
+    required double outDailyLimit, required double outMonthlyLimit,
   }) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      final number = MobileNumber(
-        id: const Uuid().v4(),
-        phoneNumber: phoneNumber,
-        name: name,
-        initialBalance: initialBalance,
-        inDailyLimit: inDailyLimit,
-        inMonthlyLimit: inMonthlyLimit,
-        outDailyLimit: outDailyLimit,
-        outMonthlyLimit: outMonthlyLimit,
-        isDefault: _mobileNumbers.isEmpty,
-        createdAt: DateTime.now(),
-        lastUpdatedAt: DateTime.now(),
-      );
-      await _dbService.addMobileNumber(number);
-      // Synchronously update local list so we can find it
-      _mobileNumbers.add(number);
-      
-      pushDefaultNumberToPublic(override: number.isDefault ? number : null); 
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      rethrow;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
+    final number = MobileNumber(
+      id: const Uuid().v4(), phoneNumber: phoneNumber, name: name, initialBalance: initialBalance,
+      inDailyLimit: inDailyLimit, inMonthlyLimit: inMonthlyLimit,
+      outDailyLimit: outDailyLimit, outMonthlyLimit: outMonthlyLimit,
+      isDefault: _mobileNumbers.isEmpty, createdAt: DateTime.now(), lastUpdatedAt: DateTime.now(),
+    );
+    await _dbService.addMobileNumber(number);
   }
 
-  Future<void> updateMobileNumber(MobileNumber updatedNumber) async {
-    _isLoading = true;
-    _error = null;
-    notifyListeners();
-
-    try {
-      await _dbService.addMobileNumber(updatedNumber);
-      final index = _mobileNumbers.indexWhere((n) => n.id == updatedNumber.id);
-      if (index != -1) {
-        _mobileNumbers[index] = updatedNumber;
-      }
-      pushDefaultNumberToPublic(override: updatedNumber.isDefault ? updatedNumber : null);
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-      rethrow;
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
-  }
-
-  Future<void> setDefaultNumber(String numberId) async {
-    try {
-      await _dbService.setDefaultNumber(numberId);
-      
-      // Find the target number in our local list for immediate sync
-      final target = _mobileNumbers.where((n) => n.id == numberId).firstOrNull;
-      if (target != null) {
-        await pushDefaultNumberToPublic(override: target);
-      } else {
-        pushDefaultNumberToPublic();
-      }
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-    }
-  }
-
-  Future<void> deleteMobileNumber(String numberId) async {
-    try {
-      await _dbService.deleteMobileNumber(numberId);
-      _mobileNumbers.removeWhere((n) => n.id == numberId);
-      
-      // Recalculate default number locally for immediate sync
-      _defaultNumber = _mobileNumbers.isEmpty
-          ? null
-          : _mobileNumbers.where((n) => n.isDefault).firstOrNull ?? _mobileNumbers.first;
-
-      pushDefaultNumberToPublic(); 
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-    }
-  }
-
-  /// Recalculate dailyUsed / monthlyUsed for every number from actual
-  /// stored transactions (filtered by today / this month).
-  /// Call after reloading or deleting transactions so UI stays accurate.
+  Future<void> updateMobileNumber(MobileNumber updatedNumber) async => await _dbService.addMobileNumber(updatedNumber);
+  Future<void> setDefaultNumber(String numberId) async => await _dbService.setDefaultNumber(numberId);
+  Future<void> deleteMobileNumber(String numberId) async => await _dbService.deleteMobileNumber(numberId);
+  // DISABLED: recalculateAllUsage is a no-op - balances are managed by Supabase RPCs only.
   Future<void> recalculateAllUsage() async {
-    try {
-      for (final number in _mobileNumbers) {
-        await _dbService.recalculateUsageForNumber(number.phoneNumber);
-      }
-      await loadMobileNumbers(); // reload so UI reflects new values
-    } catch (e) {
-      debugPrint('Error recalculating usage: $e');
-    }
+    // Intentionally empty - do not recalculate from transactions table.
+    // Balances come from the financial_ledger via process_bybit_order_sync, distribute_vf_cash, etc.
   }
-
-  // ── Transactions ──────────────────────────────────────────────────────────
-
-  Future<void> loadAllTransactions() async {
-    // Deprecated: Now handled automatically via real-time stream `_initializeListeners`
-  }
-
-  Future<List<CashTransaction>> getTransactionsForNumber(
-      String phoneNumber) async {
-    try {
-      return await _dbService.getTransactionsForNumber(phoneNumber);
-    } catch (e) {
-      return [];
-    }
-  }
-
   Future<void> deleteAllTransactions() async {
-    _isLoading = true;
-    notifyListeners();
-    try {
-      await _dbService.deleteAllTransactions();
-      _transactions.clear();
-      _lastSyncedOrderTs = 0;
-      await recalculateAllUsage();
-      notifyListeners();
-    } catch (e) {
-      _error = e.toString();
-      notifyListeners();
-    } finally {
-      _isLoading = false;
-      notifyListeners();
-    }
+    await _dbService.deleteAllTransactions();
+    // Do NOT call recalculateAllUsage after deleting - balances are ledger-based.
   }
+  Future<void> resetSyncMarkers() async => await _dbService.resetSyncMarkers();
 
-  Future<void> resetSyncMarkers() async {
-    try {
-      await _dbService.resetSyncMarkers();
-      _lastSyncedOrderTs = 0;
-      _lastSyncTime = null;
-      notifyListeners();
-    } catch (e) {
-      debugPrint('Error resetting markers: $e');
-    }
-  }
-
-  // ── Sync ──────────────────────────────────────────────────────────────────
-
-  /// Unified sync method.
-  ///
-  /// [fromDate] — if provided, does a **full sync** from that date.
-  ///              if null, does an **incremental sync** from the last synced order timestamp.
-  ///
-  /// Orders are always deduplicated by `bybitOrderId` before saving.
-  Future<SyncResult> syncOrders({DateTime? fromDate, bool isSilent = false}) async {
-    return _syncOrdersServer(fromDate: fromDate, isSilent: isSilent);
-  }
-
-  // ── Limit Helpers ─────────────────────────────────────────────────────────
-
-  double getInDailyRemaining(MobileNumber n) =>
-      (n.inDailyLimit - n.inDailyUsed).clamp(0, double.infinity);
-
-  double getOutDailyRemaining(MobileNumber n) =>
-      (n.outDailyLimit - n.outDailyUsed).clamp(0, double.infinity);
-
-  double getInMonthlyRemaining(MobileNumber n) =>
-      (n.inMonthlyLimit - n.inMonthlyUsed).clamp(0, double.infinity);
-
-  double getOutMonthlyRemaining(MobileNumber n) =>
-      (n.outMonthlyLimit - n.outMonthlyUsed).clamp(0, double.infinity);
-
-  bool isInDailyLimitExceeded(MobileNumber n) =>
-      n.inDailyUsed >= n.inDailyLimit;
-
-  bool isOutDailyLimitExceeded(MobileNumber n) =>
-      n.outDailyUsed >= n.outDailyLimit;
-
-  bool isInMonthlyLimitExceeded(MobileNumber n) =>
-      n.inMonthlyUsed >= n.inMonthlyLimit;
-
-  bool isOutMonthlyLimitExceeded(MobileNumber n) =>
-      n.outMonthlyUsed >= n.outMonthlyLimit;
-
-  double getInDailyUsagePercentage(MobileNumber n) =>
-      n.inDailyLimit == 0 ? 0 : (n.inDailyUsed / n.inDailyLimit).clamp(0, 1);
-
-  double getOutDailyUsagePercentage(MobileNumber n) =>
-      n.outDailyLimit == 0 ? 0 : (n.outDailyUsed / n.outDailyLimit).clamp(0, 1);
-
-  double getInMonthlyUsagePercentage(MobileNumber n) => n.inMonthlyLimit == 0
-      ? 0
-      : (n.inMonthlyUsed / n.inMonthlyLimit).clamp(0, 1);
-
-  double getOutMonthlyUsagePercentage(MobileNumber n) => n.outMonthlyLimit == 0
-      ? 0
-      : (n.outMonthlyUsed / n.outMonthlyLimit).clamp(0, 1);
+  // Limit Helpers
+  double getInDailyRemaining(MobileNumber n) => (n.inDailyLimit - n.inDailyUsed).clamp(0, double.infinity);
+  double getOutDailyRemaining(MobileNumber n) => (n.outDailyLimit - n.outDailyUsed).clamp(0, double.infinity);
+  double getInMonthlyRemaining(MobileNumber n) => (n.inMonthlyLimit - n.inMonthlyUsed).clamp(0, double.infinity);
+  double getOutMonthlyRemaining(MobileNumber n) => (n.outMonthlyLimit - n.outMonthlyUsed).clamp(0, double.infinity);
+  bool isInDailyLimitExceeded(MobileNumber n) => n.inDailyUsed >= n.inDailyLimit;
+  bool isOutDailyLimitExceeded(MobileNumber n) => n.outDailyUsed >= n.outDailyLimit;
+  double getInDailyUsagePercentage(MobileNumber n) => n.inDailyLimit == 0 ? 0 : (n.inDailyUsed / n.inDailyLimit).clamp(0, 1);
+  double getOutDailyUsagePercentage(MobileNumber n) => n.outDailyLimit == 0 ? 0 : (n.outDailyUsed / n.outDailyLimit).clamp(0, 1);
 }

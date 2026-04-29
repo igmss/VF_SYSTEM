@@ -76,24 +76,24 @@ class MobileNumber {
 
     return MobileNumber(
       id: map['id']?.toString() ?? '',
-      phoneNumber: map['phoneNumber']?.toString() ?? '',
+      phoneNumber: (map['phone_number'] ?? map['phoneNumber'])?.toString() ?? '',
       name: map['name']?.toString(),
-      isDefault: map['isDefault'] == true,
-      createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
-      lastUpdatedAt: map['lastUpdatedAt'] != null 
-          ? DateTime.tryParse(map['lastUpdatedAt'].toString()) 
+      isDefault: (map['is_default'] ?? map['isDefault']) == true,
+      createdAt: DateTime.tryParse((map['created_at'] ?? map['createdAt'])?.toString() ?? '') ?? DateTime.now(),
+      lastUpdatedAt: (map['last_updated_at'] ?? map['lastUpdatedAt']) != null 
+          ? DateTime.tryParse((map['last_updated_at'] ?? map['lastUpdatedAt']).toString()) 
           : null,
-      initialBalance: asDouble(map['initialBalance']),
-      inDailyLimit: asDouble(map['inDailyLimit'] ?? map['dailyLimit']),
-      inMonthlyLimit: asDouble(map['inMonthlyLimit'] ?? map['monthlyLimit']),
-      outDailyLimit: asDouble(map['outDailyLimit'] ?? map['dailyLimit']),
-      outMonthlyLimit: asDouble(map['outMonthlyLimit'] ?? map['monthlyLimit']),
-      inDailyUsed: asDouble(map['inDailyUsed'] ?? map['dailyUsed']),
-      inMonthlyUsed: asDouble(map['inMonthlyUsed'] ?? map['monthlyUsed']),
-      outDailyUsed: asDouble(map['outDailyUsed']),
-      outMonthlyUsed: asDouble(map['outMonthlyUsed']),
-      inTotalUsed: asDouble(map['inTotalUsed']),
-      outTotalUsed: asDouble(map['outTotalUsed']),
+      initialBalance: asDouble(map['initial_balance'] ?? map['initialBalance']),
+      inDailyLimit: asDouble(map['in_daily_limit'] ?? map['inDailyLimit'] ?? map['dailyLimit']),
+      inMonthlyLimit: asDouble(map['in_monthly_limit'] ?? map['inMonthlyLimit'] ?? map['monthlyLimit']),
+      outDailyLimit: asDouble(map['out_daily_limit'] ?? map['outDailyLimit'] ?? map['dailyLimit']),
+      outMonthlyLimit: asDouble(map['out_monthly_limit'] ?? map['outMonthlyLimit'] ?? map['monthlyLimit']),
+      inDailyUsed: asDouble(map['in_daily_used'] ?? map['inDailyUsed'] ?? map['dailyUsed']),
+      inMonthlyUsed: asDouble(map['in_monthly_used'] ?? map['inMonthlyUsed'] ?? map['monthlyUsed']),
+      outDailyUsed: asDouble(map['out_daily_used'] ?? map['outDailyUsed']),
+      outMonthlyUsed: asDouble(map['out_monthly_used'] ?? map['outMonthlyUsed']),
+      inTotalUsed: asDouble(map['in_total_used'] ?? map['inTotalUsed']),
+      outTotalUsed: asDouble(map['out_total_used'] ?? map['outTotalUsed']),
     );
   }
 
@@ -223,15 +223,15 @@ class CashTransaction {
 
     return CashTransaction(
       id: map['id']?.toString() ?? '',
-      phoneNumber: map['phoneNumber']?.toString(),
+      phoneNumber: (map['phone_number'] ?? map['phoneNumber'])?.toString(),
       amount: asDouble(map['amount']),
       currency: map['currency']?.toString() ?? 'EGP',
       timestamp: asDateTime(map['timestamp']),
-      bybitOrderId: map['bybitOrderId']?.toString() ?? '',
+      bybitOrderId: (map['bybit_order_id'] ?? map['bybitOrderId'])?.toString() ?? '',
       status: map['status']?.toString() ?? 'pending',
-      paymentMethod: map['paymentMethod']?.toString() ?? 'Unknown',
+      paymentMethod: (map['payment_method'] ?? map['paymentMethod'])?.toString() ?? 'Unknown',
       side: asInt(map['side'], fallback: 1),
-      chatHistory: map['chatHistory']?.toString() ?? '',
+      chatHistory: (map['chat_history'] ?? map['chatHistory'])?.toString() ?? '',
       price: asDouble(map['price']),
       quantity: asDouble(map['quantity']),
       token: map['token']?.toString() ?? 'USDT',

@@ -1,3 +1,4 @@
+import 'dart:math';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
@@ -11,6 +12,7 @@ import '../../models/bank_account.dart';
 import '../../models/financial_transaction.dart';
 import '../admin/retailer_details_screen.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/async_button.dart';
 
 part 'collector_history_tab.dart';
 
@@ -324,7 +326,7 @@ class _RetailerCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final dist = context.watch<DistributionProvider>();
-    final debt = retailer.pendingDebt;
+    final debt = retailer.totalPendingDebt;
     final debtColor = debt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
     final isBusy = dist.isCollecting;
     final isLight = !AppTheme.isDark(context);
@@ -452,18 +454,9 @@ class _RetailerCard extends StatelessWidget {
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
-                  child: ElevatedButton.icon(
-                    icon: isBusy
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                            ),
-                          )
-                        : const Icon(Icons.payments_outlined, size: 16),
-                    label: Text(isBusy ? 'Processing...' : 'collect_from'.tr()),
+                  child: AsyncButton.icon(
+                    icon: const Icon(Icons.payments_outlined, size: 16),
+                    label: Text('collect_from'.tr()),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: debtColor,
                       foregroundColor: Colors.white,
@@ -472,7 +465,8 @@ class _RetailerCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       elevation: 0,
                     ),
-                    onPressed: isBusy ? null : () => _showCollectDialog(context, retailer, collector),
+                    isDisabled: isBusy,
+                    onPressed: () async => _showCollectDialog(context, retailer, collector),
                   ),
                 ),
               ] else
@@ -526,20 +520,32 @@ class _RetailerCard extends StatelessWidget {
       );
       return;
     }
-    
-    final ctrl = TextEditingController(text: retailer.pendingDebt.toStringAsFixed(0));
+       final vfCtrl = TextEditingController(text: retailer.pendingDebt > 0 ? retailer.pendingDebt.toStringAsFixed(0) : '0');
+    final ipCtrl = TextEditingController(text: retailer.instaPayPendingDebt > 0 ? retailer.instaPayPendingDebt.toStringAsFixed(0) : '0');
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
         builder: (ctx, setSt) {
           final dist = Provider.of<DistributionProvider>(ctx);
-          final entered  = double.tryParse(ctrl.text) ?? 0.0;
-          final debt     = retailer.pendingDebt;
-          final debtPaid = entered > debt ? debt : entered;
-          final credit   = entered > debt ? entered - debt : 0.0;
-          final currentColor = debt > 0 ? AppTheme.warningColor(context) : AppTheme.positiveColor(context);
+          final vfEntered = double.tryParse(vfCtrl.text) ?? 0.0;
+          final ipEntered = double.tryParse(ipCtrl.text) ?? 0.0;
+          
+          final totalEntered = vfEntered + ipEntered;
+          final vfDebt = retailer.pendingDebt;
+          final ipDebt = retailer.instaPayPendingDebt;
+          
+          final vfPaid = vfEntered > vfDebt ? vfDebt : vfEntered;
+          final ipPaid = ipEntered > ipDebt ? ipDebt : ipEntered;
+          
+          final vfCredit = vfEntered > vfDebt ? vfEntered - vfDebt : 0.0;
+          final ipCredit = ipEntered > ipDebt ? ipEntered - ipDebt : 0.0;
+          
+          final totalAddedToCollected = vfPaid + ipPaid;
+          final totalAddedToCredit = vfCredit + ipCredit;
+
           final isSubmitting = dist.isCollecting;
+          final textMuted = AppTheme.textMutedColor(context);
 
           return AlertDialog(
             backgroundColor: AppTheme.surfaceColor(context),
@@ -548,100 +554,82 @@ class _RetailerCard extends StatelessWidget {
               '${'collect_from'.tr()} ${retailer.name}',
               style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.w800),
             ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  '${'pending_debt'.tr()}: ${debt.toStringAsFixed(0)} EGP',
-                  style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.w600),
-                ),
-                const SizedBox(height: 14),
-                TextField(
-                  controller: ctrl,
-                  keyboardType: TextInputType.number,
-                  style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
-                  onChanged: (_) => setSt(() {}),
-                  decoration: InputDecoration(
-                    labelText: 'amount'.tr(),
-                    suffixText: 'EGP',
-                    filled: true,
-                    fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.5),
+            content: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // VF Cash Section
+                  _buildCollectionInput(
+                    context,
+                    label: 'VF Cash Debt',
+                    debt: vfDebt,
+                    controller: vfCtrl,
+                    color: AppTheme.warningColor(context),
+                    onChanged: () => setSt(() {}),
                   ),
-                ),
-                if (entered > 0) ...[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: AppTheme.lineColor(context).withValues(alpha: 0.1),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: credit > 0
-                            ? AppTheme.positiveColor(context).withValues(alpha: 0.4)
-                            : AppTheme.lineColor(context),
+                  const SizedBox(height: 20),
+                  // InstaPay Section
+                  _buildCollectionInput(
+                    context,
+                    label: 'InstaPay Debt',
+                    debt: ipDebt,
+                    controller: ipCtrl,
+                    color: AppTheme.positiveColor(context),
+                    onChanged: () => setSt(() {}),
+                  ),
+                  
+                  if (totalEntered > 0) ...[
+                    const SizedBox(height: 24),
+                    Container(
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(
+                        color: AppTheme.lineColor(context).withValues(alpha: 0.1),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: AppTheme.lineColor(context)),
+                      ),
+                      child: Column(
+                        children: [
+                          _breakdownRow(context, 'Total to Collect', '${totalEntered.toStringAsFixed(0)} EGP', AppTheme.textPrimaryColor(context), isBold: true),
+                          const Divider(height: 20),
+                          _breakdownRow(context, 'Debt Reduction', '${totalAddedToCollected.toStringAsFixed(0)} EGP', AppTheme.infoColor(context)),
+                          if (totalAddedToCredit > 0)
+                            _breakdownRow(context, 'Credit Addition', '+${totalAddedToCredit.toStringAsFixed(0)} EGP', AppTheme.positiveColor(context)),
+                        ],
                       ),
                     ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        _breakdownRow(
-                          context,
-                          '↓ Debt Reduced',
-                          '${debtPaid.toStringAsFixed(0)} EGP',
-                          AppTheme.warningColor(context),
-                        ),
-                        if (credit > 0) ...[
-                          const SizedBox(height: 4),
-                          _breakdownRow(
-                            context,
-                            '⊕ Credit Added',
-                            '+${credit.toStringAsFixed(0)} EGP',
-                            AppTheme.positiveColor(context),
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
+                  ],
                 ],
-              ],
+              ),
             ),
             actions: [
               TextButton(
                 onPressed: isSubmitting ? null : () => Navigator.pop(ctx),
-                child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
+                child: Text('cancel'.tr(), style: TextStyle(color: textMuted)),
               ),
-              ElevatedButton(
-                onPressed: isSubmitting ? null : () async {
-                  final amount = double.tryParse(ctrl.text) ?? 0;
-                  if (amount <= 0) {
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      SnackBar(content: Text('invalid_amount'.tr()), backgroundColor: Colors.red),
-                    );
-                    return;
-                  }
-                  
+              AsyncButton(
+                onPressed: totalEntered <= 0 ? null : () async {
                   final confirm = await showDialog<bool>(
                     context: context,
                     builder: (c) => AlertDialog(
                       backgroundColor: AppTheme.surfaceColor(context),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(28)),
-                      title: Text('Confirm Action', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
+                      title: Text('Confirm Collection', style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold)),
                       content: Text(
-                        amount > debt
-                            ? 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?\n\n• Debt reduced: ${debt.toStringAsFixed(0)} EGP\n• Credit added: ${(amount - debt).toStringAsFixed(0)} EGP'
-                            : 'Collect ${amount.toStringAsFixed(0)} EGP from ${retailer.name}?',
-                        style: TextStyle(color: AppTheme.textMutedColor(context)),
+                        'Total: ${totalEntered.toStringAsFixed(0)} EGP\n\n'
+                        '• VF Cash: ${vfEntered.toStringAsFixed(0)} EGP\n'
+                        '• InstaPay: ${ipEntered.toStringAsFixed(0)} EGP',
+                        style: TextStyle(color: textMuted),
                       ),
                       actions: [
                         TextButton(
                           onPressed: () => Navigator.pop(c, false),
-                          child: Text('Cancel', style: TextStyle(color: AppTheme.textMutedColor(context))),
+                          child: Text('Cancel', style: TextStyle(color: textMuted)),
                         ),
                         ElevatedButton(
                           onPressed: () => Navigator.pop(c, true),
                           style: ElevatedButton.styleFrom(
-                              backgroundColor: currentColor,
+                              backgroundColor: AppTheme.positiveColor(context),
                               elevation: 0,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
                           child: const Text('Confirm', style: TextStyle(color: Colors.white)),
@@ -649,16 +637,21 @@ class _RetailerCard extends StatelessWidget {
                       ],
                     ),
                   );
-
+ 
                   if (confirm != true) return;
-
+ 
                   try {
                     await Provider.of<DistributionProvider>(context, listen: false)
                         .collectFromRetailer(
                           collectorId: collector.id,
                           retailerId: retailer.id,
-                          amount: amount,
+                          amount: totalEntered,
                           createdByUid: Provider.of<AuthProvider>(context, listen: false).currentUser?.uid ?? '',
+                          vfCollected: vfPaid,
+                          ipCollected: ipPaid,
+                          addedToCredit: totalAddedToCredit,
+                          vfAmount: vfEntered,
+                          instaPayAmount: ipEntered,
                         );
                     if (!ctx.mounted) return;
                     Navigator.pop(ctx);
@@ -669,20 +662,12 @@ class _RetailerCard extends StatelessWidget {
                     );
                   }
                 },
+                isDisabled: isSubmitting,
                 style: ElevatedButton.styleFrom(
-                    backgroundColor: currentColor,
+                    backgroundColor: AppTheme.positiveColor(context),
                     elevation: 0,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14))),
-                child: isSubmitting
-                    ? const SizedBox(
-                        width: 18,
-                        height: 18,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-                        ),
-                      )
-                    : Text('collect'.tr(), style: const TextStyle(color: Colors.white)),
+                child: Text('collect'.tr(), style: const TextStyle(color: Colors.white)),
               ),
             ],
           );
@@ -691,12 +676,51 @@ class _RetailerCard extends StatelessWidget {
     );
   }
 
-  Widget _breakdownRow(BuildContext context, String label, String value, Color color) => Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13, fontWeight: FontWeight.w600)),
-          Text(value, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
-        ],
+  Widget _buildCollectionInput(
+    BuildContext context, {
+    required String label,
+    required double debt,
+    required TextEditingController controller,
+    required Color color,
+    required VoidCallback onChanged,
+  }) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold, fontSize: 14)),
+            Text('${debt.toStringAsFixed(0)} EGP', style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 13)),
+          ],
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: TextStyle(color: AppTheme.textPrimaryColor(context), fontWeight: FontWeight.bold),
+          onChanged: (_) => onChanged(),
+          decoration: InputDecoration(
+            hintText: '0',
+            suffixText: 'EGP',
+            filled: true,
+            fillColor: AppTheme.surfaceRaisedColor(context).withValues(alpha: 0.4),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _breakdownRow(BuildContext context, String label, String value, Color color, {bool isBold = false}) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Text(label, style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 13)),
+            Text(value, style: TextStyle(color: color, fontSize: 14, fontWeight: isBold ? FontWeight.w900 : FontWeight.bold)),
+          ],
+        ),
       );
 }
 

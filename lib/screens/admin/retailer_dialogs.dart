@@ -37,6 +37,21 @@ class _Dialog extends StatelessWidget {
             final shouldClose = await onConfirm();
             if (shouldClose && context.mounted) {
               Navigator.pop(context);
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Row(
+                    children: [
+                      const Icon(Icons.check_circle, color: Colors.white, size: 18),
+                      const SizedBox(width: 10),
+                      Text('success'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                    ],
+                  ),
+                  backgroundColor: const Color(0xFF2E7D32),
+                  behavior: SnackBarBehavior.floating,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  duration: const Duration(seconds: 3),
+                ),
+              );
             }
           },
           style: ElevatedButton.styleFrom(

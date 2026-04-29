@@ -6,6 +6,7 @@ enum FlowType {
   SELL_USDT,
   DISTRIBUTE_VFCASH,
   COLLECT_CASH,
+  COLLECT_VFCASH,
   DEPOSIT_TO_BANK,
   DEPOSIT_TO_VFCASH,
   EXPENSE_VFCASH_FEE,
@@ -18,7 +19,7 @@ enum FlowType {
   INTERNAL_VF_TRANSFER_FEE,
   DISTRIBUTE_INSTAPAY,
   INSTAPAY_DIST_PROFIT,
-  COLLECT_INSTAPAY_CASH,
+  COLLECT_INSTAPAY,
   EXPENSE_INSTAPAY_FEE,
   LOAN_ISSUED,
   LOAN_REPAYMENT,
@@ -40,6 +41,7 @@ extension FlowTypeExtension on FlowType {
       case FlowType.SELL_USDT: return 'sell_usdt';
       case FlowType.DISTRIBUTE_VFCASH: return 'distribute_vfcash';
       case FlowType.COLLECT_CASH: return 'collect_cash';
+      case FlowType.COLLECT_VFCASH: return 'collect_vfcash';
       case FlowType.DEPOSIT_TO_BANK: return 'deposit_to_bank';
       case FlowType.DEPOSIT_TO_VFCASH: return 'deposit_to_vfcash';
       case FlowType.EXPENSE_VFCASH_FEE: return 'expense_vfcash_fee';
@@ -52,7 +54,7 @@ extension FlowTypeExtension on FlowType {
       case FlowType.INTERNAL_VF_TRANSFER_FEE: return 'internal_vf_transfer_fee';
       case FlowType.DISTRIBUTE_INSTAPAY: return 'distribute_instapay';
       case FlowType.INSTAPAY_DIST_PROFIT: return 'instapay_dist_profit';
-      case FlowType.COLLECT_INSTAPAY_CASH: return 'collect_instapay_cash';
+      case FlowType.COLLECT_INSTAPAY: return 'collect_instapay';
       case FlowType.EXPENSE_INSTAPAY_FEE: return 'expense_instapay_fee';
       case FlowType.LOAN_ISSUED: return 'loan_issued';
       case FlowType.LOAN_REPAYMENT: return 'loan_repayment';
@@ -138,22 +140,24 @@ class FinancialTransaction {
     }
 
     return FinancialTransaction(
-      id: map['id'] ?? id,
-      type: FlowTypeExtension.fromString(map['type'] ?? ''),
+      id: map['id']?.toString() ?? id,
+      type: FlowTypeExtension.fromString(map['type']?.toString() ?? ''),
       amount: asDouble(map['amount']),
-      usdtPrice: map['usdtPrice'] != null ? asDouble(map['usdtPrice']) : null,
-      usdtQuantity: map['usdtQuantity'] != null ? asDouble(map['usdtQuantity']) : null,
-      fromId: map['fromId'],
-      fromLabel: map['fromLabel'],
-      toId: map['toId'],
-      toLabel: map['toLabel'],
-      bybitOrderId: map['bybitOrderId'],
-      paymentMethod: map['paymentMethod'],
-      notes: map['notes'],
-      category: map['category'],
-      createdByUid: map['createdByUid'] ?? 'system',
-      timestamp: map['timestamp'] != null
-          ? DateTime.fromMillisecondsSinceEpoch(map['timestamp'])
+      usdtPrice: (map['usdt_price'] ?? map['usdtPrice']) != null ? asDouble(map['usdt_price'] ?? map['usdtPrice']) : null,
+      usdtQuantity: (map['usdt_quantity'] ?? map['usdtQuantity']) != null ? asDouble(map['usdt_quantity'] ?? map['usdtQuantity']) : null,
+      fromId: map['from_id']?.toString() ?? map['fromId']?.toString(),
+      fromLabel: map['from_label']?.toString() ?? map['fromLabel']?.toString(),
+      toId: map['to_id']?.toString() ?? map['toId']?.toString(),
+      toLabel: map['to_label']?.toString() ?? map['toLabel']?.toString(),
+      bybitOrderId: map['bybit_order_id']?.toString() ?? map['bybitOrderId']?.toString(),
+      paymentMethod: map['payment_method']?.toString() ?? map['paymentMethod']?.toString(),
+      notes: map['notes']?.toString(),
+      category: map['category']?.toString(),
+      createdByUid: (map['created_by_uid'] ?? map['createdByUid'])?.toString() ?? 'system',
+      timestamp: (map['timestamp'] != null)
+          ? (map['timestamp'] is int 
+              ? DateTime.fromMillisecondsSinceEpoch(map['timestamp']) 
+              : DateTime.tryParse(map['timestamp'].toString()) ?? DateTime.now())
           : DateTime.now(),
     );
   }

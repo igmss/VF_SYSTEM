@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/distribution_provider.dart';
+import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/financial_transaction.dart';
 import '../../models/partner.dart';
@@ -10,7 +11,6 @@ import '../../utils/formatters.dart';
 import '../../utils/utils.dart';
 import '../../theme/app_theme.dart';
 import 'package:intl/intl.dart';
-import 'package:firebase_database/firebase_database.dart';
 
 class PartnersScreen extends StatefulWidget {
   const PartnersScreen({super.key});
@@ -23,6 +23,16 @@ class _PartnersScreenState extends State<PartnersScreen> {
   final _workingDaysController = TextEditingController(text: '1');
   final _dateController = TextEditingController(text: DateFormat('yyyy-MM-dd').format(DateTime.now()));
   bool _showInactive = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Pre-load data if empty
+    final provider = context.read<DistributionProvider>();
+    if (provider.partnerPerformance.isEmpty && !provider.isPartnerLoading) {
+      provider.getPartnerPerformance();
+    }
+  }
 
   @override
   void dispose() {
@@ -336,14 +346,18 @@ class _PartnersScreenState extends State<PartnersScreen> {
           InkWell(
             onTap: _showReconciliationSettings,
             borderRadius: BorderRadius.circular(24),
-            child: FutureBuilder<Map<String, dynamic>>(
-            future: provider.getPartnerPerformance(),
-            builder: (context, snapshot) {
-              final perf = snapshot.data;
-              final assets = perf?['assetsSummary'];
-              final totalAssets = assets?['currentTotalAssets']?.toDouble() ?? 0.0;
-              final netPool = perf?['partnerPool']?.toDouble() ?? 0.0;
-              final totalLoans = assets?['totalOutstandingLoans']?.toDouble() ?? 0.0;
+            child: Builder(
+              builder: (context) {
+                final perf = provider.partnerPerformance;
+                final assets = perf['assetsSummary'];
+                final baseAssets = _asDouble(assets?['currentTotalAssets']);
+                final app = context.watch<AppProvider>();
+                final vfNumbersBalance = app.mobileNumbers.fold(0.0, (sum, n) => sum + n.currentBalance);
+                final usdtEgpBalance = provider.totalUsdExchangeBalance;
+                final totalAssets = baseAssets;
+                final netPool = _asDouble(perf['partnerPool']);
+                final unpaid = _asDouble(perf['totalPayable']);
+                final totalLoans = _asDouble(assets?['totalOutstandingLoans']);
 
               return Container(
                 width: double.infinity,
@@ -364,9 +378,7 @@ class _PartnersScreenState extends State<PartnersScreen> {
                   ],
                   border: Border.all(color: AppTheme.lineColor(context).withValues(alpha: 0.2)),
                 ),
-                child: snapshot.connectionState == ConnectionState.waiting
-                  ? const Center(child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2))
-                  : Column(
+                child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Row(
@@ -412,7 +424,7 @@ class _PartnersScreenState extends State<PartnersScreen> {
                         children: [
                           _MiniPoolItem(label: 'Net Pool', amount: netPool, color: AppTheme.accent),
                           _MiniPoolItem(label: 'Loans', amount: totalLoans, color: Colors.white70),
-                          _MiniPoolItem(label: 'Unpaid', amount: provider.totalPartnerProfitOwed, color: Colors.orange),
+                          _MiniPoolItem(label: 'Unpaid', amount: unpaid, color: Colors.orange),
                         ],
                       ),
                     ],
@@ -450,14 +462,13 @@ class _PartnersScreenState extends State<PartnersScreen> {
 
   Widget _buildPartnerCard(BuildContext context, Partner partner, DistributionProvider provider, bool isAdmin) {
     final isInactive = partner.status != 'active';
-    
-    return FutureBuilder<Map<String, dynamic>>(
-      future: provider.getPartnerPerformance(),
-      builder: (context, snapshot) {
-        final perf = snapshot.data?['partnerBreakdown']?[partner.id];
-        final double earned = perf?['totalEarned']?.toDouble() ?? 0.0;
-        final double paid = perf?['totalPaid']?.toDouble() ?? 0.0;
-        final double payable = perf?['payableBalance']?.toDouble() ?? 0.0;
+
+    final partnersList = provider.partnerPerformance['partners'] as List? ?? [];
+    final partnerMap = {for (var p in partnersList) p['partner_id']: p};
+    final perf = partnerMap[partner.id];
+    final double earned = perf?['totalEarned']?.toDouble() ?? 0.0;
+    final double paid = partner.totalProfitPaid;
+    final double payable = perf?['payableBalance']?.toDouble() ?? 0.0;
 
         return Container(
           margin: const EdgeInsets.only(bottom: 20),
@@ -551,8 +562,6 @@ class _PartnersScreenState extends State<PartnersScreen> {
             ),
           ),
         );
-      }
-    );
   }
 
   Widget _buildMiniStat(String label, String value, BuildContext context, [Color? valueColor]) {
@@ -585,20 +594,25 @@ class _PartnersScreenState extends State<PartnersScreen> {
   }
 
   void _showReconciliationSettings() async {
-    final db = FirebaseDatabase.instance.ref('system_config/module_start_dates');
-    final snap = await db.get();
-    final data = snap.exists ? Map<String, dynamic>.from(snap.value as Map) : {
-      'vf': '2026-03-18',
-      'instapay': '2026-04-09'
-    };
-
     final provider = Provider.of<DistributionProvider>(context, listen: false);
+
+    String vfStartDate = '2026-03-18';
+    String instaStartDate = '2026-04-09';
+
+    try {
+      final configSnap = await provider.getSystemConfig('module_start_dates');
+      if (configSnap != null && configSnap['vf'] != null) {
+        vfStartDate = configSnap['vf'].toString();
+        instaStartDate = configSnap['insta']?.toString() ?? '2026-04-09';
+      }
+    } catch (_) {}
+
     final perf = await provider.getPartnerPerformance();
     final assets = perf['assetsSummary'];
     final totalLoans = assets?['totalOutstandingLoans']?.toDouble() ?? 0.0;
 
-    final vfController = TextEditingController(text: data['vf']);
-    final instaController = TextEditingController(text: data['instapay']);
+    final vfController = TextEditingController(text: vfStartDate);
+    final instaController = TextEditingController(text: instaStartDate);
     final capitalController = TextEditingController(text: provider.openingCapital.toStringAsFixed(0));
 
     if (!mounted) return;
@@ -709,12 +723,12 @@ class _PartnersScreenState extends State<PartnersScreen> {
                 final newCap = double.tryParse(capitalController.text.trim()) ?? 180000;
 
                 try {
-                  await db.set({
+                  await provider.setSystemConfig('module_start_dates', {
                     'vf': newVf,
                     'instapay': newInsta,
                   });
                   await provider.setOpeningCapital(newCap);
-                  
+
                   if (mounted) Navigator.pop(context);
                   provider.loadAll();
                 } catch (e) {
@@ -729,6 +743,12 @@ class _PartnersScreenState extends State<PartnersScreen> {
         );
       }),
     );
+  }
+
+  double _asDouble(dynamic v) {
+    if (v == null) return 0.0;
+    if (v is num) return v.toDouble();
+    return double.tryParse(v.toString()) ?? 0.0;
   }
 }
 

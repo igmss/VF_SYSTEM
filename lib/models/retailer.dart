@@ -39,6 +39,9 @@ class Retailer {
     final outstanding = instaPayTotalAssigned - instaPayTotalCollected;
     return max(0.0, outstanding);
   }
+  /// Total pending debt across all channels
+  double get totalPendingDebt => pendingDebt + instaPayPendingDebt;
+
   final bool isActive;
   final DateTime createdAt;
   final DateTime lastUpdatedAt;
@@ -103,17 +106,17 @@ class Retailer {
       name: map['name']?.toString() ?? '',
       phone: map['phone']?.toString() ?? '',
       area: map['area']?.toString() ?? '',
-      totalAssigned: asDouble(map['totalAssigned']),
-      totalCollected: asDouble(map['totalCollected']),
+      totalAssigned: asDouble(map['total_assigned'] ?? map['totalAssigned']),
+      totalCollected: asDouble(map['total_collected'] ?? map['totalCollected']),
       credit: asDouble(map['credit']),
-      isActive: (map['isActive'] is bool) ? map['isActive'] : true,
-      createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
-      lastUpdatedAt: DateTime.tryParse(map['lastUpdatedAt']?.toString() ?? '') ?? DateTime.now(),
-      assignedCollectorId: map['assignedCollectorId']?.toString(),
-      discountPer1000: asDouble(map['discountPer1000']),
-      instaPayProfitPer1000: asDouble(map['instaPayProfitPer1000']),
-      instaPayTotalAssigned: asDouble(map['instaPayTotalAssigned']),
-      instaPayTotalCollected: asDouble(map['instaPayTotalCollected']),
+      isActive: (map['is_active'] ?? map['isActive']) == true,
+      createdAt: DateTime.tryParse((map['created_at'] ?? map['createdAt'])?.toString() ?? '') ?? DateTime.now(),
+      lastUpdatedAt: DateTime.tryParse((map['last_updated_at'] ?? map['lastUpdatedAt'])?.toString() ?? '') ?? DateTime.now(),
+      assignedCollectorId: (map['assigned_collector_id'] ?? map['assignedCollectorId'])?.toString(),
+      discountPer1000: asDouble(map['discount_per_1000'] ?? map['discountPer1000']),
+      instaPayProfitPer1000: asDouble(map['insta_pay_profit_per_1000'] ?? map['instaPayProfitPer1000']),
+      instaPayTotalAssigned: asDouble(map['insta_pay_total_assigned'] ?? map['instaPayTotalAssigned']),
+      instaPayTotalCollected: asDouble(map['insta_pay_total_collected'] ?? map['instaPayTotalCollected']),
     );
   }
 

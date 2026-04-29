@@ -1,0 +1,1165 @@
+{
+  "generatedAt": "2026-04-27T15:31:25.060Z",
+  "edge": {
+    "investors": {
+      "success": true,
+      "performance": [
+        {
+          "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+          "name": "gena",
+          "totalEarned": 286.9355070152754,
+          "totalPaid": 0,
+          "totalVfFlow": 71031.8837690942,
+          "totalInstaFlow": 44023.1162309058,
+          "payableBalance": 286.9355070152754
+        }
+      ],
+      "totalEarned": 286.9355070152754,
+      "totalPaid": 0,
+      "totalPayable": 286.9355070152754,
+      "totalVfFlow": 71031.8837690942,
+      "totalInstaFlow": 44023.1162309058
+    },
+    "partners": {
+      "success": true,
+      "businessNetProfit": 15749.012420000043,
+      "totalInvestorProfitDeducted": 286.9355070152754,
+      "partnerPool": 15462.076912984767,
+      "partnerBreakdown": {
+        "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa": {
+          "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+          "name": "Mostafa Abbas",
+          "sharePercent": 40,
+          "totalEarned": 6184.830765193907,
+          "totalPaid": 4182.1254,
+          "payableBalance": 2002.7053651939068
+        },
+        "658e33f9-9afa-4178-a7a5-689bafa6225d": {
+          "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+          "name": "Mostafa Galhom",
+          "sharePercent": 25,
+          "totalEarned": 3865.5192282461917,
+          "totalPaid": 2620.7998,
+          "payableBalance": 1244.719428246192
+        },
+        "a03728bd-7a73-4128-9815-8fa2ab73d7de": {
+          "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+          "name": "Ibrahim",
+          "sharePercent": 35,
+          "totalEarned": 5411.726919544668,
+          "totalPaid": 3659.3597,
+          "payableBalance": 1752.367219544668
+        }
+      },
+      "partners": [
+        {
+          "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+          "name": "Mostafa Abbas",
+          "sharePercent": 40,
+          "totalEarned": 6184.830765193907,
+          "totalPaid": 4182.1254,
+          "payableBalance": 2002.7053651939068
+        },
+        {
+          "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+          "name": "Mostafa Galhom",
+          "sharePercent": 25,
+          "totalEarned": 3865.5192282461917,
+          "totalPaid": 2620.7998,
+          "payableBalance": 1244.719428246192
+        },
+        {
+          "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+          "name": "Ibrahim",
+          "sharePercent": 35,
+          "totalEarned": 5411.726919544668,
+          "totalPaid": 3659.3597,
+          "payableBalance": 1752.367219544668
+        }
+      ],
+      "totalPayable": 4999.792012984766,
+      "assetsSummary": {
+        "openingCapital": 180000,
+        "totalActiveInvestorCapital": 100000,
+        "totalOutstandingLoans": 10000,
+        "effectiveStartingCapital": 280000,
+        "totalDistributions": 10462.284899999999,
+        "bankBalance": 4884.205,
+        "vfNumberBalance": 12339.11,
+        "retailerDebt": 48656,
+        "retailerInstaDebt": 61907,
+        "collectorCash": 147463,
+        "usdExchangeEgp": 37.41252,
+        "currentTotalAssets": 275286.72752,
+        "adjustedTotalAssets": 295749.01242000004,
+        "netProfit": 15749.012420000043,
+        "reconciledProfit": 15749.012420000043
+      }
+    }
+  },
+  "snapshots": {
+    "investors": [
+      {
+        "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+        "name": "gena",
+        "totalEarned": 0,
+        "totalPaid": 0,
+        "payableBalance": 0,
+        "history": [
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-27",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-26",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-25",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-24",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-23",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-22",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-21",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-20",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-19",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-18",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-17",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-16",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-15",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-14",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-13",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-12",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-11",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "investor_id": "91aec7b1-098e-4f4b-852a-0289ff5ca3bc",
+            "date_key": "2026-04-10",
+            "investor_profit": 0,
+            "vf_investor_profit": 0,
+            "insta_investor_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          }
+        ]
+      }
+    ],
+    "partners": [
+      {
+        "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+        "name": "Ibrahim",
+        "totalEarned": 0,
+        "totalPaid": 3659.3597,
+        "payableBalance": 0,
+        "history": [
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-27",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-26",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-25",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-24",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-23",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-22",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-21",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-20",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-19",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-18",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-17",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-16",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-15",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-14",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-13",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-12",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-11",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-10",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-09",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-08",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-07",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-06",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-05",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-04",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-03",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-02",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-04-01",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-31",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-30",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-29",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-28",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-27",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-26",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-25",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-24",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-23",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-22",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-21",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-20",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-19",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "a03728bd-7a73-4128-9815-8fa2ab73d7de",
+            "date_key": "2026-03-18",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          }
+        ]
+      },
+      {
+        "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+        "name": "Mostafa Abbas",
+        "totalEarned": 0,
+        "totalPaid": 4182.1254,
+        "payableBalance": 0,
+        "history": [
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-27",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-26",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-25",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-24",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-23",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-22",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-21",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-20",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-19",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-18",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-17",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-16",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-15",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-14",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-13",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-12",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-11",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-10",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-09",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-08",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-07",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-06",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-05",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-04",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-03",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-02",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-04-01",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-31",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-30",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-29",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-28",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-27",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-26",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-25",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-24",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-23",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-22",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-21",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-20",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-19",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "5cf95fe5-e2a7-4c3c-8ed0-d954fc4ae6fa",
+            "date_key": "2026-03-18",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          }
+        ]
+      },
+      {
+        "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+        "name": "Mostafa Galhom",
+        "totalEarned": 0,
+        "totalPaid": 2620.7998,
+        "payableBalance": 0,
+        "history": [
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-27",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-26",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-25",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-24",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-23",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-22",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-21",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-20",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-19",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-18",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-17",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-16",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-15",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-14",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-13",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-12",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-11",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-10",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-09",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-08",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-07",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-06",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-05",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-04",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-03",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-02",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-04-01",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-31",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-30",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-29",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-28",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-27",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-26",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-25",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-24",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-23",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-22",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-21",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-20",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-19",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          },
+          {
+            "partner_id": "658e33f9-9afa-4178-a7a5-689bafa6225d",
+            "date_key": "2026-03-18",
+            "partner_profit": 0,
+            "is_paid": false,
+            "paid_at": null
+          }
+        ]
+      }
+    ]
+  }
+}

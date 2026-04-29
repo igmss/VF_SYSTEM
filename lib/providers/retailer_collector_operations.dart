@@ -1,43 +1,48 @@
 part of 'distribution_provider.dart';
 
 mixin RetailerCollectorOperationsMixin on ChangeNotifier {
-  /// Mixin methods access private state fields of DistributionProvider
-  /// due to being part of the same library.
-
   Future<int> roundAllRetailerAssignments() async {
     final dist = this as DistributionProvider;
-    int fixed = 0;
-    for (final retailer in dist._retailers) {
-      final rounded = retailer.totalAssigned.ceilToDouble();
-      if (rounded != retailer.totalAssigned) {
-        await dist._db.ref('retailers/${retailer.id}/totalAssigned').set(rounded);
-        fixed++;
-      }
+    // Rounding is best done via RPC in Supabase
+    try {
+      final response = await dist._supabase.rpc('round_all_retailer_assignments');
+      return (response as int?) ?? 0;
+    } catch (e) {
+      debugPrint('Error rounding assignments in Supabase: $e');
+      return 0;
     }
-    await dist._loadRetailers();
-    notifyListeners();
-    return fixed;
   }
 
   Future<void> addRetailer(Retailer retailer) async {
     final dist = this as DistributionProvider;
-    await dist._db.ref('retailers/${retailer.id}').set(retailer.toMap());
-    await dist._loadRetailers();
-    notifyListeners();
+    await dist._supabase.from('retailers').upsert({
+      'id': retailer.id,
+      'name': retailer.name,
+      'phone': retailer.phone,
+      'assigned_collector_id': retailer.assignedCollectorId,
+      'discount_per_1000': retailer.discountPer1000,
+      'insta_pay_profit_per_1000': retailer.instaPayProfitPer1000,
+      'area': retailer.area,
+      'is_active': retailer.isActive,
+    });
   }
 
   Future<void> updateRetailer(Retailer retailer) async {
     final dist = this as DistributionProvider;
-    await dist._db.ref('retailers/${retailer.id}').update(retailer.toMap());
-    await dist._loadRetailers();
-    notifyListeners();
+    await dist._supabase.from('retailers').update({
+      'name': retailer.name,
+      'phone': retailer.phone,
+      'assigned_collector_id': retailer.assignedCollectorId,
+      'discount_per_1000': retailer.discountPer1000,
+      'insta_pay_profit_per_1000': retailer.instaPayProfitPer1000,
+      'area': retailer.area,
+      'is_active': retailer.isActive,
+    }).eq('id', retailer.id);
   }
 
   Future<void> deactivateRetailer(String id) async {
     final dist = this as DistributionProvider;
-    await dist._db.ref('retailers/$id/isActive').set(false);
-    dist._retailers.removeWhere((r) => r.id == id);
-    notifyListeners();
+    await dist._supabase.from('retailers').update({'is_active': false}).eq('id', id);
   }
 
   Future<void> distributeVfCash({
@@ -52,28 +57,20 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isDistributing) {
-      throw StateError('An assignment is already in progress.');
-    }
+    if (dist._isDistributing) throw StateError('An assignment is already in progress.');
     dist._isDistributing = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('distributeVfCash');
-      final requestData = {
-        'retailerId': retailerId,
-        'fromVfNumberId': fromVfNumberId,
-        'fromVfPhone': fromVfPhone,
-        'amount': amount,
-        'fees': fees,
-        'chargeFeesToRetailer': chargeFeesToRetailer,
-        'applyCredit': applyCredit,
-        'createdByUid': createdByUid,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-      };
-      print('--- PROV: distributeVfCash CALL ---');
-      print('    Payload: $requestData');
-      await callable.call(requestData);
-      await dist.loadAll();
+      await dist._supabase.rpc('distribute_vf_cash', params: {
+        'p_retailer_id': retailerId,
+        'p_from_vf_number_id': fromVfNumberId,
+        'p_amount': amount,
+        'p_fees': fees,
+        'p_charge_fees_to_retailer': chargeFeesToRetailer,
+        'p_apply_credit': applyCredit,
+        'p_created_by_uid': createdByUid,
+        'p_notes': notes,
+      });
     } finally {
       dist._isDistributing = false;
       notifyListeners();
@@ -90,34 +87,19 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isDistributing) {
-      throw StateError('An assignment is already in progress.');
-    }
+    if (dist._isDistributing) throw StateError('An assignment is already in progress.');
     dist._isDistributing = true;
     notifyListeners();
-    print('--- PROV: distributeInstaPay START ---');
-    print('    Retailer: $retailerId, Bank: $bankAccountId, Amt: $amount, Fees: $fees');
     try {
-      final callable = dist._functions.httpsCallable('distributeInstaPay');
-      final requestData = {
-        'retailerId': retailerId,
-        'bankAccountId': bankAccountId,
-        'amount': amount,
-        'fees': fees,
-        'applyCredit': applyCredit,
-        'createdByUid': createdByUid,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
-      };
-      print('--- PROV: distributeInstaPay CALL ---');
-      print('    Payload: $requestData');
-      final result = await callable.call(requestData);
-      print('--- PROV: distributeInstaPay SUCCESS ---');
-      print('    Result: ${result.data}');
-      await dist.loadAll();
-    } catch (e) {
-      print('--- PROV: distributeInstaPay ERROR ---');
-      print('    Error: $e');
-      rethrow;
+      await dist._supabase.rpc('distribute_insta_pay', params: {
+        'p_retailer_id': retailerId,
+        'p_bank_account_id': bankAccountId,
+        'p_amount': amount,
+        'p_fees': fees,
+        'p_apply_credit': applyCredit,
+        'p_created_by_uid': createdByUid,
+        'p_notes': notes,
+      });
     } finally {
       dist._isDistributing = false;
       notifyListeners();
@@ -139,55 +121,29 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     bool applyCredit = false,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isDistributing) {
-      throw StateError('An assignment is already in progress.');
-    }
+    if (dist._isDistributing) throw StateError('An assignment is already in progress.');
     dist._isDistributing = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('processRetailerRequest');
-      await callable.call({
+      await dist._supabase.functions.invoke('process-retailer-request', body: {
         'portalUserUid': portalUserUid,
         'requestId': requestId,
         'status': status,
         'proofImageUrl': proofImageUrl ?? '',
-        if (adminNotes != null && adminNotes.trim().isNotEmpty) 'adminNotes': adminNotes.trim(),
+        'adminNotes': adminNotes,
         if (status == 'COMPLETED') ...{
           'retailerId': retailerId,
           'fromVfNumberId': fromVfNumberId,
-          'fromVfPhone': fromVfPhone,
           'amount': amount,
           'fees': fees,
           'chargeFeesToRetailer': chargeFeesToRetailer,
           'applyCredit': applyCredit,
         }
       });
-      await dist.loadAll();
     } finally {
       dist._isDistributing = false;
       notifyListeners();
     }
-  }
-
-  Future<void> addCollector(Collector collector) async {
-    final dist = this as DistributionProvider;
-    await dist._db.ref('collectors/${collector.id}').set(collector.toMap());
-    await dist._loadCollectors();
-    notifyListeners();
-  }
-
-  Future<void> updateCollector(Collector collector) async {
-    final dist = this as DistributionProvider;
-    await dist._db.ref('collectors/${collector.id}').update(collector.toMap());
-    await dist._loadCollectors();
-    notifyListeners();
-  }
-
-  Future<void> deactivateCollector(String id) async {
-    final dist = this as DistributionProvider;
-    await dist._db.ref('collectors/$id/isActive').set(false);
-    dist._collectors.removeWhere((c) => c.id == id);
-    notifyListeners();
   }
 
   Future<void> collectFromRetailer({
@@ -195,31 +151,31 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     required String retailerId,
     required double amount,
     required String createdByUid,
+    double vfCollected = 0.0,
+    double ipCollected = 0.0,
+    double addedToCredit = 0.0,
     double vfAmount = 0.0,
     double instaPayAmount = 0.0,
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isCollecting) {
-      throw StateError('A collection is already in progress.');
-    }
-    if (amount <= 0) {
-      throw ArgumentError('Collection amount must be greater than zero.');
-    }
+    if (dist._isCollecting) throw StateError('A collection is already in progress.');
     dist._isCollecting = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('collectRetailerCash');
-      await callable.call({
-        'collectorId': collectorId,
-        'retailerId': retailerId,
-        'amount': amount,
-        'vfAmount': vfAmount,
-        'instaPayAmount': instaPayAmount,
-        'createdByUid': createdByUid,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      await dist._supabase.rpc('collect_retailer_cash_tx', params: {
+        'p_collector_id': collectorId,
+        'p_retailer_id': retailerId,
+        'p_amount': amount,
+        'p_vf_amount': vfAmount,
+        'p_insta_pay_amount': instaPayAmount,
+        'p_notes': notes,
+        'p_vf_collected': vfCollected,
+        'p_ip_collected': ipCollected,
+        'p_added_to_credit': addedToCredit,
+        'p_uid': createdByUid,
+        'p_timestamp': DateTime.now().millisecondsSinceEpoch,
       });
-      await dist._refreshOperationalData();
     } finally {
       dist._isCollecting = false;
       notifyListeners();
@@ -234,24 +190,17 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isDepositing) {
-      throw StateError('A deposit is already in progress.');
-    }
-    if (amount <= 0) {
-      throw ArgumentError('Deposit amount must be greater than zero.');
-    }
+    if (dist._isDepositing) throw StateError('A deposit is already in progress.');
     dist._isDepositing = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('depositCollectorCash');
-      await callable.call({
-        'collectorId': collectorId,
-        'bankAccountId': bankAccountId,
-        'amount': amount,
-        'createdByUid': createdByUid,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      await dist._supabase.rpc('deposit_collector_cash', params: {
+        'p_collector_id': collectorId,
+        'p_bank_account_id': bankAccountId,
+        'p_amount': amount,
+        'p_created_by_uid': createdByUid,
+        'p_notes': notes,
       });
-      await dist._refreshOperationalData();
     } finally {
       dist._isDepositing = false;
       notifyListeners();
@@ -265,23 +214,21 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isDepositing) {
-      throw StateError('A deposit is already in progress.');
-    }
-    if (amount <= 0) {
-      throw ArgumentError('Deposit amount must be greater than zero.');
-    }
+    if (dist._isDepositing) throw StateError('A deposit is already in progress.');
     dist._isDepositing = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('depositCollectorCashToDefaultVf');
-      await callable.call({
-        'collectorId': collectorId,
-        'amount': amount,
-        'createdByUid': createdByUid,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      // Find default VF number
+      final vfResponse = await dist._supabase.from('mobile_numbers').select('id').eq('is_default', true).maybeSingle();
+      if (vfResponse == null) throw Exception('No default VF number found.');
+      
+      await dist._supabase.rpc('deposit_collector_cash_to_vf', params: {
+        'p_collector_id': collectorId,
+        'p_vf_number_id': vfResponse['id'],
+        'p_amount': amount,
+        'p_created_by_uid': createdByUid,
+        'p_notes': notes,
       });
-      await dist._refreshOperationalData();
     } finally {
       dist._isDepositing = false;
       notifyListeners();
@@ -298,16 +245,11 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     if (dist._isCorrecting) return;
     dist._isCorrecting = true;
     try {
-      final callable = dist._functions.httpsCallable('correctFinancialTransaction');
-      await callable.call({
-        'transactionId': originalTx.id,
-        'correctAmount': correctAmount,
-        if (reason != null && reason.trim().isNotEmpty) 'reason': reason.trim(),
+      await dist._supabase.rpc('correct_financial_transaction', params: {
+        'p_transaction_id': originalTx.id,
+        'p_correct_amount': correctAmount,
+        'p_reason': reason,
       });
-      await dist.loadAll();
-    } catch (e) {
-      debugPrint('Correction error: $e');
-      rethrow;
     } finally {
       dist._isCorrecting = false;
     }
@@ -324,57 +266,13 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     required String createdByUid,
   }) async {
     final dist = this as DistributionProvider;
-    // 1. Strict deduplication check
     try {
-      final ledgerQuery = await dist._db.ref('financial_ledger')
-          .orderByChild('bybitOrderId')
-          .equalTo(bybitOrderId)
-          .once();
-      if (ledgerQuery.snapshot.exists) {
-        final items = Map<String, dynamic>.from(ledgerQuery.snapshot.value as Map);
-        for (final item in items.values) {
-          if (item['type'] == 'BUY_USDT') {
-            debugPrint('Buy USDT: Duplicate $bybitOrderId — skipping.');
-            return;
-          }
-        }
-      }
+      await dist._supabase.functions.invoke('sync-bybit-orders', body: {
+        'orderId': bybitOrderId,
+        'force': true,
+      });
     } catch (e) {
-      debugPrint('Buy USDT: CRITICAL Dedup check error. Halting to prevent duplicates: $e');
-      return;
-    }
-
-    final tx = FinancialTransaction(
-      id: 'buy_${bybitOrderId}',
-      type: FlowType.BUY_USDT,
-      amount: egpAmount,
-      usdtPrice: usdtPrice,
-      usdtQuantity: usdtQuantity,
-      fromId: matchedBankAccountId,
-      fromLabel: matchedBankLabel,
-      toLabel: 'USD Exchange',
-      bybitOrderId: bybitOrderId,
-      paymentMethod: paymentMethod,
-      createdByUid: createdByUid,
-      timestamp: DateTime.now(),
-    );
-
-    if (matchedBankAccountId != null) {
-      await dist._db.ref('bank_accounts/$matchedBankAccountId/balance').runTransaction((Object? data) {
-        final current = (data as num?)?.toDouble() ?? 0.0;
-        return Transaction.success(current - egpAmount);
-      });
-    }
-    // Add to USD Exchange balance (USDT quantity)
-    await dist._addUsdtBalance(usdtQuantity, usdtPrice);
-    await dist._db.ref('financial_ledger/${tx.id}').set(tx.toMap());
-
-    if (usdtPrice > 0) {
-      await dist._db.ref('price_history/${tx.id}').set({
-        'price': usdtPrice,
-        'side': 'buy',
-        'timestamp': DateTime.now().millisecondsSinceEpoch,
-      });
+      debugPrint('Error recordBybitBuyOrder in Supabase: $e');
     }
   }
 
@@ -391,52 +289,12 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
   }) async {
     final dist = this as DistributionProvider;
     try {
-      final ledgerQuery = await dist._db.ref('financial_ledger')
-          .orderByChild('bybitOrderId')
-          .equalTo(bybitOrderId)
-          .once();
-      if (ledgerQuery.snapshot.exists) {
-        final items = Map<String, dynamic>.from(ledgerQuery.snapshot.value as Map);
-        for (final item in items.values) {
-          if (item['type'] == 'SELL_USDT') {
-            debugPrint('Sell USDT: Duplicate $bybitOrderId — skipping.');
-            return;
-          }
-        }
-      }
+      await dist._supabase.functions.invoke('sync-bybit-orders', body: {
+        'orderId': bybitOrderId,
+        'force': true,
+      });
     } catch (e) {
-      debugPrint('Sell USDT: CRITICAL Dedup check error. Halting to prevent duplicates: $e');
-      return;
-    }
-
-    try {
-      final tx = FinancialTransaction(
-        id: 'sell_${bybitOrderId}',
-        type: FlowType.SELL_USDT,
-        amount: egpAmount,
-        usdtPrice: usdtPrice,
-        usdtQuantity: usdtQuantity,
-        fromLabel: 'USD Exchange',
-        toId: vfNumberId,
-        toLabel: vfNumberLabel,
-        bybitOrderId: bybitOrderId,
-        paymentMethod: paymentMethod,
-        createdByUid: createdByUid,
-        timestamp: timestamp,
-      );
-      // Subtract from USD Exchange balance (USDT quantity)
-      await dist._subtractUsdtBalance(usdtQuantity, usdtPrice);
-      await dist._db.ref('financial_ledger/${tx.id}').set(tx.toMap());
-
-      if (usdtPrice > 0) {
-        await dist._db.ref('price_history/${tx.id}').set({
-          'price': usdtPrice,
-          'side': 'sell',
-          'timestamp': DateTime.now().millisecondsSinceEpoch,
-        });
-      }
-    } catch (e) {
-      debugPrint('Process Sell Order error: $e');
+      debugPrint('Error recordBybitSellOrder in Supabase: $e');
     }
   }
 
@@ -450,26 +308,18 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isCreditReturning) {
-      throw StateError('A credit return is already in progress.');
-    }
+    if (dist._isCreditReturning) throw StateError('A credit return is already in progress.');
     dist._isCreditReturning = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('creditReturn');
-      await callable.call({
-        'retailerId': retailerId,
-        'vfNumberId': vfNumberId,
-        'vfPhone': vfPhone,
-        'amount': amount,
-        'fees': fees,
-        'createdByUid': createdByUid,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      await dist._supabase.rpc('credit_return', params: {
+        'p_retailer_id': retailerId,
+        'p_vf_number_id': vfNumberId,
+        'p_amount': amount,
+        'p_fees': fees,
+        'p_created_by_uid': createdByUid,
+        'p_notes': notes,
       });
-      await dist.loadAll();
-    } catch (e) {
-      debugPrint('Credit Return error: ');
-      rethrow;
     } finally {
       dist._isCreditReturning = false;
       notifyListeners();
@@ -484,24 +334,17 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     String? notes,
   }) async {
     final dist = this as DistributionProvider;
-    if (dist._isInternalTransferring) {
-      throw StateError('An internal transfer is already in progress.');
-    }
+    if (dist._isInternalTransferring) throw StateError('An internal transfer is already in progress.');
     dist._isInternalTransferring = true;
     notifyListeners();
     try {
-      final callable = dist._functions.httpsCallable('transferInternalVfCash');
-      await callable.call({
-        'fromVfId': fromVfId,
-        'toVfId': toVfId,
-        'amount': amount,
-        'fees': fees,
-        if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      await dist._supabase.rpc('transfer_internal_vf_cash', params: {
+        'p_from_vf_id': fromVfId,
+        'p_to_vf_id': toVfId,
+        'p_amount': amount,
+        'p_fees': fees,
+        'p_notes': notes,
       });
-      await dist.loadAll();
-    } catch (e) {
-      debugPrint('Internal Transfer error: $e');
-      rethrow;
     } finally {
       dist._isInternalTransferring = false;
       notifyListeners();
@@ -513,16 +356,39 @@ mixin RetailerCollectorOperationsMixin on ChangeNotifier {
     if (dist._isDeleting) return;
     dist._isDeleting = true;
     try {
-      final callable = dist._functions.httpsCallable('deleteFinancialTransaction');
-      await callable.call({
-        'transactionId': tx.id,
+      await dist._supabase.rpc('delete_financial_transaction', params: {
+        'p_transaction_id': tx.id,
       });
-      await dist.loadAll();
-    } catch (e) {
-      debugPrint('Delete transaction error: $e');
-      rethrow;
     } finally {
       dist._isDeleting = false;
     }
+  }
+  
+  // Stubs for Collector logic
+  Future<void> addCollector(Collector collector) async {
+    final dist = this as DistributionProvider;
+    await dist._supabase.from('collectors').upsert({
+      'id': collector.id,
+      'uid': collector.uid,
+      'name': collector.name,
+      'phone': collector.phone,
+      'email': collector.email,
+      'is_active': collector.isActive,
+    });
+  }
+
+  Future<void> updateCollector(Collector collector) async {
+    final dist = this as DistributionProvider;
+    await dist._supabase.from('collectors').update({
+      'name': collector.name,
+      'phone': collector.phone,
+      'email': collector.email,
+      'is_active': collector.isActive,
+    }).eq('id', collector.id);
+  }
+
+  Future<void> deactivateCollector(String id) async {
+    final dist = this as DistributionProvider;
+    await dist._supabase.from('collectors').update({'is_active': false}).eq('id', id);
   }
 }

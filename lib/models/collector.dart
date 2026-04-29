@@ -72,13 +72,13 @@ class Collector {
       phone: map['phone']?.toString() ?? '',
       email: map['email']?.toString(),
       uid: map['uid']?.toString(),
-      cashOnHand: asDouble(map['cashOnHand']),
-      cashLimit: asDouble(map['cashLimit'] ?? 50000.0),
-      totalCollected: asDouble(map['totalCollected']),
-      totalDeposited: asDouble(map['totalDeposited']),
-      isActive: (map['isActive'] is bool) ? map['isActive'] : true,
-      createdAt: DateTime.tryParse(map['createdAt']?.toString() ?? '') ?? DateTime.now(),
-      lastUpdatedAt: DateTime.tryParse(map['lastUpdatedAt']?.toString() ?? '') ?? DateTime.now(),
+      cashOnHand: asDouble(map['cash_on_hand'] ?? map['cashOnHand']),
+      cashLimit: asDouble(map['cash_limit'] ?? map['cashLimit'] ?? 50000.0),
+      totalCollected: asDouble(map['total_collected'] ?? map['totalCollected']),
+      totalDeposited: asDouble(map['total_deposited'] ?? map['totalDeposited']),
+      isActive: (map['is_active'] ?? map['isActive']) == true,
+      createdAt: DateTime.tryParse((map['created_at'] ?? map['createdAt'])?.toString() ?? '') ?? DateTime.now(),
+      lastUpdatedAt: DateTime.tryParse((map['last_updated_at'] ?? map['lastUpdatedAt'])?.toString() ?? '') ?? DateTime.now(),
     );
   }
 

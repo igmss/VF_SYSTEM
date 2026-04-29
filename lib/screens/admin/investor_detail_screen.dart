@@ -8,38 +8,64 @@ import '../../models/investor.dart';
 import '../../utils/formatters.dart';
 import '../../theme/app_theme.dart';
 
-class InvestorDetailScreen extends StatelessWidget {
+class InvestorDetailScreen extends StatefulWidget {
   final Investor investor;
 
   const InvestorDetailScreen({super.key, required this.investor});
 
+  @override
+  State<InvestorDetailScreen> createState() => _InvestorDetailScreenState();
+}
+
+class _InvestorDetailScreenState extends State<InvestorDetailScreen> {
+  late Future<Map<String, dynamic>> _performanceFuture;
+
+
+  @override
+  void initState() {
+    super.initState();
+    _performanceFuture = Future.value(<String, dynamic>{});
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // Fetch once and cache — prevents infinite rebuild loop from stream-based provider
+    _performanceFuture = context.read<DistributionProvider>()
+        .getInvestorPerformance(investorId: widget.investor.id);
+  }
+
   void _withdrawCapital(BuildContext context) {
     showDialog(
       context: context,
-      builder: (ctx) => _WithdrawCapitalDialog(investor: investor),
+      builder: (ctx) => _WithdrawCapitalDialog(investor: widget.investor),
     );
   }
 
   void _payProfit(BuildContext context, double payable) {
     showDialog(
       context: context,
-      builder: (ctx) => _PayProfitDialog(investor: investor, maxAmount: payable),
+      builder: (ctx) => _PayProfitDialog(investor: widget.investor, maxAmount: payable),
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final dist = context.watch<DistributionProvider>();
     return FutureBuilder<Map<String, dynamic>>(
-      future: dist.getInvestorPerformance(investorId: investor.id),
+      future: _performanceFuture,
       builder: (context, perfSnap) {
         final isLoading = perfSnap.connectionState == ConnectionState.waiting;
         final hasError = perfSnap.hasError;
         final perf = perfSnap.data ?? {};
-        final double totalEarned = (perf['totalEarned'] ?? 0.0).toDouble();
-        final double totalPaid = (perf['totalPaid'] ?? 0.0).toDouble();
-        final double payable = (perf['payableBalance'] ?? 0.0).toDouble();
-        final List<dynamic> dailyBreakdown = List<dynamic>.from(perf['dailyBreakdown'] ?? []);
+        final List<dynamic> perfList = List<dynamic>.from(perf['performance'] ?? []);
+        final Map<String, dynamic> invPerf = perfList.isNotEmpty
+            ? Map<String, dynamic>.from(perfList.first)
+            : <String, dynamic>{};
+
+        final double totalEarned = (invPerf['totalEarned'] ?? perf['totalEarned'] ?? 0.0).toDouble();
+        final double totalPaid = (invPerf['totalPaid'] ?? perf['totalPaid'] ?? 0.0).toDouble();
+        final double payable = (invPerf['payableBalance'] ?? perf['payableBalance'] ?? perf['totalPayable'] ?? 0.0).toDouble();
+        final List<dynamic> dailyBreakdown = List<dynamic>.from(invPerf['dailyBreakdown'] ?? perf['dailyBreakdown'] ?? []);
 
         return Scaffold(
           backgroundColor: AppTheme.scaffoldBg(context),
@@ -47,7 +73,7 @@ class InvestorDetailScreen extends StatelessWidget {
             backgroundColor: Colors.transparent,
             elevation: 0,
             centerTitle: true,
-            title: Text(investor.name,
+            title: Text(widget.investor.name,
                 style: TextStyle(
                     fontWeight: FontWeight.w900,
                     color: AppTheme.textPrimaryColor(context),
@@ -63,7 +89,11 @@ class InvestorDetailScreen extends StatelessWidget {
                 icon: Icon(Icons.refresh_rounded,
                     color: AppTheme.textMutedColor(context), size: 22),
                 onPressed: () {
-                  (context as Element).markNeedsBuild();
+                  final dist = context.read<DistributionProvider>();
+                  dist.invalidateInvestorPerformance(widget.investor.id);
+                  setState(() {
+                    _performanceFuture = dist.getInvestorPerformance(investorId: widget.investor.id);
+                  });
                 },
               ),
             ],
@@ -151,12 +181,12 @@ class InvestorDetailScreen extends StatelessWidget {
                                   day: Map<String, dynamic>.from(
                                       dailyBreakdown[idx]),
                                   sharePercent:
-                                      investor.profitSharePercent.toDouble(),
+                                      widget.investor.profitSharePercent.toDouble(),
                                 ),
                               ),
                       ),
                       // — Withdraw Capital Button —
-                      if (investor.status == 'active') ...[
+                      if (widget.investor.status == 'active') ...[
                         const SizedBox(height: 12),
                         OutlinedButton.icon(
                           style: OutlinedButton.styleFrom(
@@ -220,7 +250,7 @@ class InvestorDetailScreen extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Text(
-                  '${investor.profitSharePercent}% ${'profit_share'.tr()}',
+                  '${widget.investor.profitSharePercent}% ${'profit_share'.tr()}',
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 11,
@@ -231,7 +261,7 @@ class InvestorDetailScreen extends StatelessWidget {
           ),
           const SizedBox(height: 6),
           Text(
-            Formatters.formatCurrency(investor.investedAmount),
+            Formatters.formatCurrency(widget.investor.investedAmount),
             style: const TextStyle(
                 color: Colors.white,
                 fontSize: 34,
@@ -239,7 +269,7 @@ class InvestorDetailScreen extends StatelessWidget {
                 letterSpacing: -0.5),
           ),
           const SizedBox(height: 4),
-          Text(investor.investmentDate,
+          Text(widget.investor.investmentDate,
               style: const TextStyle(
                   color: Colors.white54,
                   fontSize: 11,
@@ -699,3 +729,4 @@ class _WithdrawCapitalDialogState extends State<_WithdrawCapitalDialog> {
     );
   }
 }
+

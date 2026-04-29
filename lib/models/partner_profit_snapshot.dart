@@ -126,8 +126,8 @@ class PartnerProfitSnapshot {
     }
 
     return PartnerProfitSnapshot(
-      calculationVersion: asInt(map['calculationVersion']),
-      date: map['date'] ?? '',
+      calculationVersion: asInt(map['calculationVersion'] ?? map['calculation_version']),
+      date: map['date'] ?? map['date_key'] ?? '',
       workingDays: asInt(map['workingDays']),
       totalVfDistributed: asDouble(map['totalVfDistributed'] ?? map['totalDistVf']),
       totalInstaDistributed: asDouble(map['totalInstaDistributed']),

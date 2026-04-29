@@ -1,5 +1,7 @@
 part of 'bank_accounts_screen.dart';
 
+import '../../widgets/async_button.dart';
+
 // ─────────────────────────────────────────────────────────────────────────
 //  Dialogs — 100% unchanged logic
 // ─────────────────────────────────────────────────────────────────────────
@@ -20,9 +22,9 @@ void _showAddDialog(BuildContext context) {
         _tf(context, balCtrl,    'opening_balance'.tr(), Icons.monetization_on,
             keyboard: TextInputType.number),
       ],
-      onConfirm: () {
+      onConfirm: () async {
         final uid = context.read<AuthProvider>().currentUser?.uid ?? 'system';
-        context.read<DistributionProvider>().addBankAccount(
+        await context.read<DistributionProvider>().addBankAccount(
               BankAccount(
                 bankName: nameCtrl.text.trim(),
                 accountHolder: holderCtrl.text.trim(),
@@ -52,7 +54,7 @@ void _showFundDialog(BuildContext context, BankAccount bank,
         _tf(context, notesCtrl, 'notes'.tr(),      Icons.notes),
       ],
       // Step 1 done — now show confirm dialog before touching data
-      onConfirm: () {
+      onConfirm: () async {
         final amount = double.tryParse(amtCtrl.text) ?? 0;
         final notes  = notesCtrl.text.isEmpty ? null : notesCtrl.text;
         if (amount <= 0) return; // guard: nothing to confirm
@@ -156,7 +158,7 @@ void _showFundDialog(BuildContext context, BankAccount bank,
                 child: Text('cancel'.tr(),
                     style: TextStyle(color: AppTheme.textMutedColor(context))),
               ),
-              ElevatedButton.icon(
+              AsyncButton.icon(
                 icon: Icon(Icons.check_rounded,
                     color: AppTheme.textPrimaryColor(context), size: 16),
                 label: Text('confirm'.tr(),
@@ -166,15 +168,17 @@ void _showFundDialog(BuildContext context, BankAccount bank,
                   shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(10)),
                 ),
-                onPressed: () {
-                  Navigator.pop(context); // close confirm dialog
+                onPressed: () async {
                   // ── The only place fundBankAccount is called ──────────
-                  dist.fundBankAccount(
+                  await dist.fundBankAccount(
                     bankAccountId: bank.id,
                     amount: amount,
                     createdByUid: auth.currentUser?.uid ?? 'system',
                     notes: notes,
                   );
+                  if (context.mounted) {
+                    Navigator.pop(context); // close confirm dialog
+                  }
                 },
               ),
             ],
@@ -199,9 +203,9 @@ void _showCorrectBalanceDialog(BuildContext context, BankAccount bank,
             keyboard: const TextInputType.numberWithOptions(decimal: true)),
         _tf(context, notesCtrl, 'notes'.tr(), Icons.notes),
       ],
-      onConfirm: () {
+      onConfirm: () async {
         final newBal = double.tryParse(balCtrl.text) ?? bank.balance;
-        dist.correctBankBalance(
+        await dist.correctBankBalance(
           bankAccountId: bank.id,
           newBalance: newBal,
           createdByUid: auth.currentUser?.uid ?? 'system',
@@ -246,7 +250,7 @@ Widget _tf(BuildContext context, TextEditingController c, String label, IconData
 class _FormDialog extends StatelessWidget {
   final String title;
   final List<Widget> fields;
-  final VoidCallback onConfirm;
+  final Future<void> Function() onConfirm;
 
   const _FormDialog({
     required this.title,
@@ -281,10 +285,12 @@ class _FormDialog extends StatelessWidget {
                       style: TextStyle(color: AppTheme.textMutedColor(context))),
                 ),
                 const SizedBox(width: 8),
-                ElevatedButton(
-                  onPressed: () {
-                    Navigator.pop(context);
-                    onConfirm();
+                AsyncButton(
+                  onPressed: () async {
+                    await onConfirm();
+                    if (context.mounted) {
+                      Navigator.pop(context);
+                    }
                   },
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _kRed,

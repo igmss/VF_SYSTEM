@@ -1,72 +1,63 @@
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_database/firebase_database.dart';
-import 'package:uuid/uuid.dart';
-
+import 'package:supabase_flutter/supabase_flutter.dart';
 import '../models/retailer_assignment_request.dart';
+import '../models/financial_transaction.dart';
+import '../models/retailer.dart';
 
 class RetailerPortalService {
-  final FirebaseFunctions _functions =
-      FirebaseFunctions.instanceFor(region: 'asia-east1');
-  final FirebaseDatabase _db = FirebaseDatabase.instance;
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  /// Business data + filtered ledger activity (see Cloud Function).
+  /// Business data + filtered ledger activity.
   Future<Map<String, dynamic>> getPortalData({int? startMs, int? endMs}) async {
-    final result = await _functions.httpsCallable('getRetailerPortalData').call({
-      if (startMs != null) 'startMs': startMs,
-      if (endMs != null) 'endMs': endMs,
+    final response = await _supabase.functions.invoke('get-retailer-portal-data', body: {
+      if (startMs != null) 'startMs': startMs.toString(),
+      if (endMs != null) 'endMs': endMs.toString(),
     });
-    return Map<String, dynamic>.from(result.data as Map);
+
+    if (response.status != 200) {
+      throw Exception(response.data['error'] ?? 'Failed to fetch portal data');
+    }
+
+    final data = response.data as Map<String, dynamic>;
+    final retailerMap = data['retailer'] as Map<String, dynamic>;
+    final activityList = data['activity'] as List;
+
+    return {
+      'retailer': Retailer.fromMap(retailerMap).toMap(),
+      'retailerId': data['retailerId'],
+      'activity': activityList.map((r) => FinancialTransaction.fromMap(r as Map<String, dynamic>, r['id'].toString()).toMap()).toList(),
+      'range': data['range'],
+    };
   }
 
   Stream<List<RetailerAssignmentRequest>> streamRequestsForUser(String retailerUserUid) {
-    return _db.ref('retailer_portal/$retailerUserUid/requests').onValue.map((event) {
-      final snap = event.snapshot;
-      if (!snap.exists || snap.value == null || snap.value is! Map) {
-        return <RetailerAssignmentRequest>[];
-      }
-      final map = Map<String, dynamic>.from(snap.value as Map);
-      final list = <RetailerAssignmentRequest>[];
-      map.forEach((key, value) {
-        if (value is Map) {
-          list.add(RetailerAssignmentRequest.fromMap(
-            key.toString(),
-            Map<String, dynamic>.from(value),
-          ));
-        }
-      });
-      list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
-      return list;
-    });
+    // Note: We filter by created_by_uid = retailerUserUid
+    return _supabase
+        .from('retailer_assignment_requests')
+        .stream(primaryKey: ['id'])
+        .eq('created_by_uid', retailerUserUid)
+        .map((rows) {
+          final list = rows.map((r) => RetailerAssignmentRequest.fromMap(r['id'].toString(), r)).toList();
+          list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+          return list;
+        });
   }
 
   /// Admin: all requests across retailer portal accounts.
   Stream<List<RetailerPortalRequestRow>> streamAllRequests() {
-    return _db.ref('retailer_portal').onValue.map((event) {
-      final snap = event.snapshot;
-      if (!snap.exists || snap.value == null || snap.value is! Map) {
-        return <RetailerPortalRequestRow>[];
-      }
-      final root = snap.value as Map;
-      final list = <RetailerPortalRequestRow>[];
-      root.forEach((userUid, userVal) {
-        if (userVal is! Map) return;
-        final reqMap = userVal['requests'];
-        if (reqMap is! Map) return;
-        reqMap.forEach((rid, rdata) {
-          if (rdata is Map) {
-            list.add(RetailerPortalRequestRow(
-              portalUserUid: userUid.toString(),
-              request: RetailerAssignmentRequest.fromMap(
-                rid.toString(),
-                Map<String, dynamic>.from(rdata),
-              ),
-            ));
-          }
+    return _supabase
+        .from('retailer_assignment_requests')
+        .stream(primaryKey: ['id'])
+        .map((rows) {
+          final list = rows.map((r) {
+            final request = RetailerAssignmentRequest.fromMap(r['id'].toString(), r);
+            return RetailerPortalRequestRow(
+              portalUserUid: request.createdByUid,
+              request: request,
+            );
+          }).toList();
+          list.sort((a, b) => b.request.createdAt.compareTo(a.request.createdAt));
+          return list;
         });
-      });
-      list.sort((a, b) => b.request.createdAt.compareTo(a.request.createdAt));
-      return list;
-    });
   }
 
   Future<void> createRequest({
@@ -77,18 +68,13 @@ class RetailerPortalService {
     required String vfPhoneNumber,
     String? notes,
   }) async {
-    final id = const Uuid().v4();
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _db.ref('retailer_portal/$retailerUserUid/requests/$id').set({
-      'id': id,
-      'retailerId': retailerId,
-      'createdByUid': createdByUid,
-      'requestedAmount': requestedAmount,
-      'vfPhoneNumber': vfPhoneNumber.trim(),
-      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+    await _supabase.from('retailer_assignment_requests').insert({
+      'retailer_id': retailerId,
+      'created_by_uid': createdByUid,
+      'requested_amount': requestedAmount,
+      'vf_phone_number': vfPhoneNumber.trim(),
+      'notes': notes?.trim(),
       'status': 'PENDING',
-      'createdAt': now,
-      'updatedAt': now,
     });
   }
 
@@ -97,9 +83,20 @@ class RetailerPortalService {
     required String requestId,
     required Map<String, dynamic> updates,
   }) async {
-    final u = Map<String, dynamic>.from(updates);
-    u['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
-    await _db.ref('retailer_portal/$portalUserUid/requests/$requestId').update(u);
+    // Map camelCase to snake_case for updates
+    final mappedUpdates = <String, dynamic>{};
+    if (updates.containsKey('status')) mappedUpdates['status'] = updates['status'];
+    if (updates.containsKey('assignedAmount')) mappedUpdates['assigned_amount'] = updates['assignedAmount'];
+    if (updates.containsKey('adminNotes')) mappedUpdates['admin_notes'] = updates['adminNotes'];
+    if (updates.containsKey('rejectedReason')) mappedUpdates['rejected_reason'] = updates['rejectedReason'];
+    if (updates.containsKey('proofImageUrl')) mappedUpdates['proof_image_url'] = updates['proofImageUrl'];
+    
+    mappedUpdates['updated_at'] = DateTime.now().toIso8601String();
+
+    await _supabase
+        .from('retailer_assignment_requests')
+        .update(mappedUpdates)
+        .eq('id', requestId);
   }
 
   Future<void> lockRequestAdmin({
@@ -107,19 +104,12 @@ class RetailerPortalService {
     required String requestId,
     required String adminUid,
   }) async {
-    final ref = _db.ref('retailer_portal/$portalUserUid/requests/$requestId');
-    final result = await ref.runTransaction((Object? data) {
-      if (data == null) return Transaction.abort();
-      final map = Map<String, dynamic>.from(data as Map);
-      if (map['status'] != 'PENDING') return Transaction.abort();
-
-      map['status'] = 'PROCESSING';
-      map['processingBy'] = adminUid;
-      map['updatedAt'] = DateTime.now().millisecondsSinceEpoch;
-      return Transaction.success(map);
+    final bool success = await _supabase.rpc('lock_retailer_request', params: {
+      'p_request_id': requestId,
+      'p_admin_uid': adminUid,
     });
 
-    if (!result.committed) {
+    if (!success) {
       throw Exception('Request is no longer PENDING and could not be locked.');
     }
   }
@@ -128,12 +118,14 @@ class RetailerPortalService {
     required String portalUserUid,
     required String requestId,
   }) async {
-    final now = DateTime.now().millisecondsSinceEpoch;
-    await _db.ref('retailer_portal/$portalUserUid/requests/$requestId').update({
-      'status': 'PENDING',
-      'processingBy': null,
-      'updatedAt': now,
-    });
+    await _supabase
+        .from('retailer_assignment_requests')
+        .update({
+          'status': 'PENDING',
+          'processing_by': null,
+          'updated_at': DateTime.now().toIso8601String(),
+        })
+        .eq('id', requestId);
   }
 }
 

@@ -6,6 +6,7 @@ import '../../providers/distribution_provider.dart';
 import '../../providers/app_provider.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/retailer.dart';
+import '../../widgets/async_button.dart';
 
 class CreditReturnDialog extends StatefulWidget {
   final Retailer retailer;
@@ -229,8 +230,8 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                     child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context))),
                   ),
                   const SizedBox(width: 12),
-                  ElevatedButton(
-                    onPressed: isSubmitting ? null : () => _submit(retailer),
+                  AsyncButton(
+                    onPressed: () => _submit(retailer),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFE63946),
                       foregroundColor: AppTheme.textPrimaryColor(context),
@@ -238,13 +239,7 @@ class _CreditReturnDialogState extends State<CreditReturnDialog> {
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                       elevation: 0,
                     ),
-                    child: isSubmitting
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
-                    : Text('confirm_return'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
+                    child: Text('confirm_return'.tr(), style: const TextStyle(fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),

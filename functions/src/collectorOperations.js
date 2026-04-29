@@ -241,7 +241,7 @@ exports.depositCollectorCash = onCall({ region: REGION }, async (request) => {
     await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
       if (current === null) return current;
       return asNumber(current) + amount;
-    }).catch(() => {});
+    }).catch(() => { });
     throw new HttpsError('internal', error.message || 'Unable to complete deposit.');
   }
 
@@ -415,7 +415,7 @@ exports.depositCollectorCashToDefaultVf = onCall({ region: REGION }, async (requ
     await db.ref(`collectors/${collectorId}/cashOnHand`).transaction((current) => {
       if (current === null) return current;
       return asNumber(current) + amount;
-    }).catch(() => {});
+    }).catch(() => { });
     throw new HttpsError('internal', error.message || 'Unable to complete Vodafone deposit.');
   }
 

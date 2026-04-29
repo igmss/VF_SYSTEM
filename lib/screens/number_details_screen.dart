@@ -5,6 +5,7 @@ import 'package:easy_localization/easy_localization.dart';
 import '../providers/app_provider.dart';
 import '../models/models.dart';
 import '../theme/app_theme.dart';
+import '../widgets/async_button.dart';
 
 class NumberDetailsScreen extends StatefulWidget {
   final MobileNumber number;
@@ -66,10 +67,10 @@ class _NumberDetailsScreenState extends State<NumberDetailsScreen> {
         elevation: 0,
         actions: [
           if (!currentNum.isDefault)
-            TextButton.icon(
+            AsyncTextButton.icon(
               onPressed: () async {
                 await provider.setDefaultNumber(currentNum.id);
-                if (mounted) {
+                if (context.mounted) {
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(content: Text('set_default_msg'.tr())),
                   );

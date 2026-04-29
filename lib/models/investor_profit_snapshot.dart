@@ -135,8 +135,8 @@ class InvestorProfitSnapshot {
     }
 
     return InvestorProfitSnapshot(
-      calculationVersion: asInt(map['calculationVersion']),
-      date: map['date'] ?? '',
+      calculationVersion: asInt(map['calculationVersion'] ?? map['calculation_version']),
+      date: map['date'] ?? map['date_key'] ?? '',
       workingDays: asInt(map['workingDays']),
       hurdle: asDouble(map['hurdle']),
       precedingCapital: asDouble(map['precedingCapital']),

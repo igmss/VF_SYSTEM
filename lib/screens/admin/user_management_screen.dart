@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 import 'package:easy_localization/easy_localization.dart';
 import '../../providers/auth_provider.dart';
 import '../../models/app_user.dart';
+import '../../widgets/async_button.dart';
 
 class UserManagementScreen extends StatefulWidget {
   const UserManagementScreen({super.key});
@@ -525,7 +526,7 @@ class _ManagementDialog extends StatelessWidget {
           onPressed: () => Navigator.pop(context),
           child: Text('cancel'.tr(), style: TextStyle(color: AppTheme.textMutedColor(context), fontWeight: FontWeight.bold)),
         ),
-        ElevatedButton(
+        AsyncButton(
           onPressed: () async {
             await onConfirm();
           },

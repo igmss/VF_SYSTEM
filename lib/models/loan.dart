@@ -77,25 +77,25 @@ class Loan {
     }
 
     return Loan(
-      id: map['id'],
-      borrowerName: map['borrowerName'] ?? '',
-      borrowerPhone: map['borrowerPhone'] ?? '',
-      principalAmount: asDouble(map['principalAmount']),
-      amountRepaid: asDouble(map['amountRepaid']),
+      id: map['id']?.toString() ?? '',
+      borrowerName: (map['borrower_name'] ?? map['borrowerName'])?.toString() ?? '',
+      borrowerPhone: (map['borrower_phone'] ?? map['borrowerPhone'])?.toString() ?? '',
+      principalAmount: asDouble(map['principal_amount'] ?? map['principalAmount']),
+      amountRepaid: asDouble(map['amount_repaid'] ?? map['amountRepaid']),
       sourceType: LoanSourceType.values.firstWhere(
-        (e) => e.name == map['sourceType'],
+        (e) => e.name == (map['source_type'] ?? map['sourceType']),
         orElse: () => LoanSourceType.bank,
       ),
-      sourceId: map['sourceId'] ?? '',
-      sourceLabel: map['sourceLabel'] ?? '',
+      sourceId: (map['source_id'] ?? map['sourceId'])?.toString() ?? '',
+      sourceLabel: (map['source_label'] ?? map['sourceLabel'])?.toString() ?? '',
       status: LoanStatus.values.firstWhere(
         (e) => e.name == map['status'],
         orElse: () => LoanStatus.active,
       ),
-      issuedAt: asDateTime(map['issuedAt']),
-      lastUpdatedAt: asDateTime(map['lastUpdatedAt']),
-      notes: map['notes'],
-      createdByUid: map['createdByUid'] ?? 'system',
+      issuedAt: asDateTime(map['issued_at'] ?? map['issuedAt']),
+      lastUpdatedAt: asDateTime(map['last_updated_at'] ?? map['lastUpdatedAt']),
+      notes: map['notes']?.toString(),
+      createdByUid: (map['created_by_uid'] ?? map['createdByUid'])?.toString() ?? 'system',
     );
   }
 }

@@ -1,43 +1,47 @@
-import 'package:cloud_functions/cloud_functions.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import 'package:flutter/foundation.dart';
 import '../models/app_user.dart';
 
 class AuthService {
-  final FirebaseAuth _auth = FirebaseAuth.instance;
-  final FirebaseDatabase _database = FirebaseDatabase.instance;
-  final FirebaseFunctions _functions =
-      FirebaseFunctions.instanceFor(region: 'asia-east1');
+  final sb.SupabaseClient _supabase = sb.Supabase.instance.client;
 
-  Stream<User?> get authStateChanges => _auth.authStateChanges();
-  User? get currentUser => _auth.currentUser;
+  Stream<sb.User?> get authStateChanges => _supabase.auth.onAuthStateChange.map((event) => event.session?.user);
+  sb.User? get currentUser => _supabase.auth.currentUser;
 
   Future<AppUser?> getUserData(String uid) async {
     try {
-      debugPrint('Fetching user data for UID: $uid');
-      final snapshot = await _database.ref('users/$uid').get();
-      if (snapshot.exists && snapshot.value != null) {
-        final rawData = snapshot.value;
-        if (rawData is Map) {
-          debugPrint('User data found, parsing...');
-          final data = Map<String, dynamic>.from(rawData);
-          return AppUser.fromMap(data, uid);
-        } else {
-          debugPrint('User data for $uid is not a Map: $rawData');
-        }
+      debugPrint('Fetching user data from Supabase for UID: $uid');
+      // Try by ID first, then by firebase_uid
+      final response = await _supabase
+          .from('users')
+          .select()
+          .or('id.eq.$uid,firebase_uid.eq.$uid')
+          .maybeSingle();
+
+      if (response != null) {
+        debugPrint('User data found in Supabase, parsing...');
+        // Map snake_case from DB to camelCase for the model
+        final data = {
+          'email': response['email'],
+          'name': response['name'],
+          'role': response['role'],
+          'isActive': response['is_active'],
+          'createdAt': response['created_at'],
+          'retailerId': response['retailer_id'],
+        };
+        return AppUser.fromMap(data, (response['firebase_uid'] ?? response['id']).toString());
       } else {
-        debugPrint('No user data found for UID: $uid');
+        debugPrint('No user data found in Supabase for UID: $uid');
       }
     } catch (e, stack) {
-      debugPrint('Error fetching user data: $e');
+      debugPrint('Error fetching user data from Supabase: $e');
       debugPrint(stack.toString());
     }
     return null;
   }
 
-  Future<UserCredential> signIn(String email, String password) async {
-    return await _auth.signInWithEmailAndPassword(
+  Future<sb.AuthResponse> signIn(String email, String password) async {
+    return await _supabase.auth.signInWithPassword(
       email: email,
       password: password,
     );
@@ -51,16 +55,14 @@ class AuthService {
     String? retailerId,
   }) async {
     try {
-      final callable = _functions.httpsCallable('createUserAccount');
-      await callable.call({
+      // Call Supabase Edge Function
+      await _supabase.functions.invoke('create-user-account', body: {
         'email': email,
         'password': password,
         'name': name,
         'role': role.toString().split('.').last,
         if (retailerId != null && retailerId.isNotEmpty) 'retailerId': retailerId,
       });
-    } on FirebaseFunctionsException catch (e) {
-      throw e.message ?? 'Unable to create user.';
     } catch (e) {
       throw 'Unable to create user: $e';
     }
@@ -68,20 +70,20 @@ class AuthService {
 
   Future<List<AppUser>> getAllUsers() async {
     try {
-      final snapshot = await _database.ref('users').get();
-      if (snapshot.exists && snapshot.value != null) {
-        final rawMap = snapshot.value as Map;
-        final List<AppUser> users = [];
-        rawMap.forEach((key, value) {
-          if (value is Map) {
-            final data = Map<String, dynamic>.from(value);
-            users.add(AppUser.fromMap(data, key.toString()));
-          }
-        });
-        return users;
-      }
+      final List<dynamic> data = await _supabase.from('users').select();
+      return data.map((item) {
+        final mapped = {
+          'email': item['email'],
+          'name': item['name'],
+          'role': item['role'],
+          'isActive': item['is_active'],
+          'createdAt': item['created_at'],
+          'retailerId': item['retailer_id'],
+        };
+        return AppUser.fromMap(mapped, (item['firebase_uid'] ?? item['id']).toString());
+      }).toList();
     } catch (e) {
-      debugPrint('Error fetching all users: $e');
+      debugPrint('Error fetching all users from Supabase: $e');
     }
     return [];
   }
@@ -93,60 +95,34 @@ class AuthService {
     required UserRole role,
     String? retailerId,
   }) async {
-    double asDouble(dynamic value, {double fallback = 0}) {
-      if (value == null) return fallback;
-      if (value is num) return value.toDouble();
-      return double.tryParse(value.toString().replaceAll(',', '')) ?? fallback;
-    }
-
-    final now = DateTime.now();
-    final nowIso = now.toIso8601String();
-    final appUser = AppUser(
-      uid: uid,
-      email: email,
-      name: name,
-      role: role,
-      createdAt: now,
-      retailerId: role == UserRole.RETAILER ? retailerId : null,
-    );
-    final data = Map<String, dynamic>.from(appUser.toMap());
-    final collectorSnap = await _database.ref('collectors/$uid').get();
-    final updates = <String, dynamic>{
-      'users/$uid': data,
-    };
-    if (role != UserRole.RETAILER) {
-      updates['users/$uid/retailerId'] = null;
-    }
-
-    if (role == UserRole.COLLECTOR) {
-      final existingCollector = collectorSnap.exists && collectorSnap.value is Map
-          ? Map<String, dynamic>.from(collectorSnap.value as Map)
-          : <String, dynamic>{};
-      updates['collectors/$uid'] = {
+    // In Supabase, the create-user-account function handles synchronization.
+    // If we need manual sync:
+    try {
+      final nowIso = DateTime.now().toIso8601String();
+      await _supabase.from('users').upsert({
         'id': uid,
-        'name': name,
-        'phone': existingCollector['phone']?.toString() ?? '',
         'email': email,
-        'uid': uid,
-        'cashOnHand': asDouble(existingCollector['cashOnHand']),
-        'cashLimit': asDouble(existingCollector['cashLimit'], fallback: 50000.0),
-        'totalCollected': asDouble(existingCollector['totalCollected']),
-        'totalDeposited': asDouble(existingCollector['totalDeposited']),
-        'isActive': true,
-        'createdAt': existingCollector['createdAt']?.toString() ?? data['createdAt'],
-        'lastUpdatedAt': nowIso,
-      };
-    } else if (collectorSnap.exists) {
-      updates['collectors/$uid/isActive'] = false;
-      updates['collectors/$uid/lastUpdatedAt'] = nowIso;
+        'name': name,
+        'role': role.toString().split('.').last,
+        'is_active': true,
+        'retailer_id': role == UserRole.RETAILER ? retailerId : null,
+      });
+      
+      if (role == UserRole.COLLECTOR) {
+        await _supabase.from('collectors').upsert({
+          'id': uid,
+          'name': name,
+          'email': email,
+          'is_active': true,
+          'last_updated_at': nowIso,
+        });
+      }
+    } catch (e) {
+      debugPrint('Error syncing user record to Supabase: $e');
     }
-
-    debugPrint('Syncing user record to DB for $uid with role ${role.name}');
-    await _database.ref().update(updates);
-    debugPrint('Sync successful');
   }
 
   Future<void> signOut() async {
-    await _auth.signOut();
+    await _supabase.auth.signOut();
   }
 }

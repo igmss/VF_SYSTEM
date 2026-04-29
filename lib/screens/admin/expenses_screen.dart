@@ -310,6 +310,7 @@ class _RecordExpenseSheetState extends State<_RecordExpenseSheet> {
     setState(() => _loading = true);
     try {
       await widget.dist.recordExpense(
+        type: 'EXPENSE_BANK',
         sourceId: _sourceId!,
         amount: amount,
         category: _category,

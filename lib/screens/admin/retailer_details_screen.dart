@@ -55,7 +55,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
       final isAssigned =
           (tx.type == FlowType.DISTRIBUTE_VFCASH || tx.type == FlowType.DISTRIBUTE_INSTAPAY) && tx.toId == retailer.id;
       final isCollected =
-          (tx.type == FlowType.COLLECT_CASH || tx.type == FlowType.COLLECT_INSTAPAY_CASH) && tx.fromId == retailer.id;
+          (tx.type == FlowType.COLLECT_CASH || tx.type == FlowType.COLLECT_VFCASH || tx.type == FlowType.COLLECT_INSTAPAY) && tx.fromId == retailer.id;
       final isProfit = 
           tx.type == FlowType.INSTAPAY_DIST_PROFIT && tx.toId == retailer.id;
       final isCreditReturn =
@@ -72,7 +72,8 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
     final List<FinancialTransaction> collectedTxs = allTxs
         .where((tx) =>
             tx.type == FlowType.COLLECT_CASH ||
-            tx.type == FlowType.COLLECT_INSTAPAY_CASH ||
+            tx.type == FlowType.COLLECT_VFCASH ||
+            tx.type == FlowType.COLLECT_INSTAPAY ||
             tx.type == FlowType.CREDIT_RETURN ||
             tx.type == FlowType.CREDIT_RETURN_FEE)
         .toList();
@@ -80,7 +81,7 @@ class _RetailerDetailsScreenState extends State<RetailerDetailsScreen>
     final List<FinancialTransaction> instaPayTxs = allTxs
         .where((tx) =>
             tx.type == FlowType.DISTRIBUTE_INSTAPAY ||
-            tx.type == FlowType.COLLECT_INSTAPAY_CASH ||
+            tx.type == FlowType.COLLECT_INSTAPAY ||
             tx.type == FlowType.INSTAPAY_DIST_PROFIT)
         .toList();
 

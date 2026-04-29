@@ -1,5 +1,5 @@
 import 'package:flutter/foundation.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:supabase_flutter/supabase_flutter.dart' as sb;
 import '../models/app_user.dart';
 import '../services/auth_service.dart';
 
@@ -25,8 +25,8 @@ class AuthProvider extends ChangeNotifier {
     _authService.authStateChanges.listen(_onAuthStateChanged);
   }
 
-  Future<void> _onAuthStateChanged(User? firebaseUser) async {
-    if (firebaseUser == null) {
+  Future<void> _onAuthStateChanged(sb.User? sbUser) async {
+    if (sbUser == null) {
       _currentUser = null;
       _isLoading = false;
       if (!_signingIn) {
@@ -42,7 +42,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final user = await _authService.getUserData(firebaseUser.uid);
+      final user = await _authService.getUserData(sbUser.id);
       if (user == null) {
         _currentUser = null;
         _error =
@@ -74,8 +74,8 @@ class AuthProvider extends ChangeNotifier {
     try {
       await _authService.signIn(email, password);
       return true;
-    } on FirebaseAuthException catch (e) {
-      _error = _friendlyError(e.code);
+    } on sb.AuthException catch (e) {
+      _error = _friendlyError(e.message);
       _isLoading = false;
       _signingIn = false;
       notifyListeners();
@@ -135,21 +135,13 @@ class AuthProvider extends ChangeNotifier {
     return await _authService.getAllUsers();
   }
 
-  String _friendlyError(String code) {
-    switch (code) {
-      case 'user-not-found':
-      case 'invalid-credential':
-        return 'Invalid email or password.';
-      case 'wrong-password':
-        return 'Incorrect password.';
-      case 'invalid-email':
-        return 'The email address is invalid.';
-      case 'user-disabled':
-        return 'This account has been disabled.';
-      case 'too-many-requests':
-        return 'Too many attempts. Try again later.';
-      default:
-        return 'Login failed. Please try again.';
+  String _friendlyError(String message) {
+    if (message.contains('Invalid login credentials')) {
+      return 'Invalid email or password.';
     }
+    if (message.contains('Email not confirmed')) {
+      return 'Please confirm your email address.';
+    }
+    return message;
   }
 }

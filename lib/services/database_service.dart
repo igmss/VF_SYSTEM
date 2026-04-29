@@ -1,557 +1,314 @@
-import 'package:firebase_core/firebase_core.dart';
-import 'package:firebase_database/firebase_database.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:uuid/uuid.dart';
 import '../models/models.dart';
 
 class DatabaseService {
-  static const String _dbUrl =
-      'https://vodatracking-default-rtdb.firebaseio.com';
-  static const Duration _timeout = Duration(seconds: 15);
+  final SupabaseClient _supabase = Supabase.instance.client;
 
-  // Use instance to avoid multiple initializations on Web
-  final FirebaseDatabase _database = FirebaseDatabase.instance;
+  static const String _numbersTable = 'mobile_numbers';
+  static const String _transactionsTable = 'transactions';
+  static const String _syncTable = 'sync_state';
 
-  static const String _numbersPath = 'mobile_numbers';
-  static const String _transactionsPath = 'transactions';
-  static const String _syncPath = 'sync_data';
-  static const String _ledgerPath = 'financial_ledger';
+  // ── Helpers ──────────────────────────────────────────────────────────────
 
-  /// Add or update a mobile number
+  Map<String, dynamic> _mapNumberToCamel(Map<String, dynamic> row) {
+    return {
+      'id': row['id'],
+      'phoneNumber': row['phone_number'],
+      'name': row['name'],
+      'isDefault': row['is_default'],
+      'createdAt': row['created_at'],
+      'lastUpdatedAt': row['last_updated_at'],
+      'initialBalance': row['initial_balance'],
+      'inDailyLimit': row['in_daily_limit'],
+      'inMonthlyLimit': row['in_monthly_limit'],
+      'outDailyLimit': row['out_daily_limit'],
+      'outMonthlyLimit': row['out_monthly_limit'],
+      'inDailyUsed': row['in_daily_used'],
+      'inMonthlyUsed': row['in_monthly_used'],
+      'outDailyUsed': row['out_daily_used'],
+      'outMonthlyUsed': row['out_monthly_used'],
+      'inTotalUsed': row['in_total_used'],
+      'outTotalUsed': row['out_total_used'],
+    };
+  }
+
+  Map<String, dynamic> _mapNumberToSnake(MobileNumber number) {
+    return {
+      'id': number.id,
+      'phone_number': number.phoneNumber,
+      'name': number.name,
+      'is_default': number.isDefault,
+      'created_at': number.createdAt.toIso8601String(),
+      'last_updated_at': number.lastUpdatedAt.toIso8601String(),
+      'initial_balance': number.initialBalance,
+      'in_daily_limit': number.inDailyLimit,
+      'in_monthly_limit': number.inMonthlyLimit,
+      'out_daily_limit': number.outDailyLimit,
+      'out_monthly_limit': number.outMonthlyLimit,
+      'in_daily_used': number.inDailyUsed,
+      'in_monthly_used': number.inMonthlyUsed,
+      'out_daily_used': number.outDailyUsed,
+      'out_monthly_used': number.outMonthlyUsed,
+      'in_total_used': number.inTotalUsed,
+      'out_total_used': number.outTotalUsed,
+    };
+  }
+
+  Map<String, dynamic> _mapTxToCamel(Map<String, dynamic> row) {
+    return {
+      'id': row['id'],
+      'phoneNumber': row['phone_number'],
+      'amount': row['amount'],
+      'currency': row['currency'],
+      'timestamp': row['timestamp'],
+      'bybitOrderId': row['bybit_order_id'],
+      'status': row['status'],
+      'paymentMethod': row['payment_method'],
+      'side': row['side'],
+      'chatHistory': row['chat_history'],
+      'price': row['price'],
+      'quantity': row['quantity'],
+      'token': row['token'],
+    };
+  }
+
+  Map<String, dynamic> _mapTxToSnake(CashTransaction tx) {
+    return {
+      'id': tx.id,
+      'phone_number': tx.phoneNumber,
+      'amount': tx.amount,
+      'currency': tx.currency,
+      'timestamp': tx.timestamp.toIso8601String(),
+      'bybit_order_id': tx.bybitOrderId,
+      'status': tx.status,
+      'payment_method': tx.paymentMethod,
+      'side': tx.side,
+      'chat_history': tx.chatHistory,
+      'price': tx.price,
+      'quantity': tx.quantity,
+      'token': tx.token,
+    };
+  }
+
+  // ── Mobile Numbers ───────────────────────────────────────────────────────
+
   Future<void> addMobileNumber(MobileNumber number) async {
     try {
-      await _database
-          .ref('$_numbersPath/${number.id}')
-          .set(number.toMap())
-          .timeout(_timeout, onTimeout: () {
-        throw Exception(
-            'Timeout: Could not write to Firebase. Check your internet connection and database security rules.');
-      });
-    } on Exception {
-      rethrow;
+      await _supabase.from(_numbersTable).upsert(_mapNumberToSnake(number));
     } catch (e) {
-      throw Exception('Error adding mobile number: $e');
+      throw Exception('Error adding mobile number to Supabase: $e');
     }
   }
 
-  /// Stream all mobile numbers
   Stream<List<MobileNumber>> streamMobileNumbers() {
-    return _database.ref(_numbersPath).onValue.map((event) {
-      final snapshot = event.snapshot;
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final List<MobileNumber> numbers = [];
-        data.forEach((key, value) {
-          if (value is Map) {
-            numbers.add(MobileNumber.fromMap(Map<String, dynamic>.from(value)));
-          }
-        });
-        return numbers;
-      }
-      return [];
+    return _supabase.from(_numbersTable).stream(primaryKey: ['id']).map((rows) {
+      return rows.map((row) => MobileNumber.fromMap(_mapNumberToCamel(row))).toList();
     });
   }
 
-  /// Get all mobile numbers
   Future<List<MobileNumber>> getMobileNumbers() async {
     try {
-      final snapshot =
-          await _database.ref(_numbersPath).get().timeout(_timeout);
-
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final List<MobileNumber> numbers = [];
-        data.forEach((key, value) {
-          if (value is Map) {
-            numbers.add(MobileNumber.fromMap(
-                Map<String, dynamic>.from(value)));
-          }
-        });
-        return numbers;
-      }
-      return [];
+      final List<dynamic> rows = await _supabase.from(_numbersTable).select();
+      return rows.map((row) => MobileNumber.fromMap(_mapNumberToCamel(row))).toList();
     } catch (e) {
-      // Non-fatal: return empty list so the app still loads
-      print('Warning: could not load mobile numbers: $e');
+      print('Warning: could not load mobile numbers from Supabase: $e');
       return [];
     }
   }
 
-  /// Get default mobile number
   Future<MobileNumber?> getDefaultNumber() async {
-    try {
-      final numbers = await getMobileNumbers();
-      if (numbers.isEmpty) return null;
-
-      final defaultNumbers = numbers.where((n) => n.isDefault).toList();
-      if (defaultNumbers.isNotEmpty) return defaultNumbers.first;
-
-      return numbers.first;
-    } catch (e) {
-      return null;
-    }
+    final numbers = await getMobileNumbers();
+    if (numbers.isEmpty) return null;
+    final defaults = numbers.where((n) => n.isDefault).toList();
+    return defaults.isNotEmpty ? defaults.first : numbers.first;
   }
 
-  /// Set default mobile number
   Future<void> setDefaultNumber(String numberId) async {
     try {
-      final numbers = await getMobileNumbers();
-
-      for (var number in numbers) {
-        await _database
-            .ref('$_numbersPath/${number.id}/isDefault')
-            .set(number.id == numberId)
-            .timeout(_timeout);
-      }
+      // In Supabase we can do this in two queries
+      await _supabase.from(_numbersTable).update({'is_default': false}).neq('id', numberId);
+      await _supabase.from(_numbersTable).update({'is_default': true}).eq('id', numberId);
     } catch (e) {
-      throw Exception('Error setting default number: $e');
+      throw Exception('Error setting default number in Supabase: $e');
     }
   }
 
-  /// Delete mobile number
   Future<void> deleteMobileNumber(String numberId) async {
     try {
-      await _database
-          .ref('$_numbersPath/$numberId')
-          .remove()
-          .timeout(_timeout);
+      await _supabase.from(_numbersTable).delete().eq('id', numberId);
     } catch (e) {
-      throw Exception('Error deleting mobile number: $e');
-    }
-  }
-
-  // ── Retry helper ─────────────────────────────────────────────────────────
-
-  /// Retry a Firebase write up to [maxAttempts] times on timeout/error.
-  Future<void> _retryWrite(Future<void> Function() fn, {int maxAttempts = 3}) async {
-    for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-      try {
-        await fn();
-        return;
-      } catch (e) {
-        if (attempt == maxAttempts) rethrow;
-        print('Firebase write failed (attempt $attempt/$maxAttempts): $e — retrying in 2s...');
-        await Future.delayed(const Duration(seconds: 2));
-      }
-    }
-  }
-
-  // ── Bulk order-ID pre-loader ──────────────────────────────────────────────
-
-  /// Fetches all stored [bybitOrderId] values in a **single** Firebase read.
-  /// Use this at the start of a sync batch to build an in-memory Set for
-  /// O(1) duplicate checks, avoiding per-order round-trips.
-  Future<Set<String>> getExistingBybitOrderIds() async {
-    try {
-      final snapshot = await _database
-          .ref(_transactionsPath)
-          .get()
-          .timeout(_timeout);
-
-      final ids = <String>{};
-      if (snapshot.exists && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        data.forEach((_, value) {
-          if (value is Map) {
-            final id = value['bybitOrderId'];
-            if (id != null && id is String && id.isNotEmpty) ids.add(id);
-          }
-        });
-      }
-      print('Sync: Pre-loaded ${ids.length} existing bybitOrderIds for dedup.');
-      return ids;
-    } catch (e) {
-      print('Warning: could not pre-load order IDs, falling back to per-order checks: $e');
-      return {}; // safe fallback — per-order check used instead
+      throw Exception('Error deleting mobile number from Supabase: $e');
     }
   }
 
   // ── Transactions ─────────────────────────────────────────────────────────
 
-  /// Add transaction with duplicate prevention.
-  ///
-  /// Pass [knownIds] (from [getExistingBybitOrderIds]) for fast O(1) dedup.
-  /// If omitted, falls back to a per-order Firebase query (backward-compatible).
-  Future<bool> addTransaction(CashTransaction transaction,
-      {Set<String>? knownIds}) async {
+  Future<Set<String>> getExistingBybitOrderIds() async {
     try {
-      // ── Duplicate check ──────────────────────────────────────────────────
+      final List<dynamic> rows = await _supabase.from(_transactionsTable).select('bybit_order_id');
+      return rows.map((r) => r['bybit_order_id']?.toString() ?? '').where((id) => id.isNotEmpty).toSet();
+    } catch (e) {
+      print('Warning: could not pre-load order IDs from Supabase: $e');
+      return {};
+    }
+  }
+
+  Future<bool> addTransaction(CashTransaction transaction, {Set<String>? knownIds}) async {
+    try {
       final orderId = transaction.bybitOrderId;
       if (orderId.isNotEmpty) {
         if (knownIds != null) {
-          // Fast path: O(1) Set lookup
-          if (knownIds.contains(orderId)) {
-            print('Sync: Duplicate (Set check) — skipping $orderId');
-            return false;
-          }
+          if (knownIds.contains(orderId)) return false;
         } else {
-          // Slow path: per-order DB query (backward-compatible)
-          final existingTx = await _getTransactionByBybitOrderId(orderId);
-          if (existingTx != null) {
-            print('Sync: Duplicate (DB query) — skipping $orderId');
-            return false;
-          }
+          final existing = await _supabase.from(_transactionsTable).select('id').eq('bybit_order_id', orderId).maybeSingle();
+          if (existing != null) return false;
         }
       }
 
-      // ── Write with retry ─────────────────────────────────────────────────
-      await _retryWrite(() => _database
-          .ref('$_transactionsPath/${transaction.id}')
-          .set(transaction.toMap())
-          .timeout(_timeout));
+      await _supabase.from(_transactionsTable).upsert(_mapTxToSnake(transaction));
+      knownIds?.add(orderId);
 
-      // Update the in-memory Set so subsequent orders in the same batch
-      // don't try to insert this one again.
-      if (orderId.isNotEmpty) knownIds?.add(orderId);
-
-      // Update mobile number usage if assigned
-      if (transaction.phoneNumber != null) {
-        await _updateNumberUsage(transaction.phoneNumber!);
-      }
+      // NOTE: DO NOT recalculate usage here.
+      // Balances (in_total_used / out_total_used) are managed exclusively by
+      // Supabase RPCs (process_bybit_order_sync, distribute_vf_cash, etc.).
+      // Recalculating from the transactions table produces wrong results because
+      // it misses DEPOSIT_TO_VFCASH, INTERNAL_VF_TRANSFER and other ledger-only entries.
 
       return true;
     } catch (e) {
-      throw Exception('Error adding transaction: $e');
+      throw Exception('Error adding transaction to Supabase: $e');
     }
   }
 
-  /// Get transaction by Bybit Order ID (used by legacy / backward-compat path)
-  Future<CashTransaction?> _getTransactionByBybitOrderId(
-      String bybitOrderId) async {
-    try {
-      final snapshot = await _database
-          .ref(_transactionsPath)
-          .orderByChild('bybitOrderId')
-          .equalTo(bybitOrderId)
-          .get()
-          .timeout(_timeout);
-
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final firstEntryValue = data.values.first;
-        if (firstEntryValue is Map) {
-          return CashTransaction.fromMap(
-              Map<String, dynamic>.from(firstEntryValue));
-        }
-      }
-      return null;
-    } catch (e) {
-      print('Error checking duplicate: $e');
-      return null;
-    }
-  }
-
-  /// Stream all transactions for a number
   Stream<List<CashTransaction>> streamTransactionsForNumber(String phoneNumber) {
-    return _database
-        .ref(_transactionsPath)
-        .orderByChild('phoneNumber')
-        .equalTo(phoneNumber)
-        .onValue
-        .map((event) {
-      final snapshot = event.snapshot;
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final List<CashTransaction> results = [];
-        data.forEach((key, value) {
-          if (value is Map) {
-            results.add(CashTransaction.fromMap(Map<String, dynamic>.from(value)));
-          }
+    return _supabase
+        .from(_transactionsTable)
+        .stream(primaryKey: ['id'])
+        .eq('phone_number', phoneNumber)
+        .map((rows) {
+          final list = rows.map((row) => CashTransaction.fromMap(_mapTxToCamel(row))).toList();
+          list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+          return list;
         });
-        return results..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      }
-      return [];
-    });
   }
 
-  /// Get all transactions for a number
-  Future<List<CashTransaction>> getTransactionsForNumber(
-      String phoneNumber) async {
+  Future<List<CashTransaction>> getTransactionsForNumber(String phoneNumber) async {
     try {
-      final snapshot = await _database
-          .ref(_transactionsPath)
-          .orderByChild('phoneNumber')
-          .equalTo(phoneNumber)
-          .get()
-          .timeout(_timeout);
-
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final List<CashTransaction> results = [];
-        data.forEach((key, value) {
-          if (value is Map) {
-            results.add(CashTransaction.fromMap(
-                Map<String, dynamic>.from(value)));
-          }
-        });
-        return results..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      }
-      return [];
+      final List<dynamic> rows = await _supabase.from(_transactionsTable).select().eq('phone_number', phoneNumber);
+      final list = rows.map((row) => CashTransaction.fromMap(_mapTxToCamel(row))).toList();
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
     } catch (e) {
-      throw Exception('Error fetching transactions: $e');
+      throw Exception('Error fetching transactions from Supabase: $e');
     }
   }
 
-  /// Stream all transactions
   Stream<List<CashTransaction>> streamAllTransactions() {
-    return _database.ref(_transactionsPath).onValue.map((event) {
-      final snapshot = event.snapshot;
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final List<CashTransaction> results = [];
-        data.forEach((key, value) {
-          if (value is Map) {
-            results.add(CashTransaction.fromMap(Map<String, dynamic>.from(value)));
-          }
-        });
-        return results..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      }
-      return [];
+    return _supabase.from(_transactionsTable).stream(primaryKey: ['id']).map((rows) {
+      final list = rows.map((row) => CashTransaction.fromMap(_mapTxToCamel(row))).toList();
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
     });
   }
 
-  /// Get all transactions
   Future<List<CashTransaction>> getAllTransactions() async {
     try {
-      final snapshot = await _database
-          .ref(_transactionsPath)
-          .get()
-          .timeout(_timeout);
-
-      if (snapshot.exists && snapshot.value != null && snapshot.value is Map) {
-        final data = snapshot.value as Map;
-        final List<CashTransaction> results = [];
-        data.forEach((key, value) {
-          if (value is Map) {
-            results.add(CashTransaction.fromMap(
-                Map<String, dynamic>.from(value)));
-          }
-        });
-        return results..sort((a, b) => b.timestamp.compareTo(a.timestamp));
-      }
-      return [];
+      final List<dynamic> rows = await _supabase.from(_transactionsTable).select();
+      final list = rows.map((row) => CashTransaction.fromMap(_mapTxToCamel(row))).toList();
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      return list;
     } catch (e) {
-      print('Warning: could not load transactions: $e');
+      print('Warning: could not load transactions from Supabase: $e');
       return [];
     }
   }
 
-  /// Public: recalculate dailyUsed/monthlyUsed for a number from stored
-  /// transactions. Call after reload or deleting transactions.
-  Future<void> recalculateUsageForNumber(String phoneNumber) =>
-      _updateNumberUsage(phoneNumber);
+  // DISABLED: Do not recalculate from transactions table.
+  // Balances are authoritative from the financial_ledger via Supabase RPCs.
+  // Calling this would overwrite correct ledger-based values with incomplete
+  // transaction-table data (which misses DEPOSIT_TO_VFCASH, INTERNAL_VF_TRANSFER, etc.).
+  Future<void> recalculateUsageForNumber(String phoneNumber) async {
+    // No-op: intentionally disabled to prevent balance corruption.
+  }
 
-  /// Recalculate dailyUsed and monthlyUsed for a number by summing
-  /// actual stored transactions filtered by their real timestamp.
   Future<void> _updateNumberUsage(String phoneNumber) async {
-    try {
-      final numbers = await getMobileNumbers();
-      final matching = numbers.where((n) => n.phoneNumber == phoneNumber).toList();
-      if (matching.isEmpty) return;
-      final number = matching.first;
-
-      // Load all transactions for this number
-      final allTx = await getTransactionsForNumber(phoneNumber);
-
-      final now = DateTime.now();
-      final todayStart = DateTime(now.year, now.month, now.day);
-      final monthStart = DateTime(now.year, now.month, 1);
-
-      double inDailyUsed = 0;
-      double outDailyUsed = 0;
-      double inMonthlyUsed = 0;
-      double outMonthlyUsed = 0;
-      double inTotalUsed = 0;
-      double outTotalUsed = 0;
-
-      for (final tx in allTx) {
-        if (tx.status != 'completed') continue;
-
-        final pmLow = tx.paymentMethod.toLowerCase();
-        final isValidVoda = pmLow.contains('vodafone') || pmLow.contains('voda') || pmLow.contains('vf ');
-        if (!isValidVoda) continue;
-
-        // side 1: SELL (Incoming), side 0: BUY (Outgoing)
-        final isIncoming = tx.side == 1;
-        final amount = tx.amount;
-
-        // All-Time
-        if (isIncoming) {
-          inTotalUsed += amount;
-        } else {
-          outTotalUsed += amount;
-        }
-
-        // Daily
-        if (!tx.timestamp.isBefore(todayStart)) {
-          if (isIncoming) {
-            inDailyUsed += amount;
-          } else {
-            outDailyUsed += amount;
-          }
-        }
-        // Monthly
-        if (!tx.timestamp.isBefore(monthStart)) {
-          if (isIncoming) {
-            inMonthlyUsed += amount;
-          } else {
-            outMonthlyUsed += amount;
-          }
-        }
-      }
-
-      final updated = number.copyWith(
-        inDailyUsed: inDailyUsed,
-        outDailyUsed: outDailyUsed,
-        inMonthlyUsed: inMonthlyUsed,
-        outMonthlyUsed: outMonthlyUsed,
-        inTotalUsed: inTotalUsed,
-        outTotalUsed: outTotalUsed,
-        lastUpdatedAt: now,
-      );
-
-      await _database
-          .ref('$_numbersPath/${number.id}')
-          .set(updated.toMap())
-          .timeout(_timeout);
-    } catch (e) {
-      print('Error recalculating number usage: $e');
-    }
+    // No-op: intentionally disabled to prevent balance corruption.
   }
 
+  // ── Sync ─────────────────────────────────────────────────────────────────
 
-  /// Get the createTime (ms) of the newest order that has been synced.
-  /// This is used as `beginTime` for the next incremental sync.
   Future<int> getLastSyncedOrderTimestamp() async {
     try {
-      final snapshot = await _database
-          .ref('$_syncPath/lastSyncedOrderTs')
-          .get()
-          .timeout(_timeout);
-      return (snapshot.value as int?) ?? 0;
+      final response = await _supabase.from(_syncTable).select('last_synced_order_ts').eq('id', 1).maybeSingle();
+      return response != null ? (response['last_synced_order_ts'] as int) : 0;
     } catch (e) {
       return 0;
     }
   }
 
-  /// Persist the createTime of the newest synced order.
   Future<void> saveLastSyncedOrderTimestamp(int ts) async {
     try {
-      await _database
-          .ref('$_syncPath/lastSyncedOrderTs')
-          .set(ts)
-          .timeout(_timeout);
+      await _supabase.from(_syncTable).upsert({'id': 1, 'last_synced_order_ts': ts});
     } catch (e) {
-      print('Error saving lastSyncedOrderTs: $e');
+      print('Error saving lastSyncedOrderTs to Supabase: $e');
     }
   }
 
-  /// Get when the last sync ran (wall-clock DateTime, for UI display).
   Future<DateTime?> getLastSyncTime() async {
     try {
-      final snapshot = await _database
-          .ref('$_syncPath/lastSyncTime')
-          .get()
-          .timeout(_timeout);
-      final ms = snapshot.value as int?;
-      return ms != null ? DateTime.fromMillisecondsSinceEpoch(ms) : null;
+      final response = await _supabase.from(_syncTable).select('last_sync_time').eq('id', 1).maybeSingle();
+      if (response == null || response['last_sync_time'] == null) return null;
+      return DateTime.fromMillisecondsSinceEpoch(response['last_sync_time'] as int);
     } catch (e) {
       return null;
     }
   }
 
-  /// Persist the wall-clock time of the last sync.
   Future<void> saveLastSyncTime(int ms) async {
     try {
-      await _database
-          .ref('$_syncPath/lastSyncTime')
-          .set(ms)
-          .timeout(_timeout);
+      await _supabase.from(_syncTable).upsert({'id': 1, 'last_sync_time': ms});
     } catch (e) {
-      print('Error saving lastSyncTime: $e');
+      print('Error saving lastSyncTime to Supabase: $e');
     }
   }
 
-  // Backward-compat aliases
   Future<int> getLastSyncTimestamp() => getLastSyncedOrderTimestamp();
-  Future<void> updateLastSyncTimestamp(int ts) =>
-      saveLastSyncedOrderTimestamp(ts);
+  Future<void> updateLastSyncTimestamp(int ts) => saveLastSyncedOrderTimestamp(ts);
 
-
-  /// Reset daily usage for all numbers
   Future<void> resetDailyUsage() async {
     try {
-      final numbers = await getMobileNumbers();
-      for (var number in numbers) {
-        await _database
-            .ref('$_numbersPath/${number.id}/dailyUsed')
-            .set(0)
-            .timeout(_timeout);
-      }
+      await _supabase.from(_numbersTable).update({'in_daily_used': 0, 'out_daily_used': 0});
     } catch (e) {
-      print('Error resetting daily usage: $e');
+      print('Error resetting daily usage in Supabase: $e');
     }
   }
 
-  /// Reset monthly usage for all numbers
   Future<void> resetMonthlyUsage() async {
     try {
-      final numbers = await getMobileNumbers();
-      for (var number in numbers) {
-        await _database
-            .ref('$_numbersPath/${number.id}/monthlyUsed')
-            .set(0)
-            .timeout(_timeout);
-      }
+      await _supabase.from(_numbersTable).update({'in_monthly_used': 0, 'out_monthly_used': 0});
     } catch (e) {
-      print('Error resetting monthly usage: $e');
+      print('Error resetting monthly usage in Supabase: $e');
     }
   }
 
-  /// Wipe all transactions, reset usage counters, and clear synced Bybit ledger rows.
   Future<void> deleteAllTransactions() async {
     try {
-      final numbers = await getMobileNumbers();
-      final ledgerSnapshot = await _database.ref(_ledgerPath).get().timeout(_timeout);
-      final nowIso = DateTime.now().toIso8601String();
-      final updates = <String, dynamic>{
-        _transactionsPath: null,
-        _syncPath: null,
-      };
-
-      for (final number in numbers) {
-        updates['$_numbersPath/${number.id}/inDailyUsed'] = 0.0;
-        updates['$_numbersPath/${number.id}/outDailyUsed'] = 0.0;
-        updates['$_numbersPath/${number.id}/inMonthlyUsed'] = 0.0;
-        updates['$_numbersPath/${number.id}/outMonthlyUsed'] = 0.0;
-        updates['$_numbersPath/${number.id}/inTotalUsed'] = 0.0;
-        updates['$_numbersPath/${number.id}/outTotalUsed'] = 0.0;
-        updates['$_numbersPath/${number.id}/lastUpdatedAt'] = nowIso;
-      }
-
-      if (ledgerSnapshot.exists && ledgerSnapshot.value is Map) {
-        final data = ledgerSnapshot.value as Map;
-        data.forEach((key, value) {
-          if (value is! Map) return;
-          final entry = Map<String, dynamic>.from(value);
-          final type = entry['type']?.toString();
-          if (type == 'BUY_USDT' || type == 'SELL_USDT') {
-            updates['$_ledgerPath/$key'] = null;
-          }
-        });
-      }
-
-      await _database.ref().update(updates).timeout(_timeout);
+      // In Supabase, we use an RPC for safety or delete all
+      await _supabase.from(_transactionsTable).delete().neq('id', '00000000-0000-0000-0000-000000000000');
+      await _supabase.from(_syncTable).update({'last_synced_order_ts': 0, 'last_sync_time': null}).eq('id', 1);
+      await resetDailyUsage();
+      await resetMonthlyUsage();
     } catch (e) {
-      throw Exception('Error deleting all transactions: $e');
+      throw Exception('Error deleting all transactions from Supabase: $e');
     }
   }
 
-  /// Reset sync markers (so next sync starts fresh)
   Future<void> resetSyncMarkers() async {
     try {
-      await _database.ref(_syncPath).remove().timeout(_timeout);
+      await _supabase.from(_syncTable).update({'last_synced_order_ts': 0, 'last_sync_time': null}).eq('id', 1);
     } catch (e) {
-      print('Error resetting sync markers: $e');
+      print('Error resetting sync markers in Supabase: $e');
     }
   }
 }

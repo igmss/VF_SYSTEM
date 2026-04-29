@@ -6,6 +6,7 @@ import 'package:easy_localization/easy_localization.dart';
 import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/financial_transaction.dart';
+import '../../widgets/async_button.dart';
 
 class LedgerScreen extends StatelessWidget {
   const LedgerScreen({Key? key}) : super(key: key);
@@ -134,8 +135,10 @@ class _LedgerTile extends StatelessWidget {
       label = 'InstaPay Distribution (${tx.toLabel})';
     } else if (tx.type == FlowType.INSTAPAY_DIST_PROFIT) {
       label = 'InstaPay Profit (${tx.toLabel})';
-    } else if (tx.type == FlowType.COLLECT_INSTAPAY_CASH) {
+    } else if (tx.type == FlowType.COLLECT_INSTAPAY) {
       label = 'InstaPay Collection (${tx.fromLabel})';
+    } else if (tx.type == FlowType.COLLECT_VFCASH) {
+      label = 'VF Collection (${tx.fromLabel})';
     } else if (tx.type == FlowType.LOAN_ISSUED) {
       label = 'Loan Issued (${tx.toLabel})';
     } else if (tx.type == FlowType.LOAN_REPAYMENT) {
@@ -222,7 +225,8 @@ class _LedgerTile extends StatelessWidget {
                     tx.type != FlowType.INTERNAL_VF_TRANSFER_FEE &&
                     tx.type != FlowType.DISTRIBUTE_INSTAPAY &&
                     tx.type != FlowType.INSTAPAY_DIST_PROFIT &&
-                    tx.type != FlowType.COLLECT_INSTAPAY_CASH &&
+                    tx.type != FlowType.COLLECT_INSTAPAY &&
+                    tx.type != FlowType.COLLECT_VFCASH &&
                     tx.type != FlowType.LOAN_ISSUED &&
                     tx.type != FlowType.LOAN_REPAYMENT &&
                     tx.type != FlowType.EXPENSE_BANK &&
@@ -313,6 +317,8 @@ class _LedgerTile extends StatelessWidget {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (tx.type == FlowType.COLLECT_CASH ||
+            tx.type == FlowType.COLLECT_VFCASH ||
+            tx.type == FlowType.COLLECT_INSTAPAY ||
             tx.type == FlowType.DEPOSIT_TO_BANK ||
             tx.type == FlowType.CREDIT_RETURN)
           _buildCorrectButton(context),
@@ -409,7 +415,7 @@ class _LedgerTile extends StatelessWidget {
             child: Text('cancel'.tr(),
                 style: TextStyle(color: AppTheme.textMutedColor(context))),
           ),
-          ElevatedButton(
+          AsyncButton(
             onPressed: () async {
               final newAmount = double.tryParse(ctrl.text) ?? 0;
               if (newAmount == tx.amount) {
@@ -519,8 +525,10 @@ class _LedgerTile extends StatelessWidget {
         return const Color(0xFF1B5E20);
       case FlowType.INSTAPAY_DIST_PROFIT:
         return const Color(0xFF2E7D32);
-      case FlowType.COLLECT_INSTAPAY_CASH:
+      case FlowType.COLLECT_INSTAPAY:
         return const Color(0xFF43A047);
+      case FlowType.COLLECT_VFCASH:
+        return const Color(0xFFA78BFA);
       case FlowType.EXPENSE_INSTAPAY_FEE:
         return AppTheme.warningColor(context);
       case FlowType.LOAN_ISSUED:
@@ -579,8 +587,10 @@ class _LedgerTile extends StatelessWidget {
         return Icons.payment;
       case FlowType.INSTAPAY_DIST_PROFIT:
         return Icons.trending_up;
-      case FlowType.COLLECT_INSTAPAY_CASH:
+      case FlowType.COLLECT_INSTAPAY:
         return Icons.check_circle_outline;
+      case FlowType.COLLECT_VFCASH:
+        return Icons.delivery_dining;
       case FlowType.EXPENSE_INSTAPAY_FEE:
         return Icons.money_off;
       case FlowType.LOAN_ISSUED:

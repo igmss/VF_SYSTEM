@@ -217,11 +217,6 @@ class _InvestorCard extends StatelessWidget {
 
   const _InvestorCard({required this.investor});
 
-  void _refreshPerformance(BuildContext context) {
-    // Just re-triggers the FutureBuilder in _InvestorCard
-    (context as Element).markNeedsBuild();
-  }
-
   @override
   Widget build(BuildContext context) {
     final dist = context.read<DistributionProvider>();
@@ -233,11 +228,13 @@ class _InvestorCard extends StatelessWidget {
       child: FutureBuilder<Map<String, dynamic>>(
         future: dist.getInvestorPerformance(investorId: investor.id),
         builder: (context, snapshot) {
-          final perf = snapshot.data;
-          final earned = perf?['totalEarned']?.toDouble() ?? 0.0;
-          final payable = perf?['payableBalance']?.toDouble() ?? 0.0;
-          final totalVf = perf?['totalVfFlow']?.toDouble() ?? 0.0;
-          final totalInsta = perf?['totalInstaFlow']?.toDouble() ?? 0.0;
+          final data = snapshot.data;
+          final performance = data?['performance'] as List?;
+          final invPerf = performance?.isNotEmpty == true ? performance!.first : null;
+          final earned = invPerf?['totalEarned']?.toDouble() ?? 0.0;
+          final payable = invPerf?['payableBalance']?.toDouble() ?? 0.0;
+          final totalVf = invPerf?['totalVfFlow']?.toDouble() ?? 0.0;
+          final totalInsta = invPerf?['totalInstaFlow']?.toDouble() ?? 0.0;
 
           return Container(
             margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
@@ -351,7 +348,10 @@ class _InvestorCard extends StatelessWidget {
                               padding: const EdgeInsets.symmetric(vertical: 14),
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
                             ),
-                            onPressed: () => _refreshPerformance(context),
+                            onPressed: () {
+                              dist.invalidateInvestorPerformance(investor.id);
+                              (context as Element).markNeedsBuild();
+                            },
                             label: Text('refresh'.tr(), style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
                           ),
                         ),

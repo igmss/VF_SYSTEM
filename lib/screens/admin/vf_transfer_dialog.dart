@@ -5,6 +5,7 @@ import '../../providers/app_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/models.dart';
 import '../../theme/app_theme.dart';
+import '../../widgets/async_button.dart';
 
 class VfTransferDialog extends StatefulWidget {
   const VfTransferDialog({Key? key}) : super(key: key);
@@ -254,7 +255,7 @@ class _VfTransferDialogState extends State<VfTransferDialog> {
                 height: 52,
                 child: dist.isInternalTransferring
                     ? const Center(child: CircularProgressIndicator())
-                    : ElevatedButton(
+                    : AsyncButton(
                         style: ElevatedButton.styleFrom(
                           backgroundColor: positive,
                           foregroundColor: Colors.white,
@@ -263,7 +264,7 @@ class _VfTransferDialogState extends State<VfTransferDialog> {
                           ),
                           elevation: 0,
                         ),
-                        onPressed: _submit,
+                        onPressed: () async => _submit(),
                         child: Text(
                           'confirm_transfer_label'.tr(),
                           style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
@@ -302,25 +303,31 @@ class _VfTransferDialogState extends State<VfTransferDialog> {
               value: num,
               child: Row(
                 children: [
-                  Text(
-                    num.phoneNumber,
-                    style: TextStyle(
-                      fontWeight: FontWeight.w600,
-                      color: AppTheme.textPrimaryColor(context),
+                  Flexible(
+                    child: Text(
+                      num.phoneNumber,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        color: AppTheme.textPrimaryColor(context),
+                      ),
                     ),
                   ),
                   if (num.name?.isNotEmpty == true)
-                    Padding(
-                      padding: const EdgeInsets.only(left: 8.0),
-                      child: Text(
-                        num.name!,
-                        style: TextStyle(
-                          fontSize: 12,
-                          color: AppTheme.textMutedColor(context),
+                    Flexible(
+                      child: Padding(
+                        padding: const EdgeInsets.only(left: 8.0),
+                        child: Text(
+                          num.name!,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontSize: 12,
+                            color: AppTheme.textMutedColor(context),
+                          ),
                         ),
                       ),
                     ),
-                  const Spacer(),
+                  const SizedBox(width: 8),
                   Text(
                     '${num.currentBalance.toStringAsFixed(0)} EGP',
                     style: TextStyle(

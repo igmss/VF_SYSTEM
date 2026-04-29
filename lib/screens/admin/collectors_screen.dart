@@ -8,6 +8,7 @@ import '../../models/collector.dart';
 import '../../models/retailer.dart';
 import '../../theme/app_theme.dart';
 import 'collector_details_screen.dart';
+import '../../widgets/async_button.dart';
 
 part 'collector_card.dart';
 part 'collector_dialogs.dart';

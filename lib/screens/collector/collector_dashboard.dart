@@ -390,19 +390,36 @@ class _RetailerCard extends StatelessWidget {
               ),
               const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 8),
+                padding: const EdgeInsets.all(14),
                 decoration: BoxDecoration(
-                  color: AppTheme.lineColor(context).withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(16),
+                  color: AppTheme.lineColor(context).withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(18),
+                  border: Border.all(color: AppTheme.lineColor(context).withValues(alpha: 0.1)),
                 ),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                child: Column(
                   children: [
-                    _buildStatColumn(context, 'total_assigned'.tr(), retailer.totalAssigned, AppTheme.textPrimaryColor(context).withValues(alpha: 0.8)),
-                    Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
-                    _buildStatColumn(context, 'collected'.tr(), retailer.totalCollected, AppTheme.positiveColor(context)),
-                    Container(width: 1, height: 30, color: AppTheme.lineColor(context)),
-                    _buildStatColumn(context, 'pending'.tr(), debt, debtColor),
+                    _buildChannelRow(
+                      context,
+                      'VF Cash',
+                      retailer.totalAssigned,
+                      retailer.totalCollected,
+                      retailer.pendingDebt,
+                      AppTheme.warningColor(context),
+                      Icons.phonelink_ring_rounded,
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      child: Divider(height: 1, color: AppTheme.lineColor(context).withValues(alpha: 0.1)),
+                    ),
+                    _buildChannelRow(
+                      context,
+                      'InstaPay',
+                      retailer.instaPayTotalAssigned,
+                      retailer.instaPayTotalCollected,
+                      retailer.instaPayPendingDebt,
+                      AppTheme.positiveColor(context),
+                      Icons.account_balance_rounded,
+                    ),
                   ],
                 ),
               ),
@@ -493,20 +510,87 @@ class _RetailerCard extends StatelessWidget {
     return Column(
       children: [
         Text(
-          '${amount.toStringAsFixed(0)} EGP',
+          '${amount.toStringAsFixed(0)}',
           style: TextStyle(
             color: color,
-            fontWeight: FontWeight.bold,
-            fontSize: 14,
+            fontWeight: FontWeight.w900,
+            fontSize: 13,
           ),
         ),
-        const SizedBox(height: 4),
+        const SizedBox(height: 2),
         Text(
           label,
           style: TextStyle(
             color: AppTheme.textMutedColor(context),
-            fontSize: 11,
+            fontSize: 10,
           ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildChannelRow(
+    BuildContext context,
+    String label,
+    double assigned,
+    double collected,
+    double pending,
+    Color color,
+    IconData icon,
+  ) {
+    final pendingColor = pending > 0 ? AppTheme.errorColor(context) : AppTheme.positiveColor(context);
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(
+              label,
+              style: TextStyle(
+                color: AppTheme.textPrimaryColor(context),
+                fontWeight: FontWeight.w800,
+                fontSize: 12,
+              ),
+            ),
+            const Spacer(),
+            if (pending > 0)
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: pendingColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Text(
+                  '${pending.toStringAsFixed(0)} PENDING',
+                  style: TextStyle(color: pendingColor, fontSize: 9, fontWeight: FontWeight.w900),
+                ),
+              ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Row(
+          mainAxisAlignment: MainAxisAlignment.spaceAround,
+          children: [
+            _buildStatMetric(context, 'Assigned', assigned, AppTheme.textPrimaryColor(context)),
+            _buildStatMetric(context, 'Collected', collected, AppTheme.positiveColor(context)),
+            _buildStatMetric(context, 'Debt', pending, pendingColor),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _buildStatMetric(BuildContext context, String label, double value, Color color) {
+    return Column(
+      children: [
+        Text(
+          value.toStringAsFixed(0),
+          style: TextStyle(color: color, fontWeight: FontWeight.w900, fontSize: 15),
+        ),
+        Text(
+          label,
+          style: TextStyle(color: AppTheme.textMutedColor(context), fontSize: 10, fontWeight: FontWeight.w500),
         ),
       ],
     );

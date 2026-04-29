@@ -1,6 +1,5 @@
 part of 'bank_accounts_screen.dart';
 
-import '../../widgets/async_button.dart';
 
 // ─────────────────────────────────────────────────────────────────────────
 //  Dialogs — 100% unchanged logic

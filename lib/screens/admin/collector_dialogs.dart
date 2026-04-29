@@ -1,6 +1,5 @@
 part of 'collectors_screen.dart';
 
-import '../../widgets/async_button.dart';
 
 class _Dialog extends StatelessWidget {
   final String title;

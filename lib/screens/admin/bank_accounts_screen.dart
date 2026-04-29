@@ -7,6 +7,7 @@ import '../../providers/auth_provider.dart';
 import '../../providers/distribution_provider.dart';
 import '../../models/bank_account.dart';
 import '../../models/financial_transaction.dart';
+import '../../widgets/async_button.dart';
 
 part 'bank_account_card.dart';
 part 'bank_account_dialogs.dart';

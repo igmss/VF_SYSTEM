@@ -51,16 +51,27 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
 
     // Filter ledger for this specific collector
     final List<FinancialTransaction> allTxs = dist.ledger.where((tx) {
-      final isCollection =
-          tx.type == FlowType.COLLECT_CASH && tx.toId == collector.id;
+      final isCollection = (tx.type == FlowType.COLLECT_CASH ||
+              tx.type == FlowType.COLLECT_VFCASH ||
+              tx.type == FlowType.COLLECT_INSTAPAY) &&
+          tx.toId == collector.id;
       final isDeposit = (tx.type == FlowType.DEPOSIT_TO_BANK ||
               tx.type == FlowType.DEPOSIT_TO_VFCASH) &&
           tx.fromId == collector.id;
-      return isCollection || isDeposit;
+
+      // Include Margin Profits assigned to this collector
+      final isProfit = (tx.type == FlowType.INSTAPAY_DIST_PROFIT ||
+              tx.type == FlowType.VFCASH_RETAIL_PROFIT) &&
+          tx.toId == collector.id;
+
+      return isCollection || isDeposit || isProfit;
     }).toList();
 
     final List<FinancialTransaction> collectedTxs = allTxs
-        .where((tx) => tx.type == FlowType.COLLECT_CASH)
+        .where((tx) =>
+            tx.type == FlowType.COLLECT_CASH ||
+            tx.type == FlowType.COLLECT_VFCASH ||
+            tx.type == FlowType.COLLECT_INSTAPAY)
         .toList();
 
     final List<FinancialTransaction> depositedTxs = allTxs
@@ -175,13 +186,20 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
       itemCount: txs.length,
       itemBuilder: (context, index) {
         final tx = txs[index];
-        final isCollection = tx.type == FlowType.COLLECT_CASH;
+        final isCollection = tx.type == FlowType.COLLECT_CASH ||
+            tx.type == FlowType.COLLECT_VFCASH ||
+            tx.type == FlowType.COLLECT_INSTAPAY;
         final isVfDeposit = tx.type == FlowType.DEPOSIT_TO_VFCASH;
+        final isProfit = tx.type == FlowType.INSTAPAY_DIST_PROFIT ||
+            tx.type == FlowType.VFCASH_RETAIL_PROFIT;
+
         final txColor = isCollection
             ? AppTheme.positiveColor(context)
-            : isVfDeposit
+            : isProfit
                 ? AppTheme.positiveColor(context)
-                : AppTheme.infoColor(context);
+                : isVfDeposit
+                    ? AppTheme.positiveColor(context)
+                    : AppTheme.infoColor(context);
 
         return Container(
           margin: const EdgeInsets.only(bottom: 16),
@@ -213,20 +231,18 @@ class _CollectorDetailsScreenState extends State<CollectorDetailsScreen>
                         child: Icon(
                           isCollection
                               ? Icons.arrow_downward
-                              : isVfDeposit
-                                  ? Icons.phone_android
-                                  : Icons.account_balance,
+                              : isProfit
+                                  ? Icons.trending_up
+                                  : isVfDeposit
+                                      ? Icons.phone_android
+                                      : Icons.account_balance,
                           color: txColor,
                           size: 18,
                         ),
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        isCollection
-                            ? 'Collected'
-                            : isVfDeposit
-                                ? 'Deposited to VF'
-                                : 'Deposited to Bank',
+                        tx.type.label.tr(),
                         style: TextStyle(
                           color: txColor,
                           fontWeight: FontWeight.bold,
